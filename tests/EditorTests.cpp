@@ -62,6 +62,84 @@ TEST_CASE("Project descriptor files use the validated disk format", "[KairoEdito
     std::filesystem::remove(path);
 }
 
+TEST_CASE("Project sessions create save and reopen complete projects", "[KairoEditor][Project][Session]")
+{
+    const auto root = std::filesystem::temp_directory_path() /
+        ("kairo-session-test-" + kairo::assets::GenerateAssetID().ToString());
+    ProjectSession session;
+    session.CreateProject(root, "Session Test");
+    REQUIRE(session.HasProject());
+    CHECK(session.Descriptor().Name == "Session Test");
+    CHECK_FALSE(session.HasUnsavedChanges());
+    CHECK(std::filesystem::is_regular_file(root / DefaultProjectFileName));
+
+    const auto mesh = kairo::assets::AssetID::Parse("00000000-0000-4000-8000-000000000301");
+    const auto material = kairo::assets::AssetID::Parse("00000000-0000-4000-8000-000000000302");
+    auto& assets = session.EditAssets();
+    assets.Insert({ mesh, kairo::assets::AssetType::Mesh, kairo::assets::AssetOrigin::Builtin,
+        "builtin/cube", "kairo.builtin", 1u, {} });
+    assets.Insert({ material, kairo::assets::AssetType::Material, kairo::assets::AssetOrigin::Builtin,
+        "builtin/default-material", "kairo.builtin", 1u, {} });
+    auto& scene = session.EditScene();
+    const auto cube = scene.CreateEntityWithID({ 27u }, "Saved Cube");
+    scene.SetMeshRenderer(cube, { { mesh }, { material }, true });
+    REQUIRE(session.IsSceneDirty());
+    REQUIRE(session.AreAssetsDirty());
+    session.SaveAll();
+    CHECK_FALSE(session.HasUnsavedChanges());
+
+    ProjectSession reopened;
+    reopened.OpenProject(root / DefaultProjectFileName);
+    CHECK(reopened.Scene().Contains(cube));
+    CHECK(reopened.Scene().Name(cube).Value == "Saved Cube");
+    CHECK(reopened.Assets().Contains(mesh));
+    std::filesystem::remove_all(root);
+}
+
+TEST_CASE("Project sessions enforce dirty scene transitions and portable save-as", "[KairoEditor][Project][Session]")
+{
+    const auto root = std::filesystem::temp_directory_path() /
+        ("kairo-session-transition-" + kairo::assets::GenerateAssetID().ToString());
+    ProjectSession session;
+    session.CreateProject(root, "Transitions");
+    const auto entity = session.EditScene().CreateEntity("Second Scene Entity");
+    REQUIRE_THROWS_AS(session.OpenScene("Scenes/Main.kscene"), std::logic_error);
+    session.SaveSceneAs("Scenes/Second.kscene");
+    CHECK(session.ActiveScenePath() == std::filesystem::path("Scenes/Second.kscene"));
+    CHECK_FALSE(session.IsSceneDirty());
+    session.OpenScene("Scenes/Main.kscene");
+    CHECK_FALSE(session.Scene().Contains(entity));
+    REQUIRE_THROWS_AS(session.SaveSceneAs("../escape.kscene"), std::invalid_argument);
+
+    (void)session.EditScene().CreateEntity("Unsaved");
+    REQUIRE_THROWS_AS(session.Close(), std::logic_error);
+    session.Close(UnsavedChangesPolicy::Discard);
+    CHECK_FALSE(session.HasProject());
+    REQUIRE_THROWS_AS(session.EditScene(), std::logic_error);
+    std::filesystem::remove_all(root);
+}
+
+TEST_CASE("Failed project opens preserve the live session", "[KairoEditor][Project][Session]")
+{
+    const auto base = std::filesystem::temp_directory_path() /
+        ("kairo-session-strong-" + kairo::assets::GenerateAssetID().ToString());
+    const auto good = base / "Good";
+    const auto broken = base / "Broken";
+    ProjectSession session;
+    session.CreateProject(good, "Good Project");
+    const auto stable = session.EditScene().CreateEntity("Still Here");
+    session.SaveScene();
+
+    std::filesystem::create_directories(broken);
+    SaveProjectDescriptor(broken / DefaultProjectFileName,
+        { "Broken Project", "Missing.kassets", "Missing.kscene" });
+    REQUIRE_THROWS(session.OpenProject(broken / DefaultProjectFileName));
+    CHECK(session.Descriptor().Name == "Good Project");
+    CHECK(session.Scene().Contains(stable));
+    CHECK_FALSE(session.HasUnsavedChanges());
+    std::filesystem::remove_all(base);
+}
+
 TEST_CASE("Editor state validates scene selection and play transitions", "[KairoEditor][State]")
 {
     kairo::engine::Scene scene;
