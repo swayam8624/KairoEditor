@@ -24,9 +24,29 @@ export namespace kairo::editor
         explicit EditorState(kairo::engine::Scene& scene) : m_Scene(scene) {}
 
         [[nodiscard]] EditorMode Mode() const noexcept { return m_Mode; }
+        [[nodiscard]] Workspace ActiveWorkspace() const noexcept { return m_Workspace; }
+        [[nodiscard]] AuthoringSurface ActiveAuthoringSurface() const noexcept { return m_AuthoringSurface; }
         [[nodiscard]] PanelState& Panels() noexcept { return m_Panels; }
         [[nodiscard]] const PanelState& Panels() const noexcept { return m_Panels; }
         [[nodiscard]] std::optional<kairo::engine::Entity> SelectedEntity() const noexcept { return m_Selected; }
+
+        /// Task: switch the tool layout without changing authored data or play
+        /// state. Workspace presets are starting points, not locked layouts.
+        void SwitchWorkspace(Workspace workspace)
+        {
+            m_Workspace = workspace;
+            m_Panels.ApplyWorkspacePreset(workspace);
+            if (workspace == Workspace::Logic || workspace == Workspace::Materials)
+                m_Panels.ApplyAuthoringSurface(m_AuthoringSurface);
+        }
+
+        /// Task: choose code, graph, or synchronized split authoring. This is
+        /// intentionally state-only until the shared graph/code IR lands.
+        void SetAuthoringSurface(AuthoringSurface surface)
+        {
+            m_AuthoringSurface = surface;
+            m_Panels.ApplyAuthoringSurface(surface);
+        }
 
         /// Precondition: entity belongs to the scene supplied at construction.
         /// Task: select an entity for hierarchy, inspector, and viewport tools.
@@ -66,6 +86,8 @@ export namespace kairo::editor
     private:
         kairo::engine::Scene& m_Scene;
         EditorMode m_Mode = EditorMode::Edit;
+        Workspace m_Workspace = Workspace::Scene;
+        AuthoringSurface m_AuthoringSurface = AuthoringSurface::CodeAndGraph;
         PanelState m_Panels;
         std::optional<kairo::engine::Entity> m_Selected;
     };

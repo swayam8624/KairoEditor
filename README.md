@@ -16,6 +16,13 @@ The initial milestone provides a tested, backend-neutral editor state model:
 - edit, play, pause, resume, and stop state transitions
 - persistent visibility state for hierarchy, inspector, viewport, content,
   console, and statistics panels
+- task-focused Scene, World, Logic, Materials, Animation, Simulation, Audio,
+  and Profiling workspaces
+- Code, Graph, and synchronized Code + Graph authoring surfaces
+
+The visual direction is viewport-first and production-dense: low-chrome dark
+panels, a strong central canvas, rich inspectable nodes, timeline/curve tools,
+and focused workspace presets. See [docs/EDITOR_PRODUCT_SPEC.md](docs/EDITOR_PRODUCT_SPEC.md).
 
 The next milestone binds this model to the styled Dear ImGui docking frontend
 through a renderer-owned Vulkan editor context. That backend work must expose
