@@ -6,6 +6,13 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 option(KAIRO_EDITOR_BUILD_TESTS "Build KairoEditor tests" ${PROJECT_IS_TOP_LEVEL})
 option(KAIRO_EDITOR_BUILD_APP "Build the Vulkan Dear ImGui editor application" ${PROJECT_IS_TOP_LEVEL})
+set(KAIRO_EDITOR_UI_FONT_PATH "" CACHE FILEPATH "Optional UI TTF font for the native editor")
+set(KAIRO_EDITOR_MONO_FONT_PATH "" CACHE FILEPATH "Optional monospace TTF font for the native editor")
+
+# Immutable standalone fallback revisions. Local source directories and sibling
+# checkouts still take precedence for active workspace development.
+set(KAIRO_EDITOR_CORE_REVISION 6f716b398da7a8a5607d9c4e015768a00bcf5336)
+set(KAIRO_EDITOR_RENDERER_REVISION 95b9bdcd31ce26a2719a8e3914a60520f66769bd)
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
     add_compile_options(-Wall -Wextra -Wpedantic -Wno-unused-parameter)
@@ -19,7 +26,10 @@ if(NOT TARGET KairoEngineCore)
         add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../KairoEngineCore" "${CMAKE_CURRENT_BINARY_DIR}/_deps/KairoEngineCore")
     else()
         include(FetchContent)
-        FetchContent_Declare(KairoEngineCore GIT_REPOSITORY https://github.com/swayam8624/KairoEngineCore.git GIT_TAG main)
+        FetchContent_Declare(KairoEngineCore
+            GIT_REPOSITORY https://github.com/swayam8624/KairoEngineCore.git
+            GIT_TAG ${KAIRO_EDITOR_CORE_REVISION}
+            GIT_SHALLOW TRUE)
         FetchContent_MakeAvailable(KairoEngineCore)
     endif()
 endif()
@@ -44,7 +54,10 @@ if(KAIRO_EDITOR_BUILD_APP)
             add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../KairoRenderer" "${CMAKE_CURRENT_BINARY_DIR}/_deps/KairoRenderer")
         else()
             include(FetchContent)
-            FetchContent_Declare(KairoRenderer GIT_REPOSITORY https://github.com/swayam8624/KairoRenderer.git GIT_TAG main)
+            FetchContent_Declare(KairoRenderer
+                GIT_REPOSITORY https://github.com/swayam8624/KairoRenderer.git
+                GIT_TAG ${KAIRO_EDITOR_RENDERER_REVISION}
+                GIT_SHALLOW TRUE)
             FetchContent_MakeAvailable(KairoRenderer)
         endif()
     endif()
@@ -56,15 +69,8 @@ if(KAIRO_EDITOR_BUILD_APP)
         GIT_SHALLOW TRUE)
     FetchContent_MakeAvailable(DearImGui)
 
-    find_path(KAIRO_EDITOR_VULKAN_INCLUDE_DIR vulkan/vulkan.h
-        HINTS /opt/homebrew/include /usr/local/include)
-    find_library(KAIRO_EDITOR_VULKAN_LOADER_LIBRARY NAMES vulkan
-        HINTS /opt/homebrew/lib /usr/local/lib)
-    find_library(KAIRO_EDITOR_GLFW_LIBRARY NAMES glfw glfw3
-        HINTS /opt/homebrew/lib /usr/local/lib)
-    if(NOT KAIRO_EDITOR_VULKAN_INCLUDE_DIR OR NOT KAIRO_EDITOR_VULKAN_LOADER_LIBRARY OR NOT KAIRO_EDITOR_GLFW_LIBRARY)
-        message(FATAL_ERROR "KairoEditorApp requires GLFW, Vulkan headers, and the Vulkan loader.")
-    endif()
+    find_package(glfw3 CONFIG REQUIRED)
+    find_package(Vulkan REQUIRED)
 
     add_library(KairoDearImGui STATIC
         ${dearimgui_SOURCE_DIR}/imgui.cpp
@@ -77,9 +83,8 @@ if(KAIRO_EDITOR_BUILD_APP)
     target_include_directories(KairoDearImGui PUBLIC
         ${dearimgui_SOURCE_DIR}
         ${dearimgui_SOURCE_DIR}/misc/cpp
-        ${dearimgui_SOURCE_DIR}/backends
-        ${KAIRO_EDITOR_VULKAN_INCLUDE_DIR})
-    target_link_libraries(KairoDearImGui PUBLIC ${KAIRO_EDITOR_GLFW_LIBRARY} ${KAIRO_EDITOR_VULKAN_LOADER_LIBRARY})
+        ${dearimgui_SOURCE_DIR}/backends)
+    target_link_libraries(KairoDearImGui PUBLIC glfw Vulkan::Vulkan)
 
     add_library(KairoEditorImGui)
     target_sources(KairoEditorImGui PUBLIC FILE_SET CXX_MODULES BASE_DIRS ${CMAKE_CURRENT_SOURCE_DIR} FILES
@@ -90,10 +95,13 @@ if(KAIRO_EDITOR_BUILD_APP)
     target_sources(KairoEditorRendererBridge PUBLIC FILE_SET CXX_MODULES BASE_DIRS ${CMAKE_CURRENT_SOURCE_DIR} FILES
         SceneRenderBridge.cppm)
     target_link_libraries(KairoEditorRendererBridge PUBLIC KairoEditor KairoRenderer)
-    if(APPLE)
+    if(KAIRO_EDITOR_UI_FONT_PATH)
         target_compile_definitions(KairoEditorImGui PRIVATE
-            KAIRO_EDITOR_UI_FONT_PATH="/System/Library/Fonts/SFNS.ttf"
-            KAIRO_EDITOR_MONO_FONT_PATH="/System/Library/Fonts/SFNSMono.ttf")
+            KAIRO_EDITOR_UI_FONT_PATH="${KAIRO_EDITOR_UI_FONT_PATH}")
+    endif()
+    if(KAIRO_EDITOR_MONO_FONT_PATH)
+        target_compile_definitions(KairoEditorImGui PRIVATE
+            KAIRO_EDITOR_MONO_FONT_PATH="${KAIRO_EDITOR_MONO_FONT_PATH}")
     endif()
 
     add_executable(KairoEditorApp examples/editor_main.cpp)
