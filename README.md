@@ -127,6 +127,13 @@ properties, defaults, and rename operations retain stable IDs and complete
 incident topology. Continuous drags and value entry coalesce into one causal
 undo step.
 
+The compiler boundary validates the complete document and schema snapshot
+before invoking a domain backend. Logic, material, audio, animation, and
+simulation semantics remain separate compiler implementations. Backend target,
+diagnostic references, diagnostic text, and artifact size are validated before
+an identity-bearing artifact can enter build or play; failures remain editor
+diagnostics rather than partially published output.
+
 Code, Graph, and Split are views over one future authored-document model, not
 independent sources of truth. The current shell exposes the workspace and panel
 contracts without pretending that the typed graph compiler already exists.

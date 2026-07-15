@@ -144,6 +144,8 @@ Implemented and verified:
   atomic replacement and missing-schema preservation.
 - reversible document topology and value commands in the editor-wide bounded
   command journal, including merged continuous edits and stable-ID restoration.
+- a validation-gated domain compiler interface with checked diagnostics and
+  bounded identity-bearing artifacts; no placeholder execution semantics.
 
 Not yet represented as complete product surfaces:
 

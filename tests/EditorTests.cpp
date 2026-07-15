@@ -145,6 +145,26 @@ namespace
         int m_Delta;
         bool m_Fail;
     };
+
+    class RecordingDocumentCompiler final : public DocumentCompiler
+    {
+    public:
+        DocumentKind CompilerKind = DocumentKind::Logic;
+        std::string TargetKey = "kairo.logic.test-v1";
+        DocumentCompilerOutput Output;
+        bool Throws = false;
+        mutable std::size_t Calls = 0u;
+
+        [[nodiscard]] DocumentKind Kind() const noexcept override { return CompilerKind; }
+        [[nodiscard]] std::string_view Target() const noexcept override { return TargetKey; }
+        [[nodiscard]] DocumentCompilerOutput Compile(const AuthoringDocument&,
+            const DocumentSchemaRegistry&) const override
+        {
+            ++Calls;
+            if (Throws) throw std::runtime_error("deliberate backend failure");
+            return Output;
+        }
+    };
 }
 
 TEST_CASE("Authoring documents enforce typed deterministic graph topology", "[KairoEditor][Document][Graph]")
@@ -436,6 +456,74 @@ TEST_CASE("Document commands preserve identity topology and merged edit intent",
     CHECK(document.Name() == "Command Graph B");
     values.Undo();
     CHECK(document.Name() == "Command Graph");
+}
+
+TEST_CASE("Document compiler boundary gates invalid input and backend contracts",
+    "[KairoEditor][Document][Compiler]")
+{
+    const auto documentID = kairo::assets::AssetID::Parse("00000000-0000-4000-8000-000000000507");
+    NodeSchema start;
+    start.Kind = DocumentKind::Logic;
+    start.TypeKey = "kairo.logic.start";
+    start.DisplayName = "Start";
+    start.Category = "Events";
+    start.Pins = {
+        { "out", "Out", PinDirection::Output, ValueType::Flow, PinCardinality::Multiple, false, std::nullopt }
+    };
+    const NodeSchema print = MakePrintSchema();
+    DocumentSchemaRegistry schemas;
+    schemas.Register(start);
+    schemas.Register(print);
+
+    AuthoringDocument valid(documentID, DocumentKind::Logic, "Compilable Graph");
+    const NodeID startNode = valid.AddNode(start);
+    const NodeID printNode = valid.AddNode(print);
+    valid.Connect(valid.Node(startNode).Pins[0].ID, valid.Node(printNode).Pins[0].ID);
+
+    RecordingDocumentCompiler compiler;
+    compiler.Output.Payload = { std::byte{ 0x4b }, std::byte{ 0x52 } };
+    compiler.Output.Diagnostics.push_back({ DiagnosticSeverity::Warning, "unused-output",
+        "The terminal flow output is not connected.", printNode, valid.Node(printNode).Pins[1].ID });
+    const DocumentCompileResult compiled = CompileDocument(valid, schemas, compiler);
+    REQUIRE(compiled.Succeeded());
+    REQUIRE(compiled.Artifact.has_value());
+    CHECK(compiled.Artifact->Source == documentID);
+    CHECK(compiled.Artifact->Target == "kairo.logic.test-v1");
+    CHECK(compiled.Artifact->Payload == compiler.Output.Payload);
+    CHECK(compiler.Calls == 1u);
+
+    AuthoringDocument invalid(documentID, DocumentKind::Logic, "Invalid Graph");
+    (void)invalid.AddNode(print);
+    RecordingDocumentCompiler skipped;
+    const DocumentCompileResult rejected = CompileDocument(invalid, schemas, skipped);
+    CHECK_FALSE(rejected.Succeeded());
+    CHECK_FALSE(rejected.Artifact.has_value());
+    CHECK(skipped.Calls == 0u);
+    CHECK(HasErrors(rejected.Diagnostics));
+
+    RecordingDocumentCompiler wrongKind;
+    wrongKind.CompilerKind = DocumentKind::Material;
+    const DocumentCompileResult kindFailure = CompileDocument(valid, schemas, wrongKind);
+    CHECK_FALSE(kindFailure.Succeeded());
+    CHECK(wrongKind.Calls == 0u);
+    CHECK(std::ranges::find(kindFailure.Diagnostics, std::string("compiler-contract"),
+        &DocumentDiagnostic::Code) != kindFailure.Diagnostics.end());
+
+    RecordingDocumentCompiler throwing;
+    throwing.Throws = true;
+    const DocumentCompileResult backendFailure = CompileDocument(valid, schemas, throwing);
+    CHECK_FALSE(backendFailure.Succeeded());
+    CHECK(throwing.Calls == 1u);
+    CHECK(std::ranges::find(backendFailure.Diagnostics, std::string("compiler-failure"),
+        &DocumentDiagnostic::Code) != backendFailure.Diagnostics.end());
+
+    RecordingDocumentCompiler badDiagnostic;
+    badDiagnostic.Output.Diagnostics.push_back({ DiagnosticSeverity::Error, "bad code", "Invalid code.",
+        std::nullopt, std::nullopt });
+    const DocumentCompileResult contractFailure = CompileDocument(valid, schemas, badDiagnostic);
+    CHECK_FALSE(contractFailure.Succeeded());
+    CHECK(std::ranges::find(contractFailure.Diagnostics, std::string("compiler-contract"),
+        &DocumentDiagnostic::Code) != contractFailure.Diagnostics.end());
 }
 
 TEST_CASE("Command history preserves causal branches and bounded storage", "[KairoEditor][Commands]")
