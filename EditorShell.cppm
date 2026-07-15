@@ -22,8 +22,11 @@ export module Kairo.Editor.ImGuiShell;
 
 import Kairo.Editor;
 import Kairo.Editor.ImGuiGraphCanvas;
+import Kairo.Editor.ImGuiReflectionInspector;
 import Kairo.Editor.UI;
 import Kairo.EngineCore;
+import Kairo.EngineCore.Reflection;
+import Kairo.Reflection;
 
 export namespace kairo::editor
 {
@@ -36,6 +39,7 @@ export namespace kairo::editor
         EditorShell(EditorState& state, ProjectSession& project)
             : m_State(state), m_Project(project), m_GraphCanvas(m_Schemas)
         {
+            kairo::engine::RegisterEngineCoreReflection(m_Reflection);
             if (const auto active = m_Project.Documents().ActiveID(); active.has_value())
             {
                 const auto& document = m_Project.Document(*active);
@@ -62,6 +66,7 @@ export namespace kairo::editor
         EditorState& m_State;
         ProjectSession& m_Project;
         CommandHistory m_History;
+        kairo::reflection::ReflectionRegistry m_Reflection;
         AuthoringWorkspaceState m_AuthoringWorkspace;
         DocumentSchemaRegistry m_Schemas = CreateCoreDocumentSchemaRegistry();
         ImGuiGraphCanvas m_GraphCanvas;
@@ -301,19 +306,17 @@ export namespace kairo::editor
                 ImGui::TextDisabled("Select an entity to inspect it.");
                 ImGui::End(); return;
             }
-            const auto& scene = m_Project.Scene();
-            const auto& name = scene.Name(*selected).Value;
-            std::array<char, 256> buffer{};
-            std::snprintf(buffer.data(), buffer.size(), "%s", name.c_str());
-            if (ImGui::InputText("Name", buffer.data(), buffer.size()))
-            {
-                const std::string editedName(buffer.data());
-                if (editedName != name)
-                    RunCommand([this, entity = *selected, editedName]
+            auto& scene = m_Project.EditScene();
+            DrawReflectedInspector(m_Reflection, scene, *selected,
+                [this, entity = *selected](std::string_view typeKey, std::string_view propertyKey,
+                    const kairo::reflection::PropertyValue& value)
+                {
+                    RunCommand([this, entity, type = std::string(typeKey), property = std::string(propertyKey), value]
                     {
-                        m_History.Execute(std::make_unique<SetEntityNameCommand>(m_Project, entity, editedName));
+                        m_History.Execute(std::make_unique<SetReflectedPropertyCommand>(
+                            m_Reflection, m_Project, entity, type, property, value));
                     });
-            }
+                });
             auto transform = scene.Transform(*selected).Local;
             SectionHeader("Transform");
             bool changed = ImGui::DragFloat3("Position", &transform.Translation.x, 0.05f);

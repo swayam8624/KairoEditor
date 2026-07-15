@@ -13,6 +13,7 @@
 import Kairo.Editor;
 import Kairo.EngineCore;
 import Kairo.Foundation.Math;
+import Kairo.Reflection;
 
 using namespace kairo::editor;
 
@@ -1101,6 +1102,39 @@ TEST_CASE("Scene commands restore stable entities and merge Inspector edits", "[
     CHECK_FALSE(project.Scene().Contains(entity));
 
     history.Clear();
+    project.Close(UnsavedChangesPolicy::Discard);
+    std::filesystem::remove_all(root);
+}
+
+TEST_CASE("Reflected scene commands are undoable and preserve component invariants",
+    "[KairoEditor][Commands][Reflection]")
+{
+    const auto root = std::filesystem::temp_directory_path() /
+        ("kairo-reflection-command-" + kairo::assets::GenerateAssetID().ToString());
+    ProjectSession project;
+    project.CreateProject(root, "Reflection Command Scene");
+    const auto entity = project.EditScene().CreateEntity("Reflected Camera");
+    project.EditScene().SetCamera(entity, { 1.0f, 0.1f, 100.0f, false });
+
+    kairo::reflection::ReflectionRegistry registry;
+    kairo::engine::RegisterEngineCoreReflection(registry);
+    CommandHistory history;
+    history.Execute(std::make_unique<SetReflectedPropertyCommand>(registry, project, entity,
+        "Kairo.Engine.CameraComponent", "vertical-fov-radians", kairo::reflection::PropertyValue(1.1)));
+    history.Execute(std::make_unique<SetReflectedPropertyCommand>(registry, project, entity,
+        "Kairo.Engine.CameraComponent", "vertical-fov-radians", kairo::reflection::PropertyValue(1.2)));
+    CHECK(history.AppliedCount() == 1u);
+    CHECK(project.Scene().Camera(entity).VerticalFovRadians == 1.2f);
+    history.Undo();
+    CHECK(project.Scene().Camera(entity).VerticalFovRadians == 1.0f);
+    history.Redo();
+    CHECK(project.Scene().Camera(entity).VerticalFovRadians == 1.2f);
+
+    REQUIRE_THROWS_AS(history.Execute(std::make_unique<SetReflectedPropertyCommand>(registry, project, entity,
+        "Kairo.Engine.CameraComponent", "near-plane", kairo::reflection::PropertyValue(200.0))), std::invalid_argument);
+    CHECK(project.Scene().Camera(entity).NearPlane == 0.1f);
+    CHECK(project.Scene().Camera(entity).FarPlane == 100.0f);
+
     project.Close(UnsavedChangesPolicy::Discard);
     std::filesystem::remove_all(root);
 }

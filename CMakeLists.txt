@@ -11,7 +11,7 @@ set(KAIRO_EDITOR_MONO_FONT_PATH "" CACHE FILEPATH "Optional monospace TTF font f
 
 # Immutable standalone fallback revisions. Local source directories and sibling
 # checkouts still take precedence for active workspace development.
-set(KAIRO_EDITOR_CORE_REVISION 08e94745fa38ab089fb5ae28a51aba5bbf0d05fd)
+set(KAIRO_EDITOR_CORE_REVISION 1dc981a547f89eabb37ae8c674802bd0a8f72484)
 set(KAIRO_EDITOR_RENDERER_REVISION 65b84bc431f9d22890eabc1d9c05ae001de1ec6a)
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
@@ -88,7 +88,8 @@ if(KAIRO_EDITOR_BUILD_APP)
 
     add_library(KairoEditorImGui)
     target_sources(KairoEditorImGui PUBLIC FILE_SET CXX_MODULES BASE_DIRS ${CMAKE_CURRENT_SOURCE_DIR} FILES
-        KairoUI.cppm EditorTheme.cppm ImGuiRuntime.cppm ImGuiGraphCanvas.cppm EditorShell.cppm)
+        KairoUI.cppm EditorTheme.cppm ImGuiRuntime.cppm ImGuiGraphCanvas.cppm
+        ImGuiReflectionInspector.cppm EditorShell.cppm)
     target_link_libraries(KairoEditorImGui PUBLIC KairoEditor KairoRenderer KairoDearImGui)
 
     add_library(KairoEditorRendererBridge)

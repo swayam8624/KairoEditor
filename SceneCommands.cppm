@@ -12,7 +12,9 @@ export module Kairo.Editor.SceneCommands;
 import Kairo.Editor.CommandHistory;
 import Kairo.Editor.ProjectSession;
 import Kairo.EngineCore;
+import Kairo.EngineCore.Reflection;
 import Kairo.Foundation.Math;
+import Kairo.Reflection;
 
 export namespace kairo::editor
 {
@@ -127,6 +129,71 @@ export namespace kairo::editor
         kairo::engine::Entity m_Entity;
         std::string m_Before;
         std::string m_After;
+    };
+
+    /// Edits one scalar property described by EngineCore reflection metadata.
+    /// The command resolves the component for every execute/undo rather than
+    /// retaining a component pointer, because a Scene may rehash its internal
+    /// records after structural edits. Component-level validation runs after
+    /// every write; a failed validation restores the prior property value
+    /// before the error reaches the editor shell.
+    class SetReflectedPropertyCommand final : public EditorCommand
+    {
+    public:
+        SetReflectedPropertyCommand(kairo::reflection::ReflectionRegistry& registry,
+            ProjectSession& project, kairo::engine::Entity entity, std::string typeKey,
+            std::string propertyKey, kairo::reflection::PropertyValue value)
+            : m_Registry(&registry), m_Project(&project), m_Entity(entity),
+              m_TypeKey(std::move(typeKey)), m_PropertyKey(std::move(propertyKey)),
+              m_After(std::move(value))
+        {
+            const void* object = kairo::engine::ResolveReflectedComponent(m_Project->EditScene(), m_Entity, m_TypeKey);
+            m_Before = m_Registry->Read(m_TypeKey, m_PropertyKey, object);
+        }
+
+        [[nodiscard]] std::string_view Name() const noexcept override { return "Edit Reflected Property"; }
+
+        void Execute() override { Apply(m_After); }
+        void Undo() override { Apply(m_Before); }
+
+        [[nodiscard]] bool TryMerge(EditorCommand& newer) noexcept override
+        {
+            auto* property = dynamic_cast<SetReflectedPropertyCommand*>(&newer);
+            if (property == nullptr || property->m_Registry != m_Registry || property->m_Project != m_Project ||
+                property->m_Entity != m_Entity || property->m_TypeKey != m_TypeKey ||
+                property->m_PropertyKey != m_PropertyKey)
+                return false;
+            m_After = std::move(property->m_After);
+            return true;
+        }
+
+    private:
+        kairo::reflection::ReflectionRegistry* m_Registry;
+        ProjectSession* m_Project;
+        kairo::engine::Entity m_Entity;
+        std::string m_TypeKey;
+        std::string m_PropertyKey;
+        kairo::reflection::PropertyValue m_Before{ false };
+        kairo::reflection::PropertyValue m_After{ false };
+
+        void Apply(const kairo::reflection::PropertyValue& value)
+        {
+            void* object = kairo::engine::ResolveReflectedComponent(m_Project->EditScene(), m_Entity, m_TypeKey);
+            try
+            {
+                m_Registry->Write(m_TypeKey, m_PropertyKey, object, value);
+                kairo::engine::ValidateReflectedComponent(m_TypeKey, object);
+            }
+            catch (...)
+            {
+                // A registry range failure leaves the object unchanged; a
+                // component invariant failure happens after the scalar write.
+                // Reapplying the captured pre-edit value handles both paths.
+                m_Registry->Write(m_TypeKey, m_PropertyKey, object, m_Before);
+                kairo::engine::ValidateReflectedComponent(m_TypeKey, object);
+                throw;
+            }
+        }
     };
 
     /// Replaces the complete local TRS atomically so position/rotation/scale

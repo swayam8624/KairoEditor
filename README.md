@@ -23,6 +23,8 @@ The current foundation provides a tested, backend-neutral editor state model:
 - Code, Graph, and synchronized Code + Graph authoring surfaces
 - bounded cross-surface command history with causal undo/redo branching
 - reversible entity creation, deletion, rename, and complete transform edits
+- reflection-driven scalar inspection for Name, Camera, mesh visibility, and
+  physics bindings, with component invariants checked before a command commits
 
 The visual direction is viewport-first and production-dense: low-chrome dark
 panels, a strong central canvas, rich inspectable nodes, timeline/curve tools,
@@ -107,7 +109,16 @@ command execution does not advance or truncate history. The native Edit menu
 shows the next command name and supports `Cmd/Ctrl+Z` and
 `Cmd/Ctrl+Shift+Z`.
 
-Hierarchy and Inspector edits use concrete scene commands. Entity deletion
+Hierarchy and Inspector edits use concrete scene commands. Reflection-backed
+Inspector fields are discovered from `KairoReflection` metadata rather than
+duplicated widget definitions: the editor resolves the target component only
+when a command executes, writes through the registered descriptor, validates
+component invariants, and restores the pre-edit value if validation fails.
+This currently covers all scalar EngineCore descriptors. Transform remains a
+purpose-built composite editor until vector/quaternion property adapters have
+the same stable metadata and serialization contract.
+
+Entity deletion
 captures the stable entity ID, name, transform, mesh renderer, camera, rigid
 body binding, and collider binding, then restores that complete authored state
 on undo. Commands retain a `ProjectSession` reference, so a host must clear its
