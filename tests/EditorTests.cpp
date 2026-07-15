@@ -95,6 +95,38 @@ TEST_CASE("Document schema registry validates and orders node contracts", "[Kair
     CHECK_FALSE(IsSchemaKey("9invalid", false));
 }
 
+TEST_CASE("Core document schemas cover every authoring domain with valid contracts",
+    "[KairoEditor][Document][Schema]")
+{
+    const DocumentSchemaRegistry registry = CreateCoreDocumentSchemaRegistry();
+    CHECK(registry.Size() == 16u);
+
+    for (const DocumentKind kind : { DocumentKind::Logic, DocumentKind::Material,
+        DocumentKind::Audio, DocumentKind::AnimationState, DocumentKind::Simulation })
+    {
+        const auto schemas = registry.Snapshot(kind);
+        REQUIRE_FALSE(schemas.empty());
+        for (const NodeSchema& schema : schemas)
+        {
+            CHECK(schema.Kind == kind);
+            REQUIRE_NOTHROW(ValidateNodeSchema(schema));
+        }
+    }
+
+    const NodeSchema& branch = registry.Require("kairo.logic.branch");
+    REQUIRE(branch.Pins.size() == 4u);
+    CHECK(branch.Pins[1].DefaultValue->Get<bool>() == false);
+    const NodeSchema& surface = registry.Require("kairo.material.surface-output");
+    CHECK(surface.Pins[1].DefaultValue->Get<double>() == 0.5);
+    const NodeSchema& state = registry.Require("kairo.animation.state");
+    CHECK(state.Pins[1].Required);
+    CHECK(state.Pins[1].Type == ValueType::Asset);
+
+    DocumentSchemaRegistry duplicate;
+    RegisterCoreDocumentSchemas(duplicate);
+    REQUIRE_THROWS_AS(RegisterCoreDocumentSchemas(duplicate), std::invalid_argument);
+}
+
 namespace
 {
     [[nodiscard]] NodeSchema MakeAddFloatSchema()
