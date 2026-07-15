@@ -39,9 +39,11 @@ the charcoal/yellow design tokens and reusable `ActionButton`, `ToolbarButton`,
 `SearchField`, `SectionHeader`, `MutedText`, and `StatusText` controls. Editor
 features call those named controls rather than adding ad hoc colors and widget
 styling directly to their panels. The initial migration covers the workspace
-toolbar, play controls, hierarchy commands, asset filtering, and inspector
-sections; more panels move over incrementally without changing project or
-authoring state.
+toolbar, play controls, hierarchy commands, asset filtering, inspector
+sections, document lifecycle modals, and code-authoring save/apply/revert
+actions. Canvas interaction and popup lifetime remain direct ImGui integration
+points because they are backend mechanics, not visual policy; more feature
+panels move over incrementally without changing project or authoring state.
 
 The module is intentionally implemented on Dear ImGui today, but its public
 tokens and semantic intent are engine-owned. This preserves one visual language

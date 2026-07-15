@@ -362,7 +362,7 @@ export namespace kairo::editor
                 else
                 {
                     ImGui::TextDisabled("Open a document asset or create a typed document.");
-                    if (ImGui::Button("New Document")) RequestNewDocument();
+                    if (ActionButton("New Document", UIButtonTone::Primary)) RequestNewDocument();
                 }
             }
             else if (panel == Panel::Console) ImGui::TextDisabled("No engine messages.");
@@ -453,7 +453,7 @@ export namespace kairo::editor
                 document.Name().c_str(), Name(document.Kind()).data(), document.NodeCount(),
                 document.ConnectionCount());
             ImGui::SameLine();
-            if (ImGui::SmallButton("Save")) RunCommand([this, id] { SaveDocumentWithDraft(id); });
+            if (ActionButton("Save", UIButtonTone::Primary)) RunCommand([this, id] { SaveDocumentWithDraft(id); });
             if (panel == Panel::CodeEditor)
                 DrawCodeEditor(id);
             else
@@ -522,7 +522,7 @@ export namespace kairo::editor
                 ImGui::InputText("Project path", m_NewDocumentPath.data(), m_NewDocumentPath.size());
                 ImGui::SetNextItemWidth(220.0f);
                 ImGui::Combo("Kind", &m_NewDocumentKind, kinds, static_cast<int>(std::size(kinds)));
-                if (ImGui::Button("Create", { 110.0f, 0.0f }))
+                if (ActionButton("Create", UIButtonTone::Primary, true, 110.0f))
                 {
                     RunCommand([this]
                     {
@@ -536,7 +536,7 @@ export namespace kairo::editor
                     });
                 }
                 ImGui::SameLine();
-                if (ImGui::Button("Cancel", { 110.0f, 0.0f })) ImGui::CloseCurrentPopup();
+                if (ActionButton("Cancel", UIButtonTone::Neutral, true, 110.0f)) ImGui::CloseCurrentPopup();
                 ImGui::EndPopup();
             }
 
@@ -549,7 +549,7 @@ export namespace kairo::editor
                 ImGuiWindowFlags_AlwaysAutoResize))
             {
                 ImGui::TextWrapped("This document has unapplied text or unsaved authored changes.");
-                if (ImGui::Button("Save and Close", { 130.0f, 0.0f }) && m_PendingDocumentClose.has_value())
+                if (ActionButton("Save and Close", UIButtonTone::Primary, m_PendingDocumentClose.has_value(), 130.0f))
                 {
                     const auto id = *m_PendingDocumentClose;
                     RunCommand([this, id]
@@ -562,7 +562,7 @@ export namespace kairo::editor
                     });
                 }
                 ImGui::SameLine();
-                if (ImGui::Button("Discard", { 100.0f, 0.0f }) && m_PendingDocumentClose.has_value())
+                if (ActionButton("Discard", UIButtonTone::Destructive, m_PendingDocumentClose.has_value(), 100.0f))
                 {
                     const auto id = *m_PendingDocumentClose;
                     RunCommand([this, id]
@@ -574,7 +574,7 @@ export namespace kairo::editor
                     });
                 }
                 ImGui::SameLine();
-                if (ImGui::Button("Cancel", { 100.0f, 0.0f }))
+                if (ActionButton("Cancel", UIButtonTone::Neutral, true, 100.0f))
                 {
                     m_PendingDocumentClose.reset();
                     ImGui::CloseCurrentPopup();
@@ -615,14 +615,10 @@ export namespace kairo::editor
             }
 
             const bool canApply = view.IsTextDirty() && !view.HasExternalConflict();
-            if (!canApply) ImGui::BeginDisabled();
-            if (ImGui::Button("Apply")) RunCommand([this, id] { ApplyTextDraft(id); });
-            if (!canApply) ImGui::EndDisabled();
+            if (ActionButton("Apply", UIButtonTone::Primary, canApply)) RunCommand([this, id] { ApplyTextDraft(id); });
             ImGui::SameLine();
             const bool canRevert = view.IsTextDirty() || view.HasExternalConflict();
-            if (!canRevert) ImGui::BeginDisabled();
-            if (ImGui::Button("Revert")) view.ResetText(m_Project.Document(id));
-            if (!canRevert) ImGui::EndDisabled();
+            if (ActionButton("Revert", UIButtonTone::Neutral, canRevert)) view.ResetText(m_Project.Document(id));
             ImGui::SameLine();
             const std::size_t lines = static_cast<std::size_t>(std::ranges::count(view.TextDraft(), '\n')) + 1u;
             ImGui::TextDisabled("%zu lines  |  %zu bytes%s", lines, view.TextDraft().size(),
@@ -735,7 +731,7 @@ export namespace kairo::editor
             if (ImGui::BeginPopupModal("Operation failed", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
             {
                 ImGui::TextWrapped("%s", m_LastError.c_str());
-                if (ImGui::Button("Close")) ImGui::CloseCurrentPopup();
+                if (ActionButton("Close")) ImGui::CloseCurrentPopup();
                 ImGui::EndPopup();
             }
         }

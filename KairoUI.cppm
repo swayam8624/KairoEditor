@@ -62,7 +62,8 @@ export namespace kairo::editor
     /// Task: draw a consistent command control without exposing raw ImGui
     /// styling to feature code. Labels are copied to accept arbitrary views.
     [[nodiscard]] bool ActionButton(std::string_view label,
-        UIButtonTone tone = UIButtonTone::Neutral, bool enabled = true);
+        UIButtonTone tone = UIButtonTone::Neutral, bool enabled = true,
+        float width = 0.0f);
 
     /// Input: workspace/tool label, active state, and enabled state.
     /// Output: true exactly once for an enabled click.
@@ -125,7 +126,7 @@ namespace kairo::editor
         return design;
     }
 
-    bool ActionButton(std::string_view label, UIButtonTone tone, bool enabled)
+    bool ActionButton(std::string_view label, UIButtonTone tone, bool enabled, float width)
     {
         using namespace ui_detail;
         const auto& design = KairoUIDesign();
@@ -147,7 +148,7 @@ namespace kairo::editor
             ImGui::PushStyleColor(ImGuiCol_Text, ToLinear(design.Background));
         }
 
-        const bool clicked = ImGui::Button(ownedLabel.c_str());
+        const bool clicked = ImGui::Button(ownedLabel.c_str(), { width, 0.0f });
         if (tone != UIButtonTone::Neutral) ImGui::PopStyleColor(4);
         if (!enabled) ImGui::EndDisabled();
         return enabled && clicked;
