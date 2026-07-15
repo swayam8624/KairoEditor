@@ -3,6 +3,7 @@ module;
 #include <imgui.h>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -29,9 +30,16 @@ export namespace kairo::editor
     class ImGuiGraphCanvas final
     {
     public:
+        explicit ImGuiGraphCanvas(const DocumentSchemaRegistry& schemas) noexcept : m_Schemas(&schemas) {}
+
         void Draw(ProjectSession& project, DocumentViewState& view,
             kairo::assets::AssetID documentID)
         {
+            ImGui::PushID(documentID.ToString().c_str());
+            const bool addAtCenter = ImGui::Button("+", { 28.0f, 28.0f });
+            if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort)) ImGui::SetTooltip("Add node");
+            ImGui::PopID();
+
             const std::string childID = "##GraphCanvas-" + documentID.ToString();
             const ImVec2 available = ImGui::GetContentRegionAvail();
             if (available.x < 32.0f || available.y < 32.0f) return;
@@ -45,7 +53,8 @@ export namespace kairo::editor
             const ImVec2 origin = ImGui::GetCursorScreenPos();
             const ImVec2 size = ImGui::GetContentRegionAvail();
             ImGui::InvisibleButton("##GraphInput", size,
-                ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonMiddle);
+                ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonMiddle |
+                ImGuiButtonFlags_MouseButtonRight);
             const bool hovered = ImGui::IsItemHovered();
             const bool focused = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);
             const ImVec2 mouse = ImGui::GetIO().MousePos;
@@ -58,11 +67,21 @@ export namespace kairo::editor
             GraphSpatialIndex index;
             index.Rebuild(document, layouts);
             HandleNavigation(view.Viewport(), layouts, hovered, focused, origin, size, mouse);
+            const bool addAtPointer = hovered && (ImGui::IsMouseClicked(ImGuiMouseButton_Right) ||
+                ImGui::IsKeyPressed(ImGuiKey_Space, false));
+            if (addAtCenter || addAtPointer)
+            {
+                const GraphPoint screen = addAtCenter
+                    ? GraphPoint{ origin.x + size.x * 0.5, origin.y + size.y * 0.5 }
+                    : GraphPoint{ mouse.x, mouse.y };
+                OpenPalette(documentID, view.Viewport().ToDocument(screen, { origin.x, origin.y }));
+            }
             DrawGrid(*draw, view.Viewport(), origin, size);
             DrawConnections(*draw, document, index, view.Viewport(), origin);
             DrawNodes(*draw, document, index, view.Selection(), view.Viewport(), origin, size);
             HandleInteraction(project, view, documentID, index, hovered, origin, mouse);
             DrawGestureOverlay(*draw, project.Document(documentID), view, index, origin, mouse);
+            DrawPalette(project, view, documentID);
 
             draw->PopClipRect();
             ImGui::EndChild();
@@ -97,9 +116,83 @@ export namespace kairo::editor
             bool Moved = false;
         };
 
+        struct NodePaletteState final
+        {
+            kairo::assets::AssetID Document;
+            CanvasPosition Position;
+            std::array<char, 257u> Search{};
+        };
+
+        const DocumentSchemaRegistry* m_Schemas;
         std::optional<NodeDragState> m_NodeDrag;
         std::optional<MarqueeState> m_Marquee;
+        std::optional<NodePaletteState> m_Palette;
         std::optional<std::string> m_Error;
+
+        void OpenPalette(kairo::assets::AssetID document, GraphPoint position)
+        {
+            m_Palette = NodePaletteState{ document, { position.x, position.y }, {} };
+            ImGui::OpenPopup("Add Node##KairoGraphPalette");
+        }
+
+        void DrawPalette(ProjectSession& project, DocumentViewState& view,
+            kairo::assets::AssetID documentID)
+        {
+            if (!ImGui::BeginPopup("Add Node##KairoGraphPalette")) return;
+            if (!m_Palette.has_value() || m_Palette->Document != documentID)
+            {
+                ImGui::CloseCurrentPopup();
+                ImGui::EndPopup();
+                return;
+            }
+
+            ImGui::SetNextItemWidth(360.0f);
+            if (ImGui::IsWindowAppearing()) ImGui::SetKeyboardFocusHere();
+            ImGui::InputTextWithHint("##NodeSearch", "Search node types", m_Palette->Search.data(),
+                m_Palette->Search.size());
+            ImGui::Separator();
+            const auto schemas = m_Schemas->Search(project.Document(documentID).Kind(), m_Palette->Search.data());
+            if (schemas.empty()) ImGui::TextDisabled("No matching node types");
+
+            std::map<std::string, std::vector<NodeSchema>, std::less<>> categories;
+            for (const NodeSchema& schema : schemas) categories[schema.Category].push_back(schema);
+            if (ImGui::BeginChild("##NodeResults", { 360.0f, 280.0f }, ImGuiChildFlags_None))
+            {
+                bool createdNode = false;
+                for (const auto& [category, entries] : categories)
+                {
+                    ImGui::Spacing();
+                    ImGui::TextDisabled("%s", category.c_str());
+                    for (const NodeSchema& schema : entries)
+                    {
+                        const std::string label = schema.DisplayName + "###" + schema.TypeKey;
+                        if (ImGui::Selectable(label.c_str()))
+                        {
+                            const CanvasPosition position = m_Palette->Position;
+                            if (RunOperation([&]
+                            {
+                                auto& mutableDocument = project.EditDocument(documentID);
+                                auto command = std::make_unique<AddDocumentNodeCommand>(
+                                    mutableDocument, schema, position);
+                                auto* created = command.get();
+                                project.DocumentHistory().Execute(std::move(command));
+                                view.Selection().Apply(created->CreatedNode(), GraphSelectionMode::Replace);
+                                view.Synchronize(mutableDocument);
+                            }))
+                            {
+                                m_Palette.reset();
+                                ImGui::CloseCurrentPopup();
+                                createdNode = true;
+                                break;
+                            }
+                        }
+                    }
+                    if (createdNode) break;
+                }
+            }
+            ImGui::EndChild();
+            ImGui::EndPopup();
+        }
 
         [[nodiscard]] static std::vector<GraphNodeLayout> BuildLayouts(
             const AuthoringDocument& document)
@@ -352,14 +445,19 @@ export namespace kairo::editor
         }
 
         template<class Function>
-        void RunOperation(Function&& function) noexcept
+        bool RunOperation(Function&& function) noexcept
         {
-            try { std::forward<Function>(function)(); }
+            try
+            {
+                std::forward<Function>(function)();
+                return true;
+            }
             catch (const std::exception& error)
             {
                 m_Error = error.what();
                 m_NodeDrag.reset();
                 m_Marquee.reset();
+                return false;
             }
         }
 

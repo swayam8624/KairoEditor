@@ -32,7 +32,8 @@ export namespace kairo::editor
     class EditorShell final
     {
     public:
-        EditorShell(EditorState& state, ProjectSession& project) : m_State(state), m_Project(project)
+        EditorShell(EditorState& state, ProjectSession& project)
+            : m_State(state), m_Project(project), m_GraphCanvas(m_Schemas)
         {
             if (const auto active = m_Project.Documents().ActiveID(); active.has_value())
             {
@@ -61,6 +62,7 @@ export namespace kairo::editor
         ProjectSession& m_Project;
         CommandHistory m_History;
         AuthoringWorkspaceState m_AuthoringWorkspace;
+        DocumentSchemaRegistry m_Schemas = CreateCoreDocumentSchemaRegistry();
         ImGuiGraphCanvas m_GraphCanvas;
         bool m_LayoutBuilt = false;
         bool m_DocumentPanelFocused = false;

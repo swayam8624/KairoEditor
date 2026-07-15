@@ -124,9 +124,11 @@ parsing is bounded and line/column located, and saves replace the destination
 atomically. This makes missing schemas a validation diagnostic instead of a
 data-loss event.
 
-This is not a claim that the visual node canvas is complete. Reversible
-document commands and compiler projection land before the UI can create real
-nodes.
+The shipped core catalog contributes 16 validated contracts across logic,
+material, audio, animation-state, and simulation documents. Registry search is
+bounded, tokenized, ASCII case-insensitive, and deterministically relevance
+ordered. These contracts define authored data shape; each domain compiler still
+owns runtime meaning rather than letting the editor emulate execution.
 
 Document changes now use the same bounded `CommandHistory` as hierarchy and
 Inspector edits. Node create/delete, edge connect/disconnect, movement,
@@ -169,7 +171,10 @@ frame authored nodes, spatially culled node drawing, typed pin colors, Bezier
 connections, deterministic hit testing, modifier-aware selection, marquee
 selection, compatibility-colored connection previews, and transactional
 multi-node dragging. Canvas mutations enter the shared document command history
-and dirty/conflict tracking rather than editing widget-local copies.
+and dirty/conflict tracking rather than editing widget-local copies. The `+`
+control, right-click, or `Space` opens a searchable category-grouped node
+palette; the chosen schema is instantiated at the canvas center or pointer and
+selected through the same reversible command path.
 
 The constrained Code surface uses `DocumentTextProjection`, not a second data
 model. Canonical UTF-8 text carries byte-accurate spans back to node, pin,
@@ -187,17 +192,16 @@ before Save or Save All; a graph change made after editing began raises an
 explicit stale-draft conflict that cannot be overwritten silently.
 
 Code, Graph, and Split are views over the same authored-document model, not
-independent sources of truth. The current shell exposes workspace and panel
-contracts, while the production graph/text projections remain the next UI
-surface rather than being represented by nonfunctional controls.
+independent sources of truth. Both native surfaces mutate production document
+contracts and share persistence, conflict detection, validation, and undo.
 
 `AuthoringWorkspaceState` now owns transient state separately for every open
 document: graph pan/zoom, graph selection, canonical structured-text baseline,
 and the live text draft. Clean drafts automatically follow graph and undo/redo
 changes. Dirty drafts are retained, and an external graph change raises an
 explicit conflict instead of silently discarding text or applying it over a
-newer document. This state is UI-backend-neutral so styled ImGui and a future
-Flutter shell can share identical conflict and tab-switch behavior.
+newer document. This state is UI-backend-neutral so styled ImGui and the future
+native KairoUI shell can share identical conflict and tab-switch behavior.
 
 ## Build and run
 
