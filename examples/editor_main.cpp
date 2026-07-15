@@ -91,12 +91,15 @@ int main(int argc, char** argv)
         kairo::editor::EditorState state(project.Scene());
         if (const auto entities = project.Scene().Entities(); !entities.empty()) state.Select(entities.front());
         kairo::editor::RenderAssetBindings renderAssets(project.Assets());
+        kairo::assets::ImportDatabase meshImports;
+        const kairo::assets::DerivedDataCache derivedCache(
+            project.ProjectRoot() / ".kairo" / "derived-data");
         for (const auto& asset : project.Assets().Snapshot())
         {
             if (asset.Type != kairo::assets::AssetType::Mesh) continue;
-            if (asset.Origin != kairo::assets::AssetOrigin::Builtin || asset.Path != "builtin/cube")
-                throw std::runtime_error("KairoEditor has no runtime mesh importer for asset: " + asset.Path.generic_string());
-            renderAssets.BindMesh({ asset.ID }, renderer.CreateMesh(kairo::renderer::Mesh::MakeCube()));
+            auto imported = kairo::editor::ImportRenderMesh(
+                project.ProjectRoot(), { asset.ID }, project.Assets(), meshImports, derivedCache);
+            renderAssets.BindMesh({ asset.ID }, renderer.CreateMesh(imported.Geometry));
         }
         const std::filesystem::path layoutFile = options.PersistLayout
             ? project.ProjectRoot() / ".kairo" / "editor-layout.ini" : std::filesystem::path{};

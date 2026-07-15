@@ -1,17 +1,67 @@
 module;
 
+#include <filesystem>
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
+#include <utility>
 
 export module Kairo.Editor.SceneRenderBridge;
 
 import Kairo.EngineCore;
+import Kairo.Assets;
 import Kairo.Foundation.Math;
 import Kairo.Renderer;
 
 export namespace kairo::editor
 {
+    /// Complete CPU-side result of preparing one source mesh for rendering.
+    /// The cache identity and hit flag are retained for editor diagnostics;
+    /// Geometry remains renderer-neutral until RendererRuntime uploads it.
+    struct RenderMeshImport final
+    {
+        kairo::renderer::Mesh Geometry;
+        kairo::assets::DerivedDataKey CacheKey;
+        bool CacheHit = false;
+    };
+
+    /// Input: project root, registered source mesh, mutable import provenance,
+    /// and the project's content-addressed derived-data cache.
+    /// Output: validated renderer geometry plus reproducibility diagnostics.
+    /// Task: execute the existing KairoAssets OBJ transaction and adapt its
+    /// portable mesh artifact at the KairoRenderer boundary. No source parser,
+    /// cache format, or GPU resource lifetime is duplicated in the editor.
+    /// Degeneracy: builtin/generated assets and unsupported importer identities
+    /// fail explicitly; malformed OBJ diagnostics preserve source line/column.
+    [[nodiscard]] inline RenderMeshImport ImportRenderMesh(
+        const std::filesystem::path& projectRoot,
+        kairo::assets::MeshAssetHandle asset,
+        const kairo::assets::AssetRegistry& registry,
+        kairo::assets::ImportDatabase& imports,
+        const kairo::assets::DerivedDataCache& cache)
+    {
+        const kairo::assets::AssetMetadata metadata = registry.Resolve(asset);
+        if (metadata.Origin != kairo::assets::AssetOrigin::SourceFile)
+            throw std::invalid_argument("Render mesh import requires a source-file asset.");
+        kairo::assets::OBJMeshImporter importer;
+        if (metadata.Importer != importer.Identifier())
+            throw std::invalid_argument("Unsupported render mesh importer: " + metadata.Importer);
+
+        kairo::assets::ImportRecord record{
+            metadata.ID,
+            metadata.Path,
+            importer.Identifier(),
+            importer.Version(),
+            {},
+            {},
+            1u
+        };
+        auto outcome = kairo::assets::ImportSourceAsset(
+            projectRoot, std::move(record), importer, registry, imports, cache);
+        auto mesh = kairo::assets::ParseMeshDerivedArtifact(outcome.Artifact);
+        return { kairo::renderer::Mesh::FromArtifact(mesh), outcome.Key, outcome.CacheHit };
+    }
+
     /// Maps registered persistent mesh assets to renderer-owned GPU handles.
     ///
     /// Input: a live project registry and valid handles created by

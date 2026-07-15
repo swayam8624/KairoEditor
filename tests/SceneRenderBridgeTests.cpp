@@ -1,4 +1,8 @@
 #include <catch2/catch_test_macros.hpp>
+#include <cstdint>
+#include <filesystem>
+#include <fstream>
+#include <vector>
 
 import Kairo.Editor.SceneRenderBridge;
 import Kairo.EngineCore;
@@ -59,4 +63,44 @@ TEST_CASE("Render asset bindings reject ambiguous and missing assets", "[KairoEd
     const auto missing = kairo::assets::AssetID::Parse("00000000-0000-4000-8000-000000000299");
     scene.SetMeshRenderer(entity, { { missing }, { MaterialID }, true });
     REQUIRE_THROWS_AS(BuildRenderScene(scene, assets), std::out_of_range);
+}
+
+TEST_CASE("Source OBJ meshes import through shared assets into renderer geometry", "[KairoEditor][RenderBridge][Import]")
+{
+    const auto root = std::filesystem::temp_directory_path() /
+        ("kairo-editor-mesh-import-" + kairo::assets::GenerateAssetID().ToString());
+    std::filesystem::create_directories(root / "Meshes");
+    struct Cleanup final
+    {
+        std::filesystem::path Root;
+        ~Cleanup() { std::error_code error; std::filesystem::remove_all(Root, error); }
+    } cleanup{ root };
+    {
+        std::ofstream source(root / "Meshes" / "Triangle.obj");
+        REQUIRE(source.good());
+        source << "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n";
+    }
+
+    kairo::assets::AssetRegistry registry;
+    registry.Insert({ MeshID, kairo::assets::AssetType::Mesh,
+        kairo::assets::AssetOrigin::SourceFile, "Meshes/Triangle.obj", "kairo.obj", 1u, {} });
+    kairo::assets::ImportDatabase imports;
+    const kairo::assets::DerivedDataCache cache(root / ".kairo" / "derived-data");
+
+    const auto first = ImportRenderMesh(root, { MeshID }, registry, imports, cache);
+    REQUIRE(first.Geometry.Vertices().size() == 3u);
+    CHECK(first.Geometry.Indices() == std::vector<std::uint32_t>{ 0u, 1u, 2u });
+    CHECK_FALSE(first.CacheHit);
+    CHECK(cache.Contains(first.CacheKey));
+
+    const auto second = ImportRenderMesh(root, { MeshID }, registry, imports, cache);
+    CHECK(second.CacheHit);
+    CHECK(second.CacheKey == first.CacheKey);
+    CHECK(second.Geometry.Vertices().size() == first.Geometry.Vertices().size());
+
+    kairo::assets::AssetRegistry unsupportedRegistry;
+    unsupportedRegistry.Insert({ MeshID, kairo::assets::AssetType::Mesh,
+        kairo::assets::AssetOrigin::SourceFile, "Meshes/Triangle.obj", "kairo.unknown", 1u, {} });
+    REQUIRE_THROWS_AS(ImportRenderMesh(
+        root, { MeshID }, unsupportedRegistry, imports, cache), std::invalid_argument);
 }

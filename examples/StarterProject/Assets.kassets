@@ -1,5 +1,5 @@
 kairo-assets 1
-asset 00000000-0000-4000-8000-000000000201 mesh builtin 1 "builtin/cube" "kairo.builtin"
+asset 00000000-0000-4000-8000-000000000201 mesh source 1 "Meshes/ShowcaseCube.obj" "kairo.obj"
 end
 asset 00000000-0000-4000-8000-000000000202 material builtin 1 "builtin/default-material" "kairo.builtin"
 end
