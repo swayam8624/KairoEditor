@@ -17,6 +17,7 @@ module;
 export module Kairo.Editor.ProjectDescriptor;
 
 import Kairo.Assets;
+import Kairo.Editor.TextValidation;
 
 export namespace kairo::editor
 {
@@ -54,51 +55,9 @@ export namespace kairo::editor
             std::size_t Column = 1u;
         };
 
-        /// Task: reject malformed UTF-8 before project names reach platform UI,
-        /// logs, title bars, or path-independent serialization.
-        [[nodiscard]] inline bool IsValidUtf8(std::string_view text) noexcept
-        {
-            std::size_t index = 0u;
-            while (index < text.size())
-            {
-                const auto first = static_cast<unsigned char>(text[index]);
-                if (first <= 0x7fu)
-                {
-                    ++index;
-                    continue;
-                }
-
-                std::size_t continuationCount = 0u;
-                std::uint32_t value = 0u;
-                if ((first & 0xe0u) == 0xc0u) { continuationCount = 1u; value = first & 0x1fu; }
-                else if ((first & 0xf0u) == 0xe0u) { continuationCount = 2u; value = first & 0x0fu; }
-                else if ((first & 0xf8u) == 0xf0u) { continuationCount = 3u; value = first & 0x07u; }
-                else return false;
-
-                if (index + continuationCount >= text.size()) return false;
-                for (std::size_t offset = 1u; offset <= continuationCount; ++offset)
-                {
-                    const auto continuation = static_cast<unsigned char>(text[index + offset]);
-                    if ((continuation & 0xc0u) != 0x80u) return false;
-                    value = (value << 6u) | (continuation & 0x3fu);
-                }
-
-                const bool overlong = (continuationCount == 1u && value < 0x80u) ||
-                    (continuationCount == 2u && value < 0x800u) ||
-                    (continuationCount == 3u && value < 0x10000u);
-                if (overlong || value > 0x10ffffu || (value >= 0xd800u && value <= 0xdfffu)) return false;
-                index += continuationCount + 1u;
-            }
-            return true;
-        }
-
         inline void ValidateProjectName(std::string_view name)
         {
-            if (name.empty() || name.size() > MaxProjectNameBytes)
-                throw std::invalid_argument("Project name must contain 1 to 256 UTF-8 bytes.");
-            if (!IsValidUtf8(name)) throw std::invalid_argument("Project name is not valid UTF-8.");
-            for (const unsigned char byte : name)
-                if (byte < 0x20u || byte == 0x7fu) throw std::invalid_argument("Project name contains a control character.");
+            ValidateUtf8Text(name, { 1u, MaxProjectNameBytes, false, false }, "Project name");
         }
 
         [[nodiscard]] inline std::filesystem::path ParsePortablePath(

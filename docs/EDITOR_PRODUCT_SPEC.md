@@ -130,14 +130,15 @@ Implemented and verified:
 - validated project descriptors, dirty/save lifecycle, and registry-backed
   Content Browser metadata;
 - bounded command history with reversible hierarchy and Inspector edits;
-- project-scoped dock layout persistence and a live scene/status summary.
+- project-scoped dock layout persistence and a live scene/status summary;
+- shared UTF-8/value boundaries and a deterministic typed node-schema registry.
 
 Not yet represented as complete product surfaces:
 
 - native project create/open/save-as dialogs and recent documents;
 - asset importing, thumbnails, dependency inspection, and source reimport state;
 - shared diagnostics and reflected property transactions beyond current scene commands;
-- the typed document kernel and production graph/code editors;
+- the complete typed document kernel and production graph/code editors;
 - timelines, curves, sequencer, audio tools, profilers, and large-world controls.
 
 Until those systems land, their dockable panels are shell boundaries, not

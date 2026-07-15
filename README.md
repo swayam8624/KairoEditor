@@ -92,6 +92,20 @@ on undo. Commands retain a `ProjectSession` reference, so a host must clear its
 history before replacing or closing that session; the native host currently
 opens one project for its process lifetime.
 
+## Typed document foundation
+
+The backend-neutral authoring kernel now defines strongly separated node and
+pin identities, bounded validated UTF-8 text, finite typed values, and an
+immutable deterministic node-schema registry. Structured document values cover
+flow, booleans, signed integers, floats, vectors, strings, and persistent Kairo
+asset IDs. Schema registration rejects duplicate or malformed type/pin keys,
+invalid defaults, illegal required outputs, and ambiguous pin contracts before
+they can enter an authored graph.
+
+This is the first layer of the graph/code system, not a claim that the visual
+node canvas is complete. Graph mutation, diagnostics, canonical persistence,
+commands, and compiler projection land before the UI can create real nodes.
+
 Code, Graph, and Split are views over one future authored-document model, not
 independent sources of truth. The current shell exposes the workspace and panel
 contracts without pretending that the typed graph compiler already exists.

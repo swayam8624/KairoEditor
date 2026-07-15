@@ -1,15 +1,96 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <filesystem>
+#include <limits>
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
 
 import Kairo.Editor;
 import Kairo.EngineCore;
 import Kairo.Foundation.Math;
 
 using namespace kairo::editor;
+
+static_assert(!std::is_same_v<NodeID, PinID>);
+
+TEST_CASE("Document text and values enforce persistent data boundaries", "[KairoEditor][Document][Types]")
+{
+    CHECK(IsValidUtf8("Kairo \xE2\x9C\x93"));
+    CHECK_FALSE(IsValidUtf8(std::string("\xC0\xAF", 2u)));
+    CHECK_FALSE(IsValidUtf8(std::string("\xED\xA0\x80", 3u)));
+    REQUIRE_NOTHROW(ValidateUtf8Text("line one\nline two", { 1u, 64u, true, false }, "test text"));
+    REQUIRE_THROWS_AS(ValidateUtf8Text("line one\nline two", { 1u, 64u, false, false }, "test text"),
+        std::invalid_argument);
+
+    CHECK(DocumentValue{}.Type() == ValueType::Flow);
+    CHECK(DocumentValue(true).Get<bool>());
+    CHECK(DocumentValue(std::int64_t{ 42 }).Get<std::int64_t>() == 42);
+    CHECK(DocumentValue(kairo::foundation::math::Vec3d{ 1.0, 2.0, 3.0 }).Type() == ValueType::Vector3);
+    REQUIRE_THROWS_AS(DocumentValue(std::numeric_limits<double>::infinity()), std::invalid_argument);
+    REQUIRE_THROWS_AS(DocumentValue(std::string("bad\xC0", 4u)), std::invalid_argument);
+    REQUIRE_THROWS_AS(DocumentValue(kairo::assets::AssetID{}), std::invalid_argument);
+    REQUIRE_THROWS_AS(DocumentValue(1.0).Get<bool>(), std::logic_error);
+
+    const NodeID node{ 7u };
+    const PinID pin{ 7u };
+    CHECK(static_cast<bool>(node));
+    CHECK(static_cast<bool>(pin));
+    CHECK(StableLocalIDHash<NodeIDTag>{}(node) == StableLocalIDHash<PinIDTag>{}(pin));
+}
+
+TEST_CASE("Document schema registry validates and orders node contracts", "[KairoEditor][Document][Schema]")
+{
+    NodeSchema add;
+    add.Kind = DocumentKind::Logic;
+    add.TypeKey = "kairo.logic.add-float";
+    add.DisplayName = "Add Float";
+    add.Category = "Math";
+    add.Pins = {
+        { "a", "A", PinDirection::Input, ValueType::Float, PinCardinality::Single, false, DocumentValue(0.0) },
+        { "b", "B", PinDirection::Input, ValueType::Float, PinCardinality::Single, false, DocumentValue(0.0) },
+        { "result", "Result", PinDirection::Output, ValueType::Float, PinCardinality::Multiple, false, std::nullopt }
+    };
+    add.PropertyDefaults.emplace("clamp", DocumentValue(false));
+
+    NodeSchema print;
+    print.Kind = DocumentKind::Logic;
+    print.TypeKey = "kairo.logic.print";
+    print.DisplayName = "Print";
+    print.Category = "Debug";
+    print.Pins = {
+        { "in", "In", PinDirection::Input, ValueType::Flow, PinCardinality::Single, true, std::nullopt },
+        { "out", "Out", PinDirection::Output, ValueType::Flow, PinCardinality::Multiple, false, std::nullopt },
+        { "message", "Message", PinDirection::Input, ValueType::String, PinCardinality::Single,
+            false, DocumentValue(std::string{}) }
+    };
+
+    DocumentSchemaRegistry registry;
+    registry.Register(print);
+    registry.Register(add);
+    CHECK(registry.Size() == 2u);
+    CHECK(registry.Require(add.TypeKey) == add);
+    const auto schemas = registry.Snapshot(DocumentKind::Logic);
+    REQUIRE(schemas.size() == 2u);
+    CHECK(schemas[0].TypeKey == "kairo.logic.add-float");
+    CHECK(schemas[1].TypeKey == "kairo.logic.print");
+    REQUIRE_THROWS_AS(registry.Register(add), std::invalid_argument);
+    REQUIRE_THROWS_AS(registry.Require("missing"), std::out_of_range);
+
+    NodeSchema duplicatePins = add;
+    duplicatePins.TypeKey = "kairo.logic.invalid-duplicate";
+    duplicatePins.Pins[1].Key = duplicatePins.Pins[0].Key;
+    REQUIRE_THROWS_AS(ValidateNodeSchema(duplicatePins), std::invalid_argument);
+
+    NodeSchema mismatchedDefault = add;
+    mismatchedDefault.TypeKey = "kairo.logic.invalid-default";
+    mismatchedDefault.Pins[0].DefaultValue = DocumentValue(true);
+    REQUIRE_THROWS_AS(ValidateNodeSchema(mismatchedDefault), std::invalid_argument);
+    CHECK_FALSE(IsSchemaKey(".leading", true));
+    CHECK_FALSE(IsSchemaKey("double..segment", true));
+    CHECK_FALSE(IsSchemaKey("9invalid", false));
+}
 
 namespace
 {
