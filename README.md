@@ -27,6 +27,8 @@ The current foundation provides a tested, backend-neutral editor state model:
 The visual direction is viewport-first and production-dense: low-chrome dark
 panels, a strong central canvas, rich inspectable nodes, timeline/curve tools,
 and focused workspace presets. See [docs/EDITOR_PRODUCT_SPEC.md](docs/EDITOR_PRODUCT_SPEC.md).
+The current and future UI ownership boundaries are recorded in
+[docs/UI_ARCHITECTURE.md](docs/UI_ARCHITECTURE.md).
 
 `KairoEditorApp` is the first native shell milestone. It uses the official
 Dear ImGui docking release, KairoRenderer's existing Vulkan device/render pass,
