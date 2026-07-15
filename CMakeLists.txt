@@ -77,6 +77,11 @@ if(KAIRO_EDITOR_BUILD_APP)
     target_sources(KairoEditorImGui PUBLIC FILE_SET CXX_MODULES BASE_DIRS ${CMAKE_CURRENT_SOURCE_DIR} FILES
         EditorTheme.cppm ImGuiRuntime.cppm EditorShell.cppm)
     target_link_libraries(KairoEditorImGui PUBLIC KairoEditor KairoRenderer KairoDearImGui)
+
+    add_library(KairoEditorRendererBridge)
+    target_sources(KairoEditorRendererBridge PUBLIC FILE_SET CXX_MODULES BASE_DIRS ${CMAKE_CURRENT_SOURCE_DIR} FILES
+        SceneRenderBridge.cppm)
+    target_link_libraries(KairoEditorRendererBridge PUBLIC KairoEditor KairoRenderer)
     if(APPLE)
         target_compile_definitions(KairoEditorImGui PRIVATE
             KAIRO_EDITOR_UI_FONT_PATH="/System/Library/Fonts/SFNS.ttf"
@@ -84,7 +89,7 @@ if(KAIRO_EDITOR_BUILD_APP)
     endif()
 
     add_executable(KairoEditorApp examples/editor_main.cpp)
-    target_link_libraries(KairoEditorApp PRIVATE KairoEditorImGui)
+    target_link_libraries(KairoEditorApp PRIVATE KairoEditorImGui KairoEditorRendererBridge)
 endif()
 
 if(KAIRO_EDITOR_BUILD_TESTS)
@@ -96,6 +101,9 @@ if(KAIRO_EDITOR_BUILD_TESTS)
     enable_testing()
     add_test(NAME KairoEditorTests COMMAND KairoEditorTests)
     if(TARGET KairoEditorApp)
+        add_executable(KairoEditorRenderBridgeTests tests/SceneRenderBridgeTests.cpp)
+        target_link_libraries(KairoEditorRenderBridgeTests PRIVATE KairoEditorRendererBridge Catch2::Catch2WithMain)
+        add_test(NAME KairoEditorRenderBridgeTests COMMAND KairoEditorRenderBridgeTests)
         add_test(NAME KairoEditorNativeSmoke COMMAND KairoEditorApp --frames 3)
         set_tests_properties(KairoEditorNativeSmoke PROPERTIES TIMEOUT 20)
     endif()

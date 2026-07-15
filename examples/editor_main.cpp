@@ -10,6 +10,7 @@ import Kairo.Editor;
 import Kairo.Editor.Theme;
 import Kairo.Editor.ImGuiRuntime;
 import Kairo.Editor.ImGuiShell;
+import Kairo.Editor.SceneRenderBridge;
 import Kairo.EngineCore;
 import Kairo.Renderer;
 
@@ -37,7 +38,14 @@ int main(int argc, char** argv)
         const auto frameLimit = ParseFrameLimit(argc, argv);
         kairo::renderer::RendererRuntime renderer({ "KairoEditor", 1600u, 1000u, true });
         kairo::engine::Scene scene;
+        const auto cube = scene.CreateEntity("Cube");
+        scene.SetMeshRenderer(cube, { "builtin:cube", "builtin:default", true });
+        scene.Transform(cube).Local.Scale = { 0.55f, 0.55f, 0.55f };
         kairo::editor::EditorState state(scene);
+        state.Select(cube);
+        const auto cubeMesh = renderer.CreateMesh(kairo::renderer::Mesh::MakeCube());
+        kairo::editor::RenderAssetBindings renderAssets;
+        renderAssets.BindMesh("builtin:cube", cubeMesh);
         kairo::editor::ImGuiRuntime imgui(renderer);
         kairo::editor::ApplyKairoEditorTheme();
         kairo::editor::EditorShell shell(state, scene);
@@ -49,6 +57,7 @@ int main(int argc, char** argv)
             imgui.BeginFrame();
             shell.Draw();
             imgui.EndFrame();
+            renderer.SubmitRenderScene(kairo::editor::BuildRenderScene(scene, renderAssets));
             renderer.DrawFrame();
             ++renderedFrames;
         }
