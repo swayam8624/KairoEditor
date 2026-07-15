@@ -10,6 +10,7 @@ module;
 #include <cstdio>
 #include <cstring>
 #include <exception>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -43,6 +44,7 @@ export namespace kairo::editor
     private:
         EditorState& m_State;
         ProjectSession& m_Project;
+        CommandHistory m_History;
         bool m_LayoutBuilt = false;
         std::array<char, 256> m_AssetFilter{};
         std::string m_LastError;
@@ -57,6 +59,18 @@ export namespace kairo::editor
                     RunCommand([this] { m_Project.SaveScene(); });
                 if (ImGui::MenuItem("Save All", "Cmd+Option+S", false, m_Project.HasProject()))
                     RunCommand([this] { m_Project.SaveAll(); });
+                ImGui::EndMenu();
+            }
+            if (ImGui::BeginMenu("Edit"))
+            {
+                const std::string undo = m_History.CanUndo()
+                    ? "Undo " + std::string(m_History.UndoName()) : "Undo";
+                const std::string redo = m_History.CanRedo()
+                    ? "Redo " + std::string(m_History.RedoName()) : "Redo";
+                if (ImGui::MenuItem(undo.c_str(), "Cmd+Z", false, m_History.CanUndo()))
+                    RunCommand([this] { m_History.Undo(); });
+                if (ImGui::MenuItem(redo.c_str(), "Cmd+Shift+Z", false, m_History.CanRedo()))
+                    RunCommand([this] { m_History.Redo(); });
                 ImGui::EndMenu();
             }
             if (ImGui::BeginMenu("View"))
@@ -96,6 +110,11 @@ export namespace kairo::editor
             if (m_Project.HasProject() &&
                 ImGui::Shortcut(ImGuiMod_Shortcut | ImGuiMod_Alt | ImGuiKey_S))
                 RunCommand([this] { m_Project.SaveAll(); });
+            if (m_History.CanRedo() &&
+                ImGui::Shortcut(ImGuiMod_Shortcut | ImGuiMod_Shift | ImGuiKey_Z))
+                RunCommand([this] { m_History.Redo(); });
+            else if (m_History.CanUndo() && ImGui::Shortcut(ImGuiMod_Shortcut | ImGuiKey_Z))
+                RunCommand([this] { m_History.Undo(); });
         }
 
         void DrawPlayControls()
@@ -153,7 +172,26 @@ export namespace kairo::editor
         {
             if (!ImGui::Begin("Hierarchy")) { ImGui::End(); return; }
             if (ImGui::Button("+ Entity"))
-                m_State.Select(m_Project.EditScene().CreateEntity("Entity"));
+            {
+                auto command = std::make_unique<CreateEntityCommand>(m_Project, "Entity");
+                auto* created = command.get();
+                RunCommand([this, &command] { m_History.Execute(std::move(command)); });
+                if (command == nullptr) m_State.Select(created->CreatedEntity());
+            }
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip("Create entity");
+            ImGui::SameLine();
+            const auto selectedEntity = m_State.SelectedEntity();
+            if (!selectedEntity.has_value()) ImGui::BeginDisabled();
+            if (ImGui::Button("- Entity") && selectedEntity.has_value())
+            {
+                RunCommand([this, entity = *selectedEntity]
+                {
+                    m_History.Execute(std::make_unique<DeleteEntityCommand>(m_Project, entity));
+                    m_State.ClearSelection();
+                });
+            }
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip("Delete selected entity");
+            if (!selectedEntity.has_value()) ImGui::EndDisabled();
             ImGui::Separator();
             const auto& scene = m_Project.Scene();
             for (const auto entity : scene.Entities())
@@ -179,13 +217,26 @@ export namespace kairo::editor
             std::array<char, 256> buffer{};
             std::snprintf(buffer.data(), buffer.size(), "%s", name.c_str());
             if (ImGui::InputText("Name", buffer.data(), buffer.size()))
-                m_Project.EditScene().Name(*selected).Value = buffer.data();
+            {
+                const std::string editedName(buffer.data());
+                if (editedName != name)
+                    RunCommand([this, entity = *selected, editedName]
+                    {
+                        m_History.Execute(std::make_unique<SetEntityNameCommand>(m_Project, entity, editedName));
+                    });
+            }
             auto transform = scene.Transform(*selected).Local;
             ImGui::SeparatorText("Transform");
             bool changed = ImGui::DragFloat3("Position", &transform.Translation.x, 0.05f);
             changed |= ImGui::DragFloat3("Scale", &transform.Scale.x, 0.02f, 0.001f, 1000.0f,
                 "%.3f", ImGuiSliderFlags_AlwaysClamp);
-            if (changed) m_Project.EditScene().Transform(*selected).Local = transform;
+            if (changed)
+            {
+                RunCommand([this, entity = *selected, transform]
+                {
+                    m_History.Execute(std::make_unique<SetEntityTransformCommand>(m_Project, entity, transform));
+                });
+            }
             ImGui::TextDisabled("Rotation is stored as a normalized quaternion.");
             ImGui::End();
         }

@@ -12,7 +12,7 @@ KairoMath -> KairoEngineCore -> KairoEditor
                            -> KairoPhysicsEngine (play-mode backend)
 ```
 
-The initial milestone provides a tested, backend-neutral editor state model:
+The current foundation provides a tested, backend-neutral editor state model:
 
 - validated entity selection and stale-selection recovery
 - edit, play, pause, resume, and stop state transitions
@@ -21,6 +21,8 @@ The initial milestone provides a tested, backend-neutral editor state model:
 - task-focused Scene, World, Logic, Materials, Animation, Simulation, Audio,
   and Profiling workspaces
 - Code, Graph, and synchronized Code + Graph authoring surfaces
+- bounded cross-surface command history with causal undo/redo branching
+- reversible entity creation, deletion, rename, and complete transform edits
 
 The visual direction is viewport-first and production-dense: low-chrome dark
 panels, a strong central canvas, rich inspectable nodes, timeline/curve tools,
@@ -67,6 +69,22 @@ The native File menu saves the active scene or all dirty project data, and
 `Cmd+S`/`Ctrl+S` saves the scene. This milestone accepts project paths through
 `--project`; native create/open dialogs will call the same session API rather
 than introducing another persistence path.
+
+## Commands and undo
+
+`CommandHistory` is independent from Dear ImGui and owns a bounded linear
+journal. A successful edit after undo removes the obsolete redo branch;
+continuous name and transform changes merge into one user operation. Failed
+command execution does not advance or truncate history. The native Edit menu
+shows the next command name and supports `Cmd/Ctrl+Z` and
+`Cmd/Ctrl+Shift+Z`.
+
+Hierarchy and Inspector edits use concrete scene commands. Entity deletion
+captures the stable entity ID, name, transform, mesh renderer, camera, rigid
+body binding, and collider binding, then restores that complete authored state
+on undo. Commands retain a `ProjectSession` reference, so a host must clear its
+history before replacing or closing that session; the native host currently
+opens one project for its process lifetime.
 
 Code, Graph, and Split are views over one future authored-document model, not
 independent sources of truth. The current shell exposes the workspace and panel

@@ -1,12 +1,66 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <filesystem>
+#include <memory>
+#include <stdexcept>
 #include <string>
 
 import Kairo.Editor;
 import Kairo.EngineCore;
+import Kairo.Foundation.Math;
 
 using namespace kairo::editor;
+
+namespace
+{
+    class IntegerCommand final : public EditorCommand
+    {
+    public:
+        IntegerCommand(int& value, int delta, bool fail = false)
+            : m_Value(&value), m_Delta(delta), m_Fail(fail) {}
+        [[nodiscard]] std::string_view Name() const noexcept override { return "Change Integer"; }
+        void Execute() override
+        {
+            if (m_Fail) throw std::runtime_error("deliberate command failure");
+            *m_Value += m_Delta;
+        }
+        void Undo() override { *m_Value -= m_Delta; }
+    private:
+        int* m_Value;
+        int m_Delta;
+        bool m_Fail;
+    };
+}
+
+TEST_CASE("Command history preserves causal branches and bounded storage", "[KairoEditor][Commands]")
+{
+    int value = 0;
+    CommandHistory history(2u);
+    history.Execute(std::make_unique<IntegerCommand>(value, 1));
+    history.Execute(std::make_unique<IntegerCommand>(value, 2));
+    CHECK(value == 3);
+    CHECK(history.UndoName() == "Change Integer");
+    history.Undo();
+    CHECK(value == 1);
+    REQUIRE(history.CanRedo());
+
+    history.Execute(std::make_unique<IntegerCommand>(value, 4));
+    CHECK(value == 5);
+    CHECK_FALSE(history.CanRedo());
+    history.Execute(std::make_unique<IntegerCommand>(value, 8));
+    CHECK(history.RetainedCount() == 2u);
+    CHECK(history.AppliedCount() == 2u);
+    history.Undo();
+    history.Undo();
+    CHECK(value == 1);
+    REQUIRE_THROWS_AS(history.Undo(), std::logic_error);
+
+    const auto retained = history.RetainedCount();
+    REQUIRE_THROWS_AS(history.Execute(std::make_unique<IntegerCommand>(value, 1, true)), std::runtime_error);
+    CHECK(history.RetainedCount() == retained);
+    CHECK(value == 1);
+    REQUIRE_THROWS_AS(CommandHistory(0u), std::invalid_argument);
+}
 
 TEST_CASE("Project descriptors round trip portable bootstrap state", "[KairoEditor][Project]")
 {
@@ -139,6 +193,70 @@ TEST_CASE("Failed project opens preserve the live session", "[KairoEditor][Proje
     CHECK(session.Scene().Contains(stable));
     CHECK_FALSE(session.HasUnsavedChanges());
     std::filesystem::remove_all(base);
+}
+
+TEST_CASE("Scene commands restore stable entities and merge Inspector edits", "[KairoEditor][Commands][Scene]")
+{
+    const auto root = std::filesystem::temp_directory_path() /
+        ("kairo-command-scene-" + kairo::assets::GenerateAssetID().ToString());
+    ProjectSession project;
+    project.CreateProject(root, "Command Scene");
+    CommandHistory history;
+
+    auto create = std::make_unique<CreateEntityCommand>(project, "Commanded");
+    auto* created = create.get();
+    history.Execute(std::move(create));
+    const auto entity = created->CreatedEntity();
+    REQUIRE(project.Scene().Contains(entity));
+    REQUIRE(project.IsSceneDirty());
+
+    history.Execute(std::make_unique<SetEntityNameCommand>(project, entity, "Commanded A"));
+    history.Execute(std::make_unique<SetEntityNameCommand>(project, entity, "Commanded Final"));
+    CHECK(history.AppliedCount() == 2u);
+    CHECK(project.Scene().Name(entity).Value == "Commanded Final");
+    history.Undo();
+    CHECK(project.Scene().Name(entity).Value == "Commanded");
+    history.Redo();
+    CHECK(project.Scene().Name(entity).Value == "Commanded Final");
+
+    auto firstTransform = project.Scene().Transform(entity).Local;
+    firstTransform.Translation = { 1.0f, 2.0f, 3.0f };
+    history.Execute(std::make_unique<SetEntityTransformCommand>(project, entity, firstTransform));
+    auto finalTransform = firstTransform;
+    finalTransform.Scale = { 2.0f, 3.0f, 4.0f };
+    history.Execute(std::make_unique<SetEntityTransformCommand>(project, entity, finalTransform));
+    CHECK(history.AppliedCount() == 3u);
+    CHECK(project.Scene().Transform(entity).Local == finalTransform);
+    history.Undo();
+    CHECK(project.Scene().Transform(entity).Local.Translation == kairo::foundation::math::Vec3f{});
+    history.Redo();
+
+    const auto mesh = kairo::assets::AssetID::Parse("00000000-0000-4000-8000-000000000401");
+    const auto material = kairo::assets::AssetID::Parse("00000000-0000-4000-8000-000000000402");
+    auto& authoredScene = project.EditScene();
+    authoredScene.SetMeshRenderer(entity, { { mesh }, { material }, false });
+    authoredScene.SetCamera(entity, { 0.9f, 0.2f, 500.0f, true });
+    authoredScene.SetRigidBody(entity, { 17u });
+    authoredScene.SetCollider(entity, { 23u });
+
+    history.Execute(std::make_unique<DeleteEntityCommand>(project, entity));
+    CHECK_FALSE(project.Scene().Contains(entity));
+    history.Undo();
+    REQUIRE(project.Scene().Contains(entity));
+    CHECK(project.Scene().Name(entity).Value == "Commanded Final");
+    CHECK(project.Scene().Transform(entity).Local == finalTransform);
+    CHECK(project.Scene().MeshRenderer(entity).MeshAsset.ID == mesh);
+    CHECK(project.Scene().MeshRenderer(entity).MaterialAsset.ID == material);
+    CHECK_FALSE(project.Scene().MeshRenderer(entity).Visible);
+    CHECK(project.Scene().Camera(entity).NearPlane == 0.2f);
+    CHECK(project.Scene().RigidBody(entity).Body == 17u);
+    CHECK(project.Scene().Collider(entity).Collider == 23u);
+    history.Redo();
+    CHECK_FALSE(project.Scene().Contains(entity));
+
+    history.Clear();
+    project.Close(UnsavedChangesPolicy::Discard);
+    std::filesystem::remove_all(root);
 }
 
 TEST_CASE("Editor state validates scene selection and play transitions", "[KairoEditor][State]")

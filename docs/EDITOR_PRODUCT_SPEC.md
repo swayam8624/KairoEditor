@@ -126,13 +126,16 @@ Implemented and verified:
 - real scene hierarchy, selection, transform inspection, play-state controls,
   and renderer scene extraction;
 - persistent typed asset IDs resolved through `KairoAssets` rather than paths;
-- deterministic EngineCore scene persistence with stable entity IDs.
+- deterministic EngineCore scene persistence with stable entity IDs;
+- validated project descriptors, dirty/save lifecycle, and registry-backed
+  Content Browser metadata;
+- bounded command history with reversible hierarchy and Inspector edits.
 
 Not yet represented as complete product surfaces:
 
-- project open/save/save-as flow, dirty state, recent documents, and layout files;
-- content browsing backed by registry metadata and importer state;
-- shared diagnostics, command routing, undo/redo, and property reflection;
+- native project create/open/save-as dialogs, recent documents, and layout files;
+- asset importing, thumbnails, dependency inspection, and source reimport state;
+- shared diagnostics and reflected property transactions beyond current scene commands;
 - the typed document kernel and production graph/code editors;
 - timelines, curves, sequencer, audio tools, profilers, and large-world controls.
 
@@ -141,8 +144,8 @@ finished features.
 
 ## Delivery Order
 
-1. Project session: scene open/save/save-as, dirty state, registry-backed content
-   browser, shared diagnostics, commands, undo/redo, and persisted layouts.
+1. Finish project tooling: native create/open/save-as dialogs, recent projects,
+   shared diagnostics, reflected property commands, and persisted layouts.
 2. Scene viewport selection, transform gizmos, runtime scene cloning, and physics
    debug overlays.
 3. Typed document kernel: stable document/node/pin IDs, values, commands,
