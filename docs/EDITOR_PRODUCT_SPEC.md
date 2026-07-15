@@ -139,13 +139,16 @@ Implemented and verified:
 - bounded command history with reversible hierarchy and Inspector edits;
 - project-scoped dock layout persistence and a live scene/status summary;
 - shared UTF-8/value boundaries and a deterministic typed node-schema registry;
-- bounded deterministic graph topology with stable IDs and located validation.
+- bounded deterministic graph topology with stable IDs and located validation;
 - canonical, bounded, self-describing authoring-document persistence with
-  atomic replacement and missing-schema preservation.
+  atomic replacement and missing-schema preservation;
 - reversible document topology and value commands in the editor-wide bounded
-  command journal, including merged continuous edits and stable-ID restoration.
+  command journal, including merged continuous edits and stable-ID restoration;
 - a validation-gated domain compiler interface with checked diagnostics and
-  bounded identity-bearing artifacts; no placeholder execution semantics.
+  bounded identity-bearing artifacts; no placeholder execution semantics;
+- a project-bound multi-document workspace with stable asset identity,
+  portable path uniqueness, explicit dirty/overwrite policy, atomic file
+  replacement, and safe command-reference lifetime boundaries.
 
 Not yet represented as complete product surfaces:
 

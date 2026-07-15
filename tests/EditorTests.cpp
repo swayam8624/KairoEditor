@@ -526,6 +526,76 @@ TEST_CASE("Document compiler boundary gates invalid input and backend contracts"
         &DocumentDiagnostic::Code) != contractFailure.Diagnostics.end());
 }
 
+TEST_CASE("Project document workspace owns safe multi-document disk lifecycle",
+    "[KairoEditor][Document][Project]")
+{
+    const auto root = std::filesystem::temp_directory_path() /
+        ("kairo-document-workspace-" + kairo::assets::GenerateAssetID().ToString());
+    std::filesystem::create_directories(root);
+    const auto firstID = kairo::assets::AssetID::Parse("00000000-0000-4000-8000-000000000508");
+    const auto secondID = kairo::assets::AssetID::Parse("00000000-0000-4000-8000-000000000509");
+
+    ProjectDocuments workspace(root);
+    workspace.Create(firstID, DocumentKind::Logic, "Player Logic", "Logic/Player.kdoc");
+    REQUIRE(workspace.ActiveID().has_value());
+    CHECK(*workspace.ActiveID() == firstID);
+    CHECK(workspace.IsDirty(firstID));
+    CHECK(workspace.Snapshot().front().Active);
+
+    AuthoringDocument& first = workspace.Edit(firstID);
+    auto add = std::make_unique<AddDocumentNodeCommand>(first, MakeAddFloatSchema());
+    workspace.History().Execute(std::move(add));
+    REQUIRE(workspace.History().CanUndo());
+    workspace.Save(firstID);
+    CHECK_FALSE(workspace.IsDirty(firstID));
+    CHECK(std::filesystem::is_regular_file(root / "Logic/Player.kdoc"));
+
+    workspace.Create(secondID, DocumentKind::Material, "Surface", "Materials/Surface.kdoc");
+    workspace.Save(secondID);
+    REQUIRE_THROWS_AS(workspace.Create(kairo::assets::GenerateAssetID(), DocumentKind::Logic,
+        "Case Collision", "logic/PLAYER.kdoc"), std::invalid_argument);
+    REQUIRE_THROWS_AS(workspace.Create(firstID, DocumentKind::Logic,
+        "Duplicate ID", "Logic/Duplicate.kdoc"), std::invalid_argument);
+    REQUIRE_THROWS_AS(workspace.SaveAs(firstID, "Materials/Surface.kdoc"), std::invalid_argument);
+
+    workspace.SaveAs(firstID, "Logic/PlayerRenamed.kdoc");
+    CHECK(workspace.RelativePath(firstID) == std::filesystem::path("Logic/PlayerRenamed.kdoc"));
+    CHECK(std::filesystem::is_regular_file(root / "Logic/PlayerRenamed.kdoc"));
+
+    workspace.Edit(firstID).Rename("Unsaved Player Logic");
+    REQUIRE_THROWS_AS(workspace.Close(firstID), std::logic_error);
+    CHECK(workspace.Contains(firstID));
+    workspace.Close(firstID, UnsavedChangesPolicy::Discard);
+    CHECK_FALSE(workspace.Contains(firstID));
+    CHECK_FALSE(workspace.History().CanUndo());
+
+    ProjectDocuments reopened(root);
+    CHECK(reopened.Open("Logic/PlayerRenamed.kdoc", firstID) == firstID);
+    CHECK(reopened.Open("Logic/PlayerRenamed.kdoc", firstID) == firstID);
+    CHECK(reopened.Count() == 1u);
+    CHECK_FALSE(reopened.IsDirty(firstID));
+    REQUIRE_THROWS_AS(reopened.Open("Materials/Surface.kdoc", firstID), std::invalid_argument);
+    CHECK(reopened.Count() == 1u);
+    CHECK(reopened.Open("Materials/Surface.kdoc", secondID) == secondID);
+    CHECK(reopened.Count() == 2u);
+
+    std::filesystem::create_directories(root / "Broken");
+    {
+        std::ofstream malformed(root / "Broken/Invalid.kdoc", std::ios::binary);
+        malformed << "not-a-kairo-document\n";
+    }
+    const auto activeBeforeFailure = reopened.ActiveID();
+    REQUIRE_THROWS_AS(reopened.Open("Broken/Invalid.kdoc"), DocumentFormatError);
+    CHECK(reopened.Count() == 2u);
+    CHECK(reopened.ActiveID() == activeBeforeFailure);
+    REQUIRE_THROWS(reopened.Open("../Outside.kdoc"));
+    REQUIRE_THROWS(reopened.Open("Logic/Player.txt"));
+
+    reopened.CloseAll();
+    CHECK(reopened.Empty());
+    std::filesystem::remove_all(root);
+}
+
 TEST_CASE("Command history preserves causal branches and bounded storage", "[KairoEditor][Commands]")
 {
     int value = 0;

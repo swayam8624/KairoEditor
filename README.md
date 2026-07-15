@@ -134,9 +134,17 @@ diagnostic references, diagnostic text, and artifact size are validated before
 an identity-bearing artifact can enter build or play; failures remain editor
 diagnostics rather than partially published output.
 
-Code, Graph, and Split are views over one future authored-document model, not
-independent sources of truth. The current shell exposes the workspace and panel
-contracts without pretending that the typed graph compiler already exists.
+`ProjectDocuments` owns multiple open `.kdoc` files against one canonical
+project root. It enforces persistent-ID and portable case-insensitive path
+uniqueness, bounded tab counts, explicit dirty state, validated reopen,
+non-destructive create, atomic save/save-as, explicit replacement policy, and
+strong failure behavior. Closing a document clears the shared document command
+journal before referenced object lifetimes end.
+
+Code, Graph, and Split are views over the same authored-document model, not
+independent sources of truth. The current shell exposes workspace and panel
+contracts, while the production graph/text projections remain the next UI
+surface rather than being represented by nonfunctional controls.
 
 ## Build and run
 
