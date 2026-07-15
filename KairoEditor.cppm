@@ -7,6 +7,7 @@ export import Kairo.Editor.DocumentSchema;
 export import Kairo.Editor.AuthoringDocument;
 export import Kairo.Editor.DocumentValidation;
 export import Kairo.Editor.DocumentSerialization;
+export import Kairo.Editor.DocumentCommands;
 export import Kairo.Editor.ProjectDescriptor;
 export import Kairo.Editor.ProjectSession;
 export import Kairo.Editor.CommandHistory;

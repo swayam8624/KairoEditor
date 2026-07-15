@@ -142,6 +142,8 @@ Implemented and verified:
 - bounded deterministic graph topology with stable IDs and located validation.
 - canonical, bounded, self-describing authoring-document persistence with
   atomic replacement and missing-schema preservation.
+- reversible document topology and value commands in the editor-wide bounded
+  command journal, including merged continuous edits and stable-ID restoration.
 
 Not yet represented as complete product surfaces:
 

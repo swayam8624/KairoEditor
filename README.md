@@ -121,6 +121,12 @@ This is not a claim that the visual node canvas is complete. Reversible
 document commands and compiler projection land before the UI can create real
 nodes.
 
+Document changes now use the same bounded `CommandHistory` as hierarchy and
+Inspector edits. Node create/delete, edge connect/disconnect, movement,
+properties, defaults, and rename operations retain stable IDs and complete
+incident topology. Continuous drags and value entry coalesce into one causal
+undo step.
+
 Code, Graph, and Split are views over one future authored-document model, not
 independent sources of truth. The current shell exposes the workspace and panel
 contracts without pretending that the typed graph compiler already exists.

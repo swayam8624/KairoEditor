@@ -145,6 +145,23 @@ export namespace kairo::editor
             return { m_Connections.begin(), m_Connections.end() };
         }
 
+        /// Output: deterministic connection snapshot touching any pin owned by
+        /// the node. Task: support complete undo/delete snapshots without
+        /// exposing mutable topology containers to UI code.
+        [[nodiscard]] std::vector<DocumentConnection> ConnectionsForNode(NodeID id) const
+        {
+            const DocumentNode& node = Node(id);
+            std::set<PinID> pins;
+            for (const DocumentPin& pin : node.Pins) pins.insert(pin.ID);
+            std::vector<DocumentConnection> result;
+            for (const DocumentConnection& connection : m_Connections)
+            {
+                if (pins.contains(connection.Output) || pins.contains(connection.Input))
+                    result.push_back(connection);
+            }
+            return result;
+        }
+
         [[nodiscard]] NodeID AddNode(const NodeSchema& schema, CanvasPosition position = {})
         {
             const NodeID id{ m_NextNode };

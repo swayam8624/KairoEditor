@@ -362,6 +362,82 @@ TEST_CASE("Authoring document parser reports precise structural failures",
         "node 1 plugin.test 0 0\n", 6u, 1u);
 }
 
+TEST_CASE("Document commands preserve identity topology and merged edit intent",
+    "[KairoEditor][Document][Commands]")
+{
+    const auto documentID = kairo::assets::AssetID::Parse("00000000-0000-4000-8000-000000000506");
+    const NodeSchema add = MakeAddFloatSchema();
+    AuthoringDocument document(documentID, DocumentKind::Logic, "Command Graph");
+    CommandHistory structural;
+
+    auto create = std::make_unique<AddDocumentNodeCommand>(document, add, CanvasPosition{ 10.0, 20.0 });
+    auto* createResult = create.get();
+    structural.Execute(std::move(create));
+    const NodeID first = createResult->CreatedNode();
+    const std::vector<PinID> firstPins = {
+        document.Node(first).Pins[0].ID, document.Node(first).Pins[1].ID, document.Node(first).Pins[2].ID };
+    structural.Undo();
+    CHECK_FALSE(document.Contains(first));
+    structural.Redo();
+    CHECK(document.Contains(first));
+    CHECK(document.Node(first).Pins[0].ID == firstPins[0]);
+
+    const NodeID second = document.AddNode(add, { 300.0, 20.0 });
+    const PinID secondInput = document.Node(second).Pins[0].ID;
+    structural.Execute(std::make_unique<ConnectDocumentPinsCommand>(document, firstPins[2], secondInput));
+    REQUIRE(document.IsConnected(secondInput));
+    structural.Execute(std::make_unique<DisconnectDocumentPinsCommand>(document, firstPins[2], secondInput));
+    CHECK_FALSE(document.IsConnected(secondInput));
+    structural.Undo();
+    REQUIRE(document.IsConnected(secondInput));
+    structural.Execute(std::make_unique<RemoveDocumentNodeCommand>(document, first));
+    CHECK_FALSE(document.Contains(first));
+    CHECK_FALSE(document.IsConnected(secondInput));
+    structural.Undo();
+    CHECK(document.Contains(first));
+    CHECK(document.IsConnected(secondInput));
+    structural.Redo();
+    CHECK_FALSE(document.Contains(first));
+    structural.Undo();
+    structural.Undo();
+    CHECK_FALSE(document.IsConnected(secondInput));
+
+    CommandHistory values;
+    values.Execute(std::make_unique<SetDocumentNodePositionCommand>(document, second,
+        CanvasPosition{ 320.0, 30.0 }));
+    values.Execute(std::make_unique<SetDocumentNodePositionCommand>(document, second,
+        CanvasPosition{ 350.0, 40.0 }));
+    CHECK(values.RetainedCount() == 1u);
+    CHECK(document.Node(second).Position == CanvasPosition{ 350.0, 40.0 });
+    values.Undo();
+    CHECK(document.Node(second).Position == CanvasPosition{ 300.0, 20.0 });
+    values.Redo();
+
+    values.Execute(std::make_unique<SetDocumentPropertyCommand>(document, second,
+        "clamp", DocumentValue(true)));
+    values.Execute(std::make_unique<SetDocumentPropertyCommand>(document, second,
+        "clamp", DocumentValue(false)));
+    CHECK(document.Node(second).Properties.at("clamp").Get<bool>() == false);
+    values.Undo();
+    CHECK(document.Node(second).Properties.at("clamp").Get<bool>() == false);
+    values.Redo();
+
+    const PinID defaultPin = document.Node(second).Pins[1].ID;
+    values.Execute(std::make_unique<SetDocumentPinDefaultCommand>(document, defaultPin,
+        std::optional<DocumentValue>{ DocumentValue(5.0) }));
+    values.Execute(std::make_unique<SetDocumentPinDefaultCommand>(document, defaultPin, std::nullopt));
+    CHECK_FALSE(document.Pin(defaultPin).DefaultValue.has_value());
+    values.Undo();
+    REQUIRE(document.Pin(defaultPin).DefaultValue.has_value());
+    CHECK(document.Pin(defaultPin).DefaultValue->Get<double>() == 0.0);
+
+    values.Execute(std::make_unique<RenameDocumentCommand>(document, "Command Graph A"));
+    values.Execute(std::make_unique<RenameDocumentCommand>(document, "Command Graph B"));
+    CHECK(document.Name() == "Command Graph B");
+    values.Undo();
+    CHECK(document.Name() == "Command Graph");
+}
+
 TEST_CASE("Command history preserves causal branches and bounded storage", "[KairoEditor][Commands]")
 {
     int value = 0;
