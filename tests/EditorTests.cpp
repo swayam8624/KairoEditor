@@ -705,6 +705,65 @@ TEST_CASE("Graph connection gestures normalize input and output initiation",
     CHECK_FALSE(drag.Active());
 }
 
+TEST_CASE("Structured text projection synchronizes stable graph identities",
+    "[KairoEditor][Document][Projection]")
+{
+    const auto documentID = kairo::assets::AssetID::Parse("00000000-0000-4000-8000-000000000512");
+    AuthoringDocument document(documentID, DocumentKind::Logic, "Projection Graph");
+    const NodeSchema add = MakeAddFloatSchema();
+    const NodeID first = document.AddNode(add);
+    const NodeID second = document.AddNode(add, { 250.0, 0.0 });
+    const PinID output = document.Node(first).Pins[2].ID;
+    const PinID input = document.Node(second).Pins[0].ID;
+    document.Connect(output, input);
+
+    const DocumentTextProjection projection = BuildDocumentTextProjection(document);
+    CHECK(projection.Source() == SerializeDocument(document));
+    REQUIRE(projection.ForNode(first).has_value());
+    CHECK(projection.ForNode(first)->Line == 5u);
+    REQUIRE(projection.ForPin(output).has_value());
+    CHECK(projection.ForPin(output)->Node == first);
+    CHECK(projection.ForPin(output)->Key == "result");
+    REQUIRE(projection.At(projection.ForPin(output)->Offset + 2u).has_value());
+    CHECK(projection.At(projection.ForPin(output)->Offset + 2u)->Pin == output);
+    CHECK(std::ranges::count(projection.Spans(), DocumentSourceRole::Connection,
+        &DocumentSourceSpan::Role) == 1u);
+
+    const auto replaceOnce = [](std::string source, std::string_view before, std::string_view after)
+    {
+        const std::size_t offset = source.find(before);
+        if (offset == std::string::npos) throw std::logic_error("Projection test replacement source is missing.");
+        source.replace(offset, before.size(), after);
+        return source;
+    };
+
+    CommandHistory history;
+    const std::string renamed = replaceOnce(projection.Source(),
+        "name \"Projection Graph\"", "name \"Projection Graph Edited\"");
+    history.Execute(std::make_unique<ApplyDocumentTextCommand>(document, renamed));
+    CHECK(document.Name() == "Projection Graph Edited");
+    const std::string repositioned = replaceOnce(SerializeDocument(document),
+        "node 1 kairo.logic.add-float 0 0", "node 1 kairo.logic.add-float 25 50");
+    history.Execute(std::make_unique<ApplyDocumentTextCommand>(document, repositioned));
+    CHECK(history.RetainedCount() == 1u);
+    CHECK(document.Node(first).Position == CanvasPosition{ 25.0, 50.0 });
+    history.Undo();
+    CHECK(document.Name() == "Projection Graph");
+    CHECK(document.Node(first).Position == CanvasPosition{});
+    history.Redo();
+    CHECK(document.Name() == "Projection Graph Edited");
+    CHECK(document.Node(first).Position == CanvasPosition{ 25.0, 50.0 });
+
+    REQUIRE_THROWS_AS(ApplyDocumentTextCommand(document, SerializeDocument(document)), std::invalid_argument);
+    const std::string wrongID = replaceOnce(SerializeDocument(document), documentID.ToString(),
+        "00000000-0000-4000-8000-000000000513");
+    REQUIRE_THROWS_AS(ApplyDocumentTextCommand(document, wrongID), std::invalid_argument);
+    const std::string wrongKind = replaceOnce(SerializeDocument(document), "kind logic", "kind material");
+    REQUIRE_THROWS_AS(ApplyDocumentTextCommand(document, wrongKind), std::invalid_argument);
+    REQUIRE_THROWS_AS(ApplyDocumentTextCommand(document, "kairo-document 1\n"), DocumentFormatError);
+    CHECK(document.Name() == "Projection Graph Edited");
+}
+
 TEST_CASE("Command history preserves causal branches and bounded storage", "[KairoEditor][Commands]")
 {
     int value = 0;

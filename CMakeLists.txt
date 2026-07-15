@@ -28,7 +28,7 @@ add_library(KairoEditor)
 target_sources(KairoEditor PUBLIC FILE_SET CXX_MODULES BASE_DIRS ${CMAKE_CURRENT_SOURCE_DIR} FILES
     EditorTypes.cppm TextValidation.cppm TextFormat.cppm ProjectPaths.cppm DocumentTypes.cppm DocumentSchema.cppm
     AuthoringDocument.cppm DocumentValidation.cppm DocumentSerialization.cppm DocumentCommands.cppm
-    DocumentCompiler.cppm ProjectDocuments.cppm GraphCanvas.cppm
+    DocumentCompiler.cppm ProjectDocuments.cppm GraphCanvas.cppm DocumentProjection.cppm
     ProjectDescriptor.cppm ProjectSession.cppm CommandHistory.cppm SceneCommands.cppm
     EditorState.cppm PanelState.cppm KairoEditor.cppm)
 target_link_libraries(KairoEditor PUBLIC KairoEngineCore)

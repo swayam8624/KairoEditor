@@ -154,7 +154,10 @@ Implemented and verified:
   in project save and destructive-lifecycle guards;
 - a renderer-independent graph interaction kernel with stable coordinate
   transforms, bounded cursor zoom, uniform-grid culling, deterministic node/pin
-  hits, marquee selection modes, and typed non-mutating connection gestures.
+  hits, marquee selection modes, and typed non-mutating connection gestures;
+- a canonical structured-text projection with stable source navigation,
+  immutable identity/kind guards, parse-before-mutate replacement, and merged
+  reversible edits over the same graph document.
 
 Not yet represented as complete product surfaces:
 

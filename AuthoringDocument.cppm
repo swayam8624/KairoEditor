@@ -99,6 +99,23 @@ export namespace kairo::editor
         [[nodiscard]] std::size_t PinCount() const noexcept { return m_PinOwners.size(); }
         [[nodiscard]] std::size_t ConnectionCount() const noexcept { return m_Connections.size(); }
 
+        /// Task: exchange mutable authored contents while keeping the owning
+        /// object anchored to its persistent ID and domain kind. Validation
+        /// occurs before mutation; equal standard allocators make all following
+        /// swaps non-throwing. This enables exact parse-before-mutate text undo.
+        void SwapContents(AuthoringDocument& other)
+        {
+            if (m_ID != other.m_ID || m_Kind != other.m_Kind)
+                throw std::invalid_argument("Cannot swap contents between different document identities or kinds.");
+            using std::swap;
+            m_Name.swap(other.m_Name);
+            m_Nodes.swap(other.m_Nodes);
+            m_PinOwners.swap(other.m_PinOwners);
+            m_Connections.swap(other.m_Connections);
+            swap(m_NextNode, other.m_NextNode);
+            swap(m_NextPin, other.m_NextPin);
+        }
+
         void Rename(std::string name)
         {
             ValidateUtf8Text(name, { 1u, 256u, false, false }, "Document name");

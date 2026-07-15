@@ -156,6 +156,13 @@ large graph. Selection supports replace/add/subtract/toggle and marquee modes;
 connection gestures normalize input- or output-initiated drags while retaining
 `AuthoringDocument` as the only compatibility authority.
 
+The constrained Code surface uses `DocumentTextProjection`, not a second data
+model. Canonical UTF-8 text carries byte-accurate spans back to node, pin,
+property, and connection identities. Edited text is fully parsed before one
+reversible content swap; persistent ID and document kind cannot be changed from
+the text view. Successive valid text edits merge while malformed edits leave
+the graph and command history untouched.
+
 Code, Graph, and Split are views over the same authored-document model, not
 independent sources of truth. The current shell exposes workspace and panel
 contracts, while the production graph/text projections remain the next UI
