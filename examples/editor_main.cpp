@@ -118,6 +118,11 @@ int main(int argc, char** argv)
         }
         return 0;
     }
+    catch (const kairo::renderer::PresentationUnavailableError& error)
+    {
+        std::cerr << "KairoEditor skipped: " << error.what() << '\n';
+        return 77;
+    }
     catch (const std::exception& error)
     {
         std::cerr << "KairoEditor error: " << error.what() << '\n';

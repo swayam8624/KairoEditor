@@ -234,6 +234,11 @@ Appending `--frames 3` runs a bounded native smoke session used by CTest to
 verify project loading, asset resolution, initialization, frame recording,
 presentation, and orderly shutdown.
 
+On a CI host that exposes X/GLFW but no Vulkan presentation extension, the
+native smoke executable exits with CTest skip code `77`. This is limited to the
+typed `PresentationUnavailableError`; renderer initialization or frame failures
+continue to fail the test.
+
 For CI or consumers that only need the backend-neutral editor state library:
 
 ```bash

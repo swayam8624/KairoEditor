@@ -12,7 +12,7 @@ set(KAIRO_EDITOR_MONO_FONT_PATH "" CACHE FILEPATH "Optional monospace TTF font f
 # Immutable standalone fallback revisions. Local source directories and sibling
 # checkouts still take precedence for active workspace development.
 set(KAIRO_EDITOR_CORE_REVISION 08e94745fa38ab089fb5ae28a51aba5bbf0d05fd)
-set(KAIRO_EDITOR_RENDERER_REVISION 66b00d31b2a106bd53901f43ed3d10a331b6800a)
+set(KAIRO_EDITOR_RENDERER_REVISION 4fa65e19c6edb9bb77f889bb9780b55f4359b44e)
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
     add_compile_options(-Wall -Wextra -Wpedantic -Wno-unused-parameter)
@@ -128,11 +128,13 @@ if(KAIRO_EDITOR_BUILD_TESTS)
             --document Logic/Player.kdoc
             --frames 3 --no-layout-persistence)
         set_tests_properties(KairoEditorNativeSmoke PROPERTIES TIMEOUT 20)
+        set_tests_properties(KairoEditorNativeSmoke PROPERTIES SKIP_RETURN_CODE 77)
         add_test(NAME KairoEditorCodeSurfaceSmoke COMMAND KairoEditorApp
             --project ${CMAKE_CURRENT_SOURCE_DIR}/examples/StarterProject/Project.kproject
             --document Logic/Player.kdoc --authoring code
             --frames 3 --no-layout-persistence)
         set_tests_properties(KairoEditorCodeSurfaceSmoke PROPERTIES TIMEOUT 20)
+        set_tests_properties(KairoEditorCodeSurfaceSmoke PROPERTIES SKIP_RETURN_CODE 77)
         add_test(NAME KairoEditorRequiresProject COMMAND KairoEditorApp --frames 1)
         set_tests_properties(KairoEditorRequiresProject PROPERTIES WILL_FAIL TRUE TIMEOUT 20)
     endif()
