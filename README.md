@@ -168,6 +168,14 @@ independent sources of truth. The current shell exposes workspace and panel
 contracts, while the production graph/text projections remain the next UI
 surface rather than being represented by nonfunctional controls.
 
+`AuthoringWorkspaceState` now owns transient state separately for every open
+document: graph pan/zoom, graph selection, canonical structured-text baseline,
+and the live text draft. Clean drafts automatically follow graph and undo/redo
+changes. Dirty drafts are retained, and an external graph change raises an
+explicit conflict instead of silently discarding text or applying it over a
+newer document. This state is UI-backend-neutral so styled ImGui and a future
+Flutter shell can share identical conflict and tab-switch behavior.
+
 ## Build and run
 
 ```bash

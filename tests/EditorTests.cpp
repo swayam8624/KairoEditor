@@ -1077,3 +1077,52 @@ TEST_CASE("Task workspaces expose focused production tool sets", "[KairoEditor][
     CHECK(editor.Panels().IsVisible(Panel::CurveEditor));
     CHECK(editor.Panels().IsVisible(Panel::Sequencer));
 }
+
+TEST_CASE("Authoring workspace preserves document views and detects stale text drafts",
+    "[KairoEditor][Document][Workspace]")
+{
+    const auto firstID = kairo::assets::AssetID::Parse("00000000-0000-4000-8000-000000000701");
+    const auto secondID = kairo::assets::AssetID::Parse("00000000-0000-4000-8000-000000000702");
+    AuthoringDocument first(firstID, DocumentKind::Logic, "First");
+    AuthoringDocument second(secondID, DocumentKind::Material, "Second");
+    const NodeID node = first.AddNode(MakeAddFloatSchema(), { 10.0, 20.0 });
+
+    AuthoringWorkspaceState workspace;
+    auto& firstView = workspace.Open(first);
+    firstView.Viewport().SetDocumentOrigin({ 90.0, -40.0 });
+    firstView.Selection().Apply(node, GraphSelectionMode::Replace);
+    const std::string canonical = firstView.TextDraft();
+    firstView.SetTextDraft(canonical + "# unfinished local edit\n");
+    REQUIRE(firstView.IsTextDirty());
+    CHECK_FALSE(firstView.HasExternalConflict());
+
+    (void)workspace.Open(second);
+    REQUIRE(workspace.Size() == 2u);
+    auto& reopened = workspace.Open(first);
+    CHECK(reopened.Viewport().DocumentOrigin() == GraphPoint{ 90.0, -40.0 });
+    CHECK(reopened.Selection().Contains(node));
+    CHECK(reopened.TextDraft() == canonical + "# unfinished local edit\n");
+    CHECK_FALSE(reopened.HasExternalConflict());
+
+    first.SetNodePosition(node, { 200.0, 300.0 });
+    reopened.Synchronize(first);
+    CHECK(reopened.HasExternalConflict());
+    CHECK(reopened.TextDraft() == canonical + "# unfinished local edit\n");
+
+    reopened.ResetText(first);
+    CHECK_FALSE(reopened.IsTextDirty());
+    CHECK_FALSE(reopened.HasExternalConflict());
+    CHECK(reopened.TextDraft() == BuildDocumentTextProjection(first).Source());
+
+    first.RemoveNode(node);
+    reopened.Synchronize(first);
+    CHECK_FALSE(reopened.Selection().Contains(node));
+    REQUIRE_THROWS_AS(reopened.Synchronize(second), std::invalid_argument);
+    REQUIRE_THROWS_AS(reopened.SetTextDraft(std::string(MaximumDocumentDraftBytes + 1u, 'x')),
+        std::length_error);
+
+    workspace.Close(firstID);
+    CHECK_FALSE(workspace.Contains(firstID));
+    workspace.Clear();
+    CHECK(workspace.Size() == 0u);
+}
