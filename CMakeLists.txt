@@ -12,7 +12,7 @@ set(KAIRO_EDITOR_MONO_FONT_PATH "" CACHE FILEPATH "Optional monospace TTF font f
 # Immutable standalone fallback revisions. Local source directories and sibling
 # checkouts still take precedence for active workspace development.
 set(KAIRO_EDITOR_CORE_REVISION 08e94745fa38ab089fb5ae28a51aba5bbf0d05fd)
-set(KAIRO_EDITOR_RENDERER_REVISION 4fa65e19c6edb9bb77f889bb9780b55f4359b44e)
+set(KAIRO_EDITOR_RENDERER_REVISION 65b84bc431f9d22890eabc1d9c05ae001de1ec6a)
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
     add_compile_options(-Wall -Wextra -Wpedantic -Wno-unused-parameter)
