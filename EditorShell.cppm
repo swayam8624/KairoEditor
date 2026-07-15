@@ -20,6 +20,7 @@ module;
 export module Kairo.Editor.ImGuiShell;
 
 import Kairo.Editor;
+import Kairo.Editor.ImGuiGraphCanvas;
 import Kairo.EngineCore;
 
 export namespace kairo::editor
@@ -30,7 +31,16 @@ export namespace kairo::editor
     class EditorShell final
     {
     public:
-        EditorShell(EditorState& state, ProjectSession& project) : m_State(state), m_Project(project) {}
+        EditorShell(EditorState& state, ProjectSession& project) : m_State(state), m_Project(project)
+        {
+            if (const auto active = m_Project.Documents().ActiveID(); active.has_value())
+            {
+                const auto& document = m_Project.Document(*active);
+                (void)m_AuthoringWorkspace.Open(document);
+                m_State.SwitchWorkspace(WorkspaceFor(document.Kind()));
+                m_State.SetAuthoringSurface(AuthoringSurface::CodeAndGraph);
+            }
+        }
 
         void Draw()
         {
@@ -50,6 +60,7 @@ export namespace kairo::editor
         ProjectSession& m_Project;
         CommandHistory m_History;
         AuthoringWorkspaceState m_AuthoringWorkspace;
+        ImGuiGraphCanvas m_GraphCanvas;
         bool m_LayoutBuilt = false;
         bool m_DocumentPanelFocused = false;
         std::array<char, 256> m_AssetFilter{};
@@ -403,7 +414,6 @@ export namespace kairo::editor
         {
             const auto documents = m_Project.Documents().Snapshot();
             if (documents.empty()) return std::nullopt;
-            std::optional<kairo::assets::AssetID> active = m_Project.Documents().ActiveID();
             const std::string tabBarID = panel == Panel::CodeEditor ? "##CodeDocuments" : "##GraphDocuments";
             if (ImGui::BeginTabBar(tabBarID.c_str(), ImGuiTabBarFlags_Reorderable |
                 ImGuiTabBarFlags_AutoSelectNewTabs | ImGuiTabBarFlags_FittingPolicyScroll))
@@ -417,7 +427,6 @@ export namespace kairo::editor
                     if (ImGui::BeginTabItem(title.c_str(), &open, flags))
                     {
                         if (!info.Active) m_Project.ActivateDocument(info.ID);
-                        active = info.ID;
                         (void)m_AuthoringWorkspace.Open(m_Project.Document(info.ID));
                         ImGui::EndTabItem();
                     }
@@ -425,7 +434,7 @@ export namespace kairo::editor
                 }
                 ImGui::EndTabBar();
             }
-            return active;
+            return m_Project.Documents().ActiveID();
         }
 
         void DrawDocumentSummary(Panel panel, kairo::assets::AssetID id)
@@ -439,7 +448,15 @@ export namespace kairo::editor
             if (ImGui::SmallButton("Save")) RunCommand([this, id] { m_Project.SaveDocument(id); });
             if (panel == Panel::CodeEditor)
                 ImGui::TextDisabled("Structured text editing is synchronized with this document model.");
-            else ImGui::TextDisabled("Graph navigation and selection are retained for this document.");
+            else
+            {
+                m_GraphCanvas.Draw(m_Project, m_AuthoringWorkspace.At(id), id);
+                if (auto error = m_GraphCanvas.TakeError(); error.has_value())
+                {
+                    m_LastError = std::move(*error);
+                    m_RequestErrorPopup = true;
+                }
+            }
         }
 
         void RequestNewDocument()

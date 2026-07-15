@@ -39,6 +39,8 @@ export namespace kairo::editor
         [[nodiscard]] const GraphViewport& Viewport() const noexcept { return m_Viewport; }
         [[nodiscard]] GraphSelection& Selection() noexcept { return m_Selection; }
         [[nodiscard]] const GraphSelection& Selection() const noexcept { return m_Selection; }
+        [[nodiscard]] GraphConnectionDrag& ConnectionDrag() noexcept { return m_ConnectionDrag; }
+        [[nodiscard]] const GraphConnectionDrag& ConnectionDrag() const noexcept { return m_ConnectionDrag; }
         [[nodiscard]] const std::string& TextDraft() const noexcept { return m_TextDraft; }
         [[nodiscard]] const std::string& BaselineSource() const noexcept { return m_BaselineSource; }
         [[nodiscard]] bool IsTextDirty() const noexcept { return m_TextDraft != m_BaselineSource; }
@@ -95,6 +97,7 @@ export namespace kairo::editor
         kairo::assets::AssetID m_DocumentID;
         GraphViewport m_Viewport;
         GraphSelection m_Selection;
+        GraphConnectionDrag m_ConnectionDrag;
         std::string m_TextDraft;
         std::string m_BaselineSource;
         bool m_ExternalConflict = false;

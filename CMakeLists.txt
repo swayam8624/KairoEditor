@@ -82,7 +82,7 @@ if(KAIRO_EDITOR_BUILD_APP)
 
     add_library(KairoEditorImGui)
     target_sources(KairoEditorImGui PUBLIC FILE_SET CXX_MODULES BASE_DIRS ${CMAKE_CURRENT_SOURCE_DIR} FILES
-        EditorTheme.cppm ImGuiRuntime.cppm EditorShell.cppm)
+        EditorTheme.cppm ImGuiRuntime.cppm ImGuiGraphCanvas.cppm EditorShell.cppm)
     target_link_libraries(KairoEditorImGui PUBLIC KairoEditor KairoRenderer KairoDearImGui)
 
     add_library(KairoEditorRendererBridge)

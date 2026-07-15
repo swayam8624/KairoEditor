@@ -163,6 +163,14 @@ large graph. Selection supports replace/add/subtract/toggle and marquee modes;
 connection gestures normalize input- or output-initiated drags while retaining
 `AuthoringDocument` as the only compatibility authority.
 
+The native Graph panel now renders that kernel through a custom ImGui draw-list
+surface. It provides cursor-centered wheel zoom, middle-button panning, `F` to
+frame authored nodes, spatially culled node drawing, typed pin colors, Bezier
+connections, deterministic hit testing, modifier-aware selection, marquee
+selection, compatibility-colored connection previews, and transactional
+multi-node dragging. Canvas mutations enter the shared document command history
+and dirty/conflict tracking rather than editing widget-local copies.
+
 The constrained Code surface uses `DocumentTextProjection`, not a second data
 model. Canonical UTF-8 text carries byte-accurate spans back to node, pin,
 property, and connection identities. Edited text is fully parsed before one
