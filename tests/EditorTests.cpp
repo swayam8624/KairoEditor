@@ -434,6 +434,24 @@ TEST_CASE("Document commands preserve identity topology and merged edit intent",
     CHECK(document.Node(second).Position == CanvasPosition{ 300.0, 20.0 });
     values.Redo();
 
+    const NodeID third = document.AddNode(add, { 600.0, 20.0 });
+    values.Execute(std::make_unique<SetDocumentNodePositionsCommand>(document,
+        std::vector<DocumentNodePositionEdit>{ { second, { 400.0, 50.0 } }, { third, { 650.0, 50.0 } } }));
+    values.Execute(std::make_unique<SetDocumentNodePositionsCommand>(document,
+        std::vector<DocumentNodePositionEdit>{ { third, { 700.0, 80.0 } }, { second, { 450.0, 80.0 } } }));
+    CHECK(document.Node(second).Position == CanvasPosition{ 450.0, 80.0 });
+    CHECK(document.Node(third).Position == CanvasPosition{ 700.0, 80.0 });
+    const std::size_t retainedAfterMove = values.RetainedCount();
+    values.Undo();
+    CHECK(document.Node(second).Position == CanvasPosition{ 350.0, 40.0 });
+    CHECK(document.Node(third).Position == CanvasPosition{ 600.0, 20.0 });
+    values.Redo();
+    CHECK(values.RetainedCount() == retainedAfterMove);
+    REQUIRE_THROWS_AS(SetDocumentNodePositionsCommand(document,
+        { { second, {} }, { second, { 1.0, 1.0 } } }), std::invalid_argument);
+    REQUIRE_THROWS_AS(SetDocumentNodePositionsCommand(document,
+        { { NodeID{ 9999u }, {} } }), std::out_of_range);
+
     values.Execute(std::make_unique<SetDocumentPropertyCommand>(document, second,
         "clamp", DocumentValue(true)));
     values.Execute(std::make_unique<SetDocumentPropertyCommand>(document, second,

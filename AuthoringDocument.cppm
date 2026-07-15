@@ -410,10 +410,7 @@ export namespace kairo::editor
 
         static void ValidatePosition(CanvasPosition position)
         {
-            constexpr double limit = 1.0e9;
-            if (!std::isfinite(position.X) || !std::isfinite(position.Y) ||
-                std::abs(position.X) > limit || std::abs(position.Y) > limit)
-                throw std::invalid_argument("Canvas position must be finite and within +/-1e9 units.");
+            ValidateCanvasPosition(position);
         }
 
         [[nodiscard]] DocumentNode& MutableNode(NodeID id)

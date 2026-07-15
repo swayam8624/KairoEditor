@@ -154,6 +154,66 @@ export namespace kairo::editor
         CanvasPosition m_After;
     };
 
+    struct DocumentNodePositionEdit final
+    {
+        NodeID Node;
+        CanvasPosition Position;
+        friend bool operator==(const DocumentNodePositionEdit&, const DocumentNodePositionEdit&) = default;
+    };
+
+    /// Moves one selection as one causal command. Every node and target is
+    /// validated before Execute, so applying the sorted batch cannot partially
+    /// fail. Consecutive pointer frames with the same identity set merge while
+    /// retaining the positions that existed before the drag began.
+    class SetDocumentNodePositionsCommand final : public EditorCommand
+    {
+    public:
+        SetDocumentNodePositionsCommand(AuthoringDocument& document,
+            std::vector<DocumentNodePositionEdit> edits)
+            : m_Document(&document), m_After(std::move(edits))
+        {
+            if (m_After.empty()) throw std::invalid_argument("A multi-node move requires at least one node.");
+            if (m_After.size() > MaximumDocumentNodes)
+                throw std::length_error("A multi-node move exceeds the document node safety limit.");
+            std::ranges::sort(m_After, {}, &DocumentNodePositionEdit::Node);
+            m_Before.reserve(m_After.size());
+            std::optional<NodeID> previous;
+            for (const auto& edit : m_After)
+            {
+                if (!edit.Node) throw std::invalid_argument("A multi-node move contains a zero node ID.");
+                if (previous == edit.Node) throw std::invalid_argument("A multi-node move contains a duplicate node ID.");
+                ValidateCanvasPosition(edit.Position);
+                m_Before.push_back({ edit.Node, document.Node(edit.Node).Position });
+                previous = edit.Node;
+            }
+        }
+
+        [[nodiscard]] std::string_view Name() const noexcept override { return "Move Nodes"; }
+        void Execute() override { Apply(m_After); }
+        void Undo() override { Apply(m_Before); }
+
+        [[nodiscard]] bool TryMerge(EditorCommand& newer) noexcept override
+        {
+            auto* move = dynamic_cast<SetDocumentNodePositionsCommand*>(&newer);
+            if (move == nullptr || move->m_Document != m_Document ||
+                move->m_After.size() != m_After.size()) return false;
+            for (std::size_t index = 0u; index < m_After.size(); ++index)
+                if (move->m_After[index].Node != m_After[index].Node) return false;
+            m_After.swap(move->m_After);
+            return true;
+        }
+
+    private:
+        AuthoringDocument* m_Document;
+        std::vector<DocumentNodePositionEdit> m_Before;
+        std::vector<DocumentNodePositionEdit> m_After;
+
+        void Apply(const std::vector<DocumentNodePositionEdit>& edits)
+        {
+            for (const auto& edit : edits) m_Document->SetNodePosition(edit.Node, edit.Position);
+        }
+    };
+
     /// Replaces one typed property. The document enforces type stability;
     /// adjacent edits to the same property coalesce for sliders/text entry.
     class SetDocumentPropertyCommand final : public EditorCommand

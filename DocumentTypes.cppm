@@ -220,4 +220,15 @@ export namespace kairo::editor
         double Y = 0.0;
         friend constexpr bool operator==(const CanvasPosition&, const CanvasPosition&) noexcept = default;
     };
+
+    /// Input: a document-space node position.
+    /// Task: enforce the shared finite coordinate envelope before a position
+    /// enters a document, command, serializer, or graph interaction.
+    inline void ValidateCanvasPosition(CanvasPosition position)
+    {
+        constexpr double limit = 1.0e9;
+        if (!std::isfinite(position.X) || !std::isfinite(position.Y) ||
+            std::abs(position.X) > limit || std::abs(position.Y) > limit)
+            throw std::invalid_argument("Canvas position must be finite and within +/-1e9 units.");
+    }
 }
