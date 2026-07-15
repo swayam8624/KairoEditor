@@ -8,6 +8,7 @@
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <type_traits>
 #include <vector>
 
@@ -205,6 +206,42 @@ namespace
             return Output;
         }
     };
+
+    struct CompilerGraphFixture final
+    {
+        kairo::assets::AssetID DocumentID =
+            kairo::assets::AssetID::Parse("00000000-0000-4000-8000-000000000507");
+        NodeSchema Start;
+        NodeSchema Print = MakePrintSchema();
+        DocumentSchemaRegistry Schemas;
+        AuthoringDocument Valid{ DocumentID, DocumentKind::Logic, "Compilable Graph" };
+        NodeID StartNode;
+        NodeID PrintNode;
+
+        CompilerGraphFixture()
+        {
+            Start.Kind = DocumentKind::Logic;
+            Start.TypeKey = "kairo.logic.start";
+            Start.DisplayName = "Start";
+            Start.Category = "Events";
+            Start.Pins = {
+                { "out", "Out", PinDirection::Output, ValueType::Flow,
+                    PinCardinality::Multiple, false, std::nullopt }
+            };
+            Schemas.Register(Start);
+            Schemas.Register(Print);
+            StartNode = Valid.AddNode(Start);
+            PrintNode = Valid.AddNode(Print);
+            Valid.Connect(Valid.Node(StartNode).Pins[0].ID, Valid.Node(PrintNode).Pins[0].ID);
+        }
+    };
+
+    [[nodiscard]] bool HasDiagnosticCode(
+        const std::vector<DocumentDiagnostic>& diagnostics, std::string_view code)
+    {
+        return std::ranges::any_of(diagnostics,
+            [code](const DocumentDiagnostic& diagnostic) { return diagnostic.Code == code; });
+    }
 }
 
 TEST_CASE("Authoring documents enforce typed deterministic graph topology", "[KairoEditor][Document][Graph]")
@@ -516,44 +553,32 @@ TEST_CASE("Document commands preserve identity topology and merged edit intent",
     CHECK(document.Name() == "Command Graph");
 }
 
-TEST_CASE("Document compiler boundary gates invalid input and backend contracts",
+TEST_CASE("Document compiler boundary publishes validated artifacts",
     "[KairoEditor][Document][Compiler]")
 {
-    const auto documentID = kairo::assets::AssetID::Parse("00000000-0000-4000-8000-000000000507");
-    NodeSchema start;
-    start.Kind = DocumentKind::Logic;
-    start.TypeKey = "kairo.logic.start";
-    start.DisplayName = "Start";
-    start.Category = "Events";
-    start.Pins = {
-        { "out", "Out", PinDirection::Output, ValueType::Flow, PinCardinality::Multiple, false, std::nullopt }
-    };
-    const NodeSchema print = MakePrintSchema();
-    DocumentSchemaRegistry schemas;
-    schemas.Register(start);
-    schemas.Register(print);
-
-    AuthoringDocument valid(documentID, DocumentKind::Logic, "Compilable Graph");
-    const NodeID startNode = valid.AddNode(start);
-    const NodeID printNode = valid.AddNode(print);
-    valid.Connect(valid.Node(startNode).Pins[0].ID, valid.Node(printNode).Pins[0].ID);
-
+    CompilerGraphFixture fixture;
     RecordingDocumentCompiler compiler;
     compiler.Output.Payload = { std::byte{ 0x4b }, std::byte{ 0x52 } };
     compiler.Output.Diagnostics.push_back({ DiagnosticSeverity::Warning, "unused-output",
-        "The terminal flow output is not connected.", printNode, valid.Node(printNode).Pins[1].ID });
-    const DocumentCompileResult compiled = CompileDocument(valid, schemas, compiler);
+        "The terminal flow output is not connected.", fixture.PrintNode,
+        fixture.Valid.Node(fixture.PrintNode).Pins[1].ID });
+    const DocumentCompileResult compiled = CompileDocument(fixture.Valid, fixture.Schemas, compiler);
     REQUIRE(compiled.Succeeded());
     REQUIRE(compiled.Artifact.has_value());
-    CHECK(compiled.Artifact->Source == documentID);
+    CHECK(compiled.Artifact->Source == fixture.DocumentID);
     CHECK(compiled.Artifact->Target == "kairo.logic.test-v1");
     CHECK(compiled.Artifact->Payload == compiler.Output.Payload);
     CHECK(compiler.Calls == 1u);
+}
 
-    AuthoringDocument invalid(documentID, DocumentKind::Logic, "Invalid Graph");
-    (void)invalid.AddNode(print);
+TEST_CASE("Document compiler boundary rejects invalid graphs and compiler kinds",
+    "[KairoEditor][Document][Compiler]")
+{
+    CompilerGraphFixture fixture;
+    AuthoringDocument invalid(fixture.DocumentID, DocumentKind::Logic, "Invalid Graph");
+    (void)invalid.AddNode(fixture.Print);
     RecordingDocumentCompiler skipped;
-    const DocumentCompileResult rejected = CompileDocument(invalid, schemas, skipped);
+    const DocumentCompileResult rejected = CompileDocument(invalid, fixture.Schemas, skipped);
     CHECK_FALSE(rejected.Succeeded());
     CHECK_FALSE(rejected.Artifact.has_value());
     CHECK(skipped.Calls == 0u);
@@ -561,27 +586,30 @@ TEST_CASE("Document compiler boundary gates invalid input and backend contracts"
 
     RecordingDocumentCompiler wrongKind;
     wrongKind.CompilerKind = DocumentKind::Material;
-    const DocumentCompileResult kindFailure = CompileDocument(valid, schemas, wrongKind);
+    const DocumentCompileResult kindFailure = CompileDocument(fixture.Valid, fixture.Schemas, wrongKind);
     CHECK_FALSE(kindFailure.Succeeded());
     CHECK(wrongKind.Calls == 0u);
-    CHECK(std::ranges::find(kindFailure.Diagnostics, std::string("compiler-contract"),
-        &DocumentDiagnostic::Code) != kindFailure.Diagnostics.end());
+    CHECK(HasDiagnosticCode(kindFailure.Diagnostics, "compiler-contract"));
+}
 
+TEST_CASE("Document compiler boundary contains backend contract failures",
+    "[KairoEditor][Document][Compiler]")
+{
+    CompilerGraphFixture fixture;
     RecordingDocumentCompiler throwing;
     throwing.Throws = true;
-    const DocumentCompileResult backendFailure = CompileDocument(valid, schemas, throwing);
+    const DocumentCompileResult backendFailure = CompileDocument(fixture.Valid, fixture.Schemas, throwing);
     CHECK_FALSE(backendFailure.Succeeded());
     CHECK(throwing.Calls == 1u);
-    CHECK(std::ranges::find(backendFailure.Diagnostics, std::string("compiler-failure"),
-        &DocumentDiagnostic::Code) != backendFailure.Diagnostics.end());
+    CHECK(HasDiagnosticCode(backendFailure.Diagnostics, "compiler-failure"));
 
     RecordingDocumentCompiler badDiagnostic;
     badDiagnostic.Output.Diagnostics.push_back({ DiagnosticSeverity::Error, "bad code", "Invalid code.",
         std::nullopt, std::nullopt });
-    const DocumentCompileResult contractFailure = CompileDocument(valid, schemas, badDiagnostic);
+    const DocumentCompileResult contractFailure = CompileDocument(
+        fixture.Valid, fixture.Schemas, badDiagnostic);
     CHECK_FALSE(contractFailure.Succeeded());
-    CHECK(std::ranges::find(contractFailure.Diagnostics, std::string("compiler-contract"),
-        &DocumentDiagnostic::Code) != contractFailure.Diagnostics.end());
+    CHECK(HasDiagnosticCode(contractFailure.Diagnostics, "compiler-contract"));
 }
 
 TEST_CASE("Project document workspace owns safe multi-document disk lifecycle",
