@@ -7,6 +7,7 @@ module;
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <optional>
 #include <type_traits>
 #include <utility>
 #include <variant>
@@ -79,6 +80,54 @@ export namespace kairo::editor
             case ValueType::Asset: return "asset";
         }
         return "unknown";
+    }
+
+    [[nodiscard]] constexpr std::string_view Name(PinDirection direction) noexcept
+    {
+        return direction == PinDirection::Input ? "input" : "output";
+    }
+
+    [[nodiscard]] constexpr std::string_view Name(PinCardinality cardinality) noexcept
+    {
+        return cardinality == PinCardinality::Single ? "single" : "multiple";
+    }
+
+    [[nodiscard]] constexpr std::optional<DocumentKind> ParseDocumentKind(std::string_view value) noexcept
+    {
+        if (value == "logic") return DocumentKind::Logic;
+        if (value == "material") return DocumentKind::Material;
+        if (value == "audio") return DocumentKind::Audio;
+        if (value == "animation-state") return DocumentKind::AnimationState;
+        if (value == "simulation") return DocumentKind::Simulation;
+        return std::nullopt;
+    }
+
+    [[nodiscard]] constexpr std::optional<ValueType> ParseValueType(std::string_view value) noexcept
+    {
+        if (value == "flow") return ValueType::Flow;
+        if (value == "bool") return ValueType::Boolean;
+        if (value == "int") return ValueType::Integer;
+        if (value == "float") return ValueType::Float;
+        if (value == "vec2") return ValueType::Vector2;
+        if (value == "vec3") return ValueType::Vector3;
+        if (value == "vec4") return ValueType::Vector4;
+        if (value == "string") return ValueType::String;
+        if (value == "asset") return ValueType::Asset;
+        return std::nullopt;
+    }
+
+    [[nodiscard]] constexpr std::optional<PinDirection> ParsePinDirection(std::string_view value) noexcept
+    {
+        if (value == "input") return PinDirection::Input;
+        if (value == "output") return PinDirection::Output;
+        return std::nullopt;
+    }
+
+    [[nodiscard]] constexpr std::optional<PinCardinality> ParsePinCardinality(std::string_view value) noexcept
+    {
+        if (value == "single") return PinCardinality::Single;
+        if (value == "multiple") return PinCardinality::Multiple;
+        return std::nullopt;
     }
 
     /// Canonical value domain shared by graph pins, structured text, defaults,

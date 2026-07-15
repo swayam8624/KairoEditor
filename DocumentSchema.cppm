@@ -108,6 +108,8 @@ export namespace kairo::editor
             if (key.size() > 64u || !IsSchemaKey(key, false))
                 throw std::invalid_argument("Property key must contain 1 to 64 ASCII identifier bytes.");
             value.Validate();
+            if (value.Type() == ValueType::Flow)
+                throw std::invalid_argument("Node properties cannot use the flow type.");
         }
     }
 

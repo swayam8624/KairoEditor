@@ -82,6 +82,13 @@ Large graphs require spatial indexing, clipped rendering, cached text/layout,
 stable zoom limits, and deterministic hit testing. Evaluation order, cycles,
 implicit conversions, and compile state must be inspectable rather than hidden.
 
+Compact nodes reveal focused inline editors only for the selected operation;
+contextual property surfaces appear near the work instead of permanently
+shrinking the canvas. The canvas remains visually dominant during graph work.
+Node, constrained text, and split views are projections over one persisted
+typed document. Switching views cannot fork state or silently discard data
+owned by a temporarily unavailable schema provider.
+
 ## Large World Experience
 
 The city-scale reference implies more than a camera looking at many meshes.
@@ -133,6 +140,8 @@ Implemented and verified:
 - project-scoped dock layout persistence and a live scene/status summary;
 - shared UTF-8/value boundaries and a deterministic typed node-schema registry;
 - bounded deterministic graph topology with stable IDs and located validation.
+- canonical, bounded, self-describing authoring-document persistence with
+  atomic replacement and missing-schema preservation.
 
 Not yet represented as complete product surfaces:
 

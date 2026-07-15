@@ -110,9 +110,16 @@ stable node/pin diagnostics for unknown schemas, schema drift, required inputs,
 and missing defaults. The same API is intended for graph and structured-text
 commands.
 
-This is not a claim that the visual node canvas is complete. Canonical
-persistence, reversible document commands, and compiler projection land before
-the UI can create real nodes.
+Canonical `.kdoc` persistence is self-describing: node, pin, property, stable
+identity, and connection contracts survive a load/save cycle even when the
+schema provider or plugin is unavailable. Serialization is deterministic,
+parsing is bounded and line/column located, and saves replace the destination
+atomically. This makes missing schemas a validation diagnostic instead of a
+data-loss event.
+
+This is not a claim that the visual node canvas is complete. Reversible
+document commands and compiler projection land before the UI can create real
+nodes.
 
 Code, Graph, and Split are views over one future authored-document model, not
 independent sources of truth. The current shell exposes the workspace and panel

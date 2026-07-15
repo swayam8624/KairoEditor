@@ -7,6 +7,7 @@
 #include <stdexcept>
 #include <string>
 #include <type_traits>
+#include <vector>
 
 import Kairo.Editor;
 import Kairo.EngineCore;
@@ -248,6 +249,117 @@ TEST_CASE("Authoring documents restore IDs and report schema-aware diagnostics",
         complete.Node(completePrint).Pins[2].ID);
     CHECK_FALSE(mismatch.Allowed);
     CHECK(mismatch.Code == "type");
+}
+
+TEST_CASE("Authoring documents persist canonically without installed schemas",
+    "[KairoEditor][Document][Persistence]")
+{
+    const auto documentID = kairo::assets::AssetID::Parse("00000000-0000-4000-8000-000000000503");
+    const auto textureID = kairo::assets::AssetID::Parse("00000000-0000-4000-8000-000000000504");
+    AuthoringDocument original(documentID, DocumentKind::Logic, "Lossless \"Plugin\" Graph");
+
+    DocumentNode source;
+    source.ID = { 40u };
+    source.TypeKey = "plugin.signal.source";
+    source.Position = { -0.0, 25.5 };
+    source.Pins.push_back({ { 100u }, "value", "Value", PinDirection::Output,
+        ValueType::Float, PinCardinality::Multiple, false, std::nullopt });
+    source.Properties.emplace("asset", DocumentValue(textureID));
+    source.Properties.emplace("enabled", DocumentValue(true));
+    source.Properties.emplace("label", DocumentValue(std::string("line one\nline \"two\"")));
+    source.Properties.emplace("layer", DocumentValue(std::int64_t{ -17 }));
+    source.Properties.emplace("scale", DocumentValue(1.0 / 3.0));
+    source.Properties.emplace("uv", DocumentValue(kairo::foundation::math::Vec2d{ 0.25, 0.75 }));
+    source.Properties.emplace("position", DocumentValue(kairo::foundation::math::Vec3d{ 1.0, 2.0, 3.0 }));
+    source.Properties.emplace("color", DocumentValue(kairo::foundation::math::Vec4d{ 0.1, 0.2, 0.3, 1.0 }));
+    original.RestoreNode(std::move(source));
+
+    DocumentNode sink;
+    sink.ID = { 80u };
+    sink.TypeKey = "plugin.signal.sink";
+    sink.Position = { 320.0, 25.5 };
+    sink.Pins.push_back({ { 200u }, "value", "Value", PinDirection::Input,
+        ValueType::Float, PinCardinality::Single, true, std::nullopt });
+    original.RestoreNode(std::move(sink));
+    original.Connect({ 100u }, { 200u });
+
+    const std::string canonical = SerializeDocument(original);
+    const AuthoringDocument parsed = ParseDocument(canonical);
+    CHECK(SerializeDocument(parsed) == canonical);
+    CHECK(parsed.ID() == original.ID());
+    CHECK(parsed.Name() == original.Name());
+    CHECK(parsed.Node({ 40u }).Properties.at("asset").Get<kairo::assets::AssetID>() == textureID);
+    CHECK(parsed.Node({ 40u }).Properties.at("label").Get<std::string>() == "line one\nline \"two\"");
+    CHECK(parsed.ConnectionCount() == 1u);
+
+    DocumentSchemaRegistry unavailablePlugins;
+    const auto diagnostics = ValidateDocument(parsed, unavailablePlugins);
+    REQUIRE(HasErrors(diagnostics));
+    CHECK(std::ranges::count(diagnostics, std::string("unknown-node-type"), &DocumentDiagnostic::Code) == 2u);
+
+    const auto path = std::filesystem::temp_directory_path() /
+        ("kairo-document-test-" + kairo::assets::GenerateAssetID().ToString() + ".kdoc");
+    SaveDocument(path, original);
+    CHECK(SerializeDocument(LoadDocument(path)) == canonical);
+    std::filesystem::remove(path);
+}
+
+TEST_CASE("Authoring document parser reports precise structural failures",
+    "[KairoEditor][Document][Persistence]")
+{
+    const auto requireLocation = [](std::string_view source, std::size_t line, std::size_t column)
+    {
+        try
+        {
+            (void)ParseDocument(source);
+            FAIL("Expected a located document parse failure");
+        }
+        catch (const DocumentFormatError& error)
+        {
+            CHECK(error.Line == line);
+            CHECK(error.Column == column);
+        }
+    };
+
+    requireLocation(
+        "kairo-document 1\n"
+        "id 00000000-0000-4000-8000-000000000505\n"
+        "kind logic\n"
+        "name \"Duplicate Pin\"\n"
+        "node 1 plugin.test 0 0\n"
+        "pin 4 first \"First\" output float multiple false no-default\n"
+        "pin 4 second \"Second\" output float multiple false no-default\n"
+        "end-node\n", 7u, 5u);
+
+    requireLocation(
+        "kairo-document 1\n"
+        "id 00000000-0000-4000-8000-000000000505\n"
+        "kind logic\n"
+        "name \"Bad Number\"\n"
+        "node 1 plugin.test 0 0\n"
+        "property gain float nan\n"
+        "end-node\n", 6u, 21u);
+
+    requireLocation(
+        "kairo-document 1\n"
+        "id 00000000-0000-4000-8000-000000000505\n"
+        "kind logic\n"
+        "name \"\"\n", 4u, 6u);
+
+    requireLocation(
+        "kairo-document 1\n"
+        "id 00000000-0000-4000-8000-000000000505\n"
+        "kind logic\n"
+        "name \"Metadata Order\"\n"
+        "connect 1 2\n"
+        "name \"Too Late\"\n", 6u, 1u);
+
+    requireLocation(
+        "kairo-document 1\n"
+        "id 00000000-0000-4000-8000-000000000505\n"
+        "kind logic\n"
+        "name \"Missing Terminator\"\n"
+        "node 1 plugin.test 0 0\n", 6u, 1u);
 }
 
 TEST_CASE("Command history preserves causal branches and bounded storage", "[KairoEditor][Commands]")

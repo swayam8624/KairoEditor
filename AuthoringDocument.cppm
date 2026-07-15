@@ -166,23 +166,9 @@ export namespace kairo::editor
             const std::vector<PinID>& pinIDs, CanvasPosition position = {})
         {
             ValidateNodeSchema(schema);
-            ValidatePosition(position);
             if (schema.Kind != m_Kind) throw std::invalid_argument("Node schema belongs to a different document kind.");
-            if (!nodeID) throw std::invalid_argument("Node ID cannot be zero.");
-            if (m_Nodes.size() >= MaximumDocumentNodes) throw std::length_error("Document exceeds its node safety limit.");
             if (schema.Pins.size() != pinIDs.size())
                 throw std::invalid_argument("Restored pin ID count must match the node schema.");
-            if (m_PinOwners.size() + pinIDs.size() > MaximumDocumentPins)
-                throw std::length_error("Document exceeds its pin safety limit.");
-            if (m_Nodes.contains(nodeID)) throw std::invalid_argument("Document already contains this node ID.");
-
-            std::set<PinID> uniquePins;
-            for (const PinID pinID : pinIDs)
-            {
-                if (!pinID) throw std::invalid_argument("Pin ID cannot be zero.");
-                if (m_PinOwners.contains(pinID) || !uniquePins.insert(pinID).second)
-                    throw std::invalid_argument("Document contains a duplicate pin ID.");
-            }
 
             DocumentNode node;
             node.ID = nodeID;
@@ -196,7 +182,59 @@ export namespace kairo::editor
                 node.Pins.push_back({ pinIDs[index], pin.Key, pin.DisplayName, pin.Direction,
                     pin.Type, pin.Cardinality, pin.Required, pin.DefaultValue });
             }
+            RestoreNode(std::move(node));
+        }
 
+        /// Input: complete self-describing node record from persistence or undo.
+        /// Task: retain unknown-plugin nodes without data loss while still
+        /// proving structural safety. Schema compatibility remains a diagnostic,
+        /// allowing the editor to open and preserve documents when a provider is
+        /// temporarily unavailable.
+        void RestoreNode(DocumentNode node)
+        {
+            ValidatePosition(node.Position);
+            if (!node.ID) throw std::invalid_argument("Node ID cannot be zero.");
+            if (node.TypeKey.size() > 128u || !IsSchemaKey(node.TypeKey, true))
+                throw std::invalid_argument("Restored node has an invalid type key.");
+            if (m_Nodes.size() >= MaximumDocumentNodes) throw std::length_error("Document exceeds its node safety limit.");
+            if (node.Pins.size() > 256u) throw std::length_error("Restored node exceeds 256 pins.");
+            if (node.Properties.size() > 256u) throw std::length_error("Restored node exceeds 256 properties.");
+            if (m_PinOwners.size() + node.Pins.size() > MaximumDocumentPins)
+                throw std::length_error("Document exceeds its pin safety limit.");
+            if (m_Nodes.contains(node.ID)) throw std::invalid_argument("Document already contains this node ID.");
+
+            std::set<PinID> uniquePins;
+            std::set<std::string_view> uniquePinKeys;
+            for (const DocumentPin& pin : node.Pins)
+            {
+                if (!pin.ID) throw std::invalid_argument("Pin ID cannot be zero.");
+                if (m_PinOwners.contains(pin.ID) || !uniquePins.insert(pin.ID).second)
+                    throw std::invalid_argument("Document contains a duplicate pin ID.");
+                if (pin.Key.size() > 64u || !IsSchemaKey(pin.Key, false) || !uniquePinKeys.insert(pin.Key).second)
+                    throw std::invalid_argument("Restored node contains an invalid or duplicate pin key.");
+                ValidateUtf8Text(pin.DisplayName, { 1u, 128u, false, false }, "Pin display name");
+                if (pin.Direction == PinDirection::Output && (pin.Required || pin.DefaultValue.has_value()))
+                    throw std::invalid_argument("Restored output pin has invalid required/default state.");
+                if (pin.Type == ValueType::Flow && pin.DefaultValue.has_value())
+                    throw std::invalid_argument("Restored flow pin cannot have a default value.");
+                if (pin.Required && pin.DefaultValue.has_value())
+                    throw std::invalid_argument("Restored required pin cannot have a default value.");
+                if (pin.DefaultValue.has_value() && pin.DefaultValue->Type() != pin.Type)
+                    throw std::invalid_argument("Restored pin default type does not match the pin type.");
+            }
+            for (const auto& [key, value] : node.Properties)
+            {
+                if (key.size() > 64u || !IsSchemaKey(key, false))
+                    throw std::invalid_argument("Restored node contains an invalid property key.");
+                if (value.Type() == ValueType::Flow)
+                    throw std::invalid_argument("Node properties cannot use the flow type.");
+                value.Validate();
+            }
+
+            const NodeID nodeID = node.ID;
+            std::vector<PinID> pinIDs;
+            pinIDs.reserve(node.Pins.size());
+            for (const DocumentPin& pin : node.Pins) pinIDs.push_back(pin.ID);
             const auto [inserted, accepted] = m_Nodes.emplace(nodeID, std::move(node));
             if (!accepted) throw std::logic_error("Document node insertion failed after duplicate validation.");
             std::vector<PinID> indexed;

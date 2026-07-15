@@ -1,10 +1,12 @@
 export module Kairo.Editor;
 export import Kairo.Editor.Types;
 export import Kairo.Editor.TextValidation;
+export import Kairo.Editor.TextFormat;
 export import Kairo.Editor.DocumentTypes;
 export import Kairo.Editor.DocumentSchema;
 export import Kairo.Editor.AuthoringDocument;
 export import Kairo.Editor.DocumentValidation;
+export import Kairo.Editor.DocumentSerialization;
 export import Kairo.Editor.ProjectDescriptor;
 export import Kairo.Editor.ProjectSession;
 export import Kairo.Editor.CommandHistory;
