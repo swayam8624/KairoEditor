@@ -78,6 +78,11 @@ TEST_CASE("Document schema registry validates and orders node contracts", "[Kair
     REQUIRE(schemas.size() == 2u);
     CHECK(schemas[0].TypeKey == "kairo.logic.add-float");
     CHECK(schemas[1].TypeKey == "kairo.logic.print");
+    const auto mathSearch = registry.Search(DocumentKind::Logic, "FLOAT math");
+    REQUIRE(mathSearch.size() == 1u);
+    CHECK(mathSearch.front().TypeKey == add.TypeKey);
+    CHECK(registry.Search(DocumentKind::Material, "float").empty());
+    REQUIRE_THROWS_AS(registry.Search(DocumentKind::Logic, std::string(257u, 'x')), std::invalid_argument);
     REQUIRE_THROWS_AS(registry.Register(add), std::invalid_argument);
     REQUIRE_THROWS_AS(registry.Require("missing"), std::out_of_range);
 

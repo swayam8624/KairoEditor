@@ -147,9 +147,75 @@ export namespace kairo::editor
             return result;
         }
 
+        /// Input: document domain and at most 256 bytes of valid UTF-8 search
+        /// text. Output: matching schema copies ordered by relevance, display
+        /// name, then stable type key. Task: provide one deterministic search
+        /// contract for graph palettes, command palettes, and future UI shells.
+        /// Matching is ASCII case-insensitive and requires every whitespace-
+        /// separated token to occur in the display name, category, or type key.
+        [[nodiscard]] std::vector<NodeSchema> Search(DocumentKind kind, std::string_view query) const
+        {
+            ValidateUtf8Text(query, { 0u, 256u, false, false }, "Node schema search query");
+            const std::string normalized = LowerAscii(query);
+            const std::vector<std::string> tokens = Tokens(normalized);
+            struct Match final { std::size_t Rank; NodeSchema Schema; };
+            std::vector<Match> matches;
+            for (const auto& [key, schema] : m_Schemas)
+            {
+                (void)key;
+                if (schema.Kind != kind) continue;
+                const std::string display = LowerAscii(schema.DisplayName);
+                const std::string category = LowerAscii(schema.Category);
+                const std::string searchable = display + " " + category + " " + LowerAscii(schema.TypeKey);
+                if (!std::ranges::all_of(tokens,
+                    [&](const std::string& token) { return searchable.contains(token); })) continue;
+
+                std::size_t rank = 3u;
+                if (!normalized.empty() && display == normalized) rank = 0u;
+                else if (!normalized.empty() && display.starts_with(normalized)) rank = 1u;
+                else if (!normalized.empty() && category.starts_with(normalized)) rank = 2u;
+                matches.push_back({ rank, schema });
+            }
+            std::ranges::sort(matches, [](const Match& left, const Match& right)
+            {
+                if (left.Rank != right.Rank) return left.Rank < right.Rank;
+                if (left.Schema.DisplayName != right.Schema.DisplayName)
+                    return left.Schema.DisplayName < right.Schema.DisplayName;
+                return left.Schema.TypeKey < right.Schema.TypeKey;
+            });
+            std::vector<NodeSchema> result;
+            result.reserve(matches.size());
+            for (auto& match : matches) result.push_back(std::move(match.Schema));
+            return result;
+        }
+
         [[nodiscard]] std::size_t Size() const noexcept { return m_Schemas.size(); }
 
     private:
         std::map<std::string, NodeSchema, std::less<>> m_Schemas;
+
+        [[nodiscard]] static std::string LowerAscii(std::string_view value)
+        {
+            std::string result(value);
+            for (char& character : result)
+                if (character >= 'A' && character <= 'Z') character = static_cast<char>(character + ('a' - 'A'));
+            return result;
+        }
+
+        [[nodiscard]] static std::vector<std::string> Tokens(std::string_view value)
+        {
+            std::vector<std::string> result;
+            std::size_t begin = 0u;
+            while (begin < value.size())
+            {
+                while (begin < value.size() && static_cast<unsigned char>(value[begin]) <= 0x20u) ++begin;
+                if (begin == value.size()) break;
+                std::size_t end = begin;
+                while (end < value.size() && static_cast<unsigned char>(value[end]) > 0x20u) ++end;
+                result.emplace_back(value.substr(begin, end - begin));
+                begin = end;
+            }
+            return result;
+        }
     };
 }
