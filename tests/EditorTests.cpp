@@ -1129,6 +1129,8 @@ TEST_CASE("Authoring workspace preserves document views and detects stale text d
     const std::string canonical = firstView.TextDraft();
     firstView.SetTextDraft(canonical + "# unfinished local edit\n");
     REQUIRE(firstView.IsTextDirty());
+    CHECK(workspace.HasDirtyTextDrafts());
+    CHECK(workspace.DocumentIDs() == std::vector<kairo::assets::AssetID>{ firstID });
     CHECK_FALSE(firstView.HasExternalConflict());
 
     (void)workspace.Open(second);
@@ -1155,6 +1157,7 @@ TEST_CASE("Authoring workspace preserves document views and detects stale text d
     REQUIRE_THROWS_AS(reopened.Synchronize(second), std::invalid_argument);
     REQUIRE_THROWS_AS(reopened.SetTextDraft(std::string(MaximumDocumentDraftBytes + 1u, 'x')),
         std::length_error);
+    REQUIRE_THROWS_AS(reopened.ResizeTextDraft(MaximumDocumentDraftBytes + 1u), std::length_error);
 
     workspace.Close(firstID);
     CHECK_FALSE(workspace.Contains(firstID));

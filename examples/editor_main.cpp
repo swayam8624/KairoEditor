@@ -22,6 +22,7 @@ namespace
     {
         std::filesystem::path Project;
         std::optional<std::filesystem::path> Document;
+        std::optional<kairo::editor::AuthoringSurface> AuthoringSurface;
         std::optional<std::uint64_t> FrameLimit;
         bool PersistLayout = true;
     };
@@ -49,6 +50,16 @@ namespace
                 options.Document = std::filesystem::path(argv[index]);
                 continue;
             }
+            if (argument == "--authoring")
+            {
+                if (++index == argc) throw std::invalid_argument("--authoring requires code, graph, or split.");
+                const std::string_view surface(argv[index]);
+                if (surface == "code") options.AuthoringSurface = kairo::editor::AuthoringSurface::Code;
+                else if (surface == "graph") options.AuthoringSurface = kairo::editor::AuthoringSurface::Graph;
+                else if (surface == "split") options.AuthoringSurface = kairo::editor::AuthoringSurface::CodeAndGraph;
+                else throw std::invalid_argument("--authoring requires code, graph, or split.");
+                continue;
+            }
             if (argument != "--frames")
                 throw std::invalid_argument("Unknown option: " + std::string(argument));
             if (++index == argc) throw std::invalid_argument("--frames requires a positive integer.");
@@ -62,7 +73,8 @@ namespace
         }
         if (options.Project.empty())
             throw std::invalid_argument("Usage: KairoEditorApp --project <file.kproject> "
-                "[--document project-relative.kdoc] [--frames positive-count] [--no-layout-persistence]");
+                "[--document project-relative.kdoc] [--authoring code|graph|split] "
+                "[--frames positive-count] [--no-layout-persistence]");
         return options;
     }
 }
@@ -91,6 +103,7 @@ int main(int argc, char** argv)
         kairo::editor::ImGuiRuntime imgui(renderer, layoutFile);
         kairo::editor::ApplyKairoEditorTheme();
         kairo::editor::EditorShell shell(state, project);
+        if (options.AuthoringSurface.has_value()) state.SetAuthoringSurface(*options.AuthoringSurface);
 
         std::uint64_t renderedFrames = 0u;
         while (!renderer.NativeWindow().ShouldClose() && (!options.FrameLimit.has_value() || renderedFrames < *options.FrameLimit))

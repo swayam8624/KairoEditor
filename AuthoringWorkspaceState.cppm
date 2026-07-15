@@ -1,11 +1,13 @@
 module;
 
+#include <algorithm>
 #include <cstddef>
 #include <map>
 #include <stdexcept>
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 export module Kairo.Editor.AuthoringWorkspaceState;
 
@@ -56,6 +58,18 @@ export namespace kairo::editor
             m_TextDraft = std::move(source);
         }
 
+        /// Mutable buffer contract used by native text widgets with explicit
+        /// resize callbacks. Callers must resize through ResizeTextDraft so the
+        /// workspace safety limit remains authoritative.
+        [[nodiscard]] char* TextDraftData() noexcept { return m_TextDraft.data(); }
+        [[nodiscard]] std::size_t TextDraftCapacity() const noexcept { return m_TextDraft.capacity(); }
+        void ResizeTextDraft(std::size_t size)
+        {
+            if (size > MaximumDocumentDraftBytes)
+                throw std::length_error("Document text draft exceeds the 16 MiB editor safety limit.");
+            m_TextDraft.resize(size);
+        }
+
         /// Synchronizes clean text after graph/undo changes. If local text is
         /// dirty, the draft survives and a conflict is raised when the current
         /// canonical document no longer matches its editing baseline.
@@ -63,7 +77,7 @@ export namespace kairo::editor
         {
             RequireIdentity(document);
             m_Selection.RemoveMissing(document);
-            const std::string canonical = BuildDocumentTextProjection(document).Source();
+            const std::string canonical = BuildBoundedCanonicalSource(document);
             if (!IsTextDirty())
             {
                 m_TextDraft = canonical;
@@ -79,7 +93,7 @@ export namespace kairo::editor
         {
             if (m_DocumentID.IsValid()) RequireIdentity(document);
             m_DocumentID = document.ID();
-            m_TextDraft = BuildDocumentTextProjection(document).Source();
+            m_TextDraft = BuildBoundedCanonicalSource(document);
             m_BaselineSource = m_TextDraft;
             m_ExternalConflict = false;
             m_Selection.RemoveMissing(document);
@@ -102,6 +116,18 @@ export namespace kairo::editor
         std::string m_BaselineSource;
         bool m_ExternalConflict = false;
 
+        /// Produces the authoritative text representation while preserving the
+        /// same memory bound used by interactive edits. Documents may also be
+        /// constructed programmatically, so the UI cannot assume their
+        /// canonical projection is already small enough for an editor buffer.
+        [[nodiscard]] static std::string BuildBoundedCanonicalSource(const AuthoringDocument& document)
+        {
+            std::string source = BuildDocumentTextProjection(document).Source();
+            if (source.size() > MaximumDocumentDraftBytes)
+                throw std::length_error("Document canonical source exceeds the 16 MiB editor safety limit.");
+            return source;
+        }
+
         void RequireIdentity(const AuthoringDocument& document) const
         {
             if (document.ID() != m_DocumentID)
@@ -117,6 +143,22 @@ export namespace kairo::editor
     public:
         [[nodiscard]] std::size_t Size() const noexcept { return m_Views.size(); }
         [[nodiscard]] bool Contains(kairo::assets::AssetID id) const noexcept { return m_Views.contains(id); }
+        [[nodiscard]] bool HasDirtyTextDrafts() const noexcept
+        {
+            return std::ranges::any_of(m_Views,
+                [](const auto& entry) { return entry.second.IsTextDirty(); });
+        }
+        [[nodiscard]] std::vector<kairo::assets::AssetID> DocumentIDs() const
+        {
+            std::vector<kairo::assets::AssetID> result;
+            result.reserve(m_Views.size());
+            for (const auto& [id, view] : m_Views)
+            {
+                (void)view;
+                result.push_back(id);
+            }
+            return result;
+        }
 
         [[nodiscard]] DocumentViewState& Open(const AuthoringDocument& document)
         {

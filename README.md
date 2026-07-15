@@ -178,6 +178,14 @@ reversible content swap; persistent ID and document kind cannot be changed from
 the text view. Successive valid text edits merge while malformed edits leave
 the graph and command history untouched.
 
+The native Code panel edits that canonical projection in a dynamically resized
+monospaced buffer. Apply parses the complete draft before requesting mutable
+project access, so malformed input reports its exact format error without
+changing or dirtying the document. Revert reloads the current graph. Dirty
+drafts mark tabs, participate in close confirmation, and are validated/applied
+before Save or Save All; a graph change made after editing began raises an
+explicit stale-draft conflict that cannot be overwritten silently.
+
 Code, Graph, and Split are views over the same authored-document model, not
 independent sources of truth. The current shell exposes workspace and panel
 contracts, while the production graph/text projections remain the next UI
@@ -199,7 +207,8 @@ cmake --build build
 ctest --test-dir build --output-on-failure
 ./build/KairoEditorApp \
   --project examples/StarterProject/Project.kproject \
-  --document Logic/Player.kdoc
+  --document Logic/Player.kdoc \
+  --authoring split
 ```
 
 Appending `--frames 3` runs a bounded native smoke session used by CTest to

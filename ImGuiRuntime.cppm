@@ -56,6 +56,9 @@ export namespace kairo::editor
 #else
                 io.Fonts->AddFontDefault();
 #endif
+#if defined(KAIRO_EDITOR_MONO_FONT_PATH)
+                (void)io.Fonts->AddFontFromFileTTF(KAIRO_EDITOR_MONO_FONT_PATH, 14.0f);
+#endif
 
                 if (!ImGui_ImplGlfw_InitForVulkan(renderer.NativeWindow().NativeHandle(), true))
                     throw std::runtime_error("Dear ImGui GLFW backend initialization failed.");

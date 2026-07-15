@@ -116,6 +116,11 @@ if(KAIRO_EDITOR_BUILD_TESTS)
             --document Logic/Player.kdoc
             --frames 3 --no-layout-persistence)
         set_tests_properties(KairoEditorNativeSmoke PROPERTIES TIMEOUT 20)
+        add_test(NAME KairoEditorCodeSurfaceSmoke COMMAND KairoEditorApp
+            --project ${CMAKE_CURRENT_SOURCE_DIR}/examples/StarterProject/Project.kproject
+            --document Logic/Player.kdoc --authoring code
+            --frames 3 --no-layout-persistence)
+        set_tests_properties(KairoEditorCodeSurfaceSmoke PROPERTIES TIMEOUT 20)
         add_test(NAME KairoEditorRequiresProject COMMAND KairoEditorApp --frames 1)
         set_tests_properties(KairoEditorRequiresProject PROPERTIES WILL_FAIL TRUE TIMEOUT 20)
     endif()

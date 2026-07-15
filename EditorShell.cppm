@@ -13,6 +13,7 @@ module;
 #include <filesystem>
 #include <memory>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -84,14 +85,14 @@ export namespace kairo::editor
                 const auto activeDocument = m_Project.HasProject()
                     ? m_Project.Documents().ActiveID() : std::nullopt;
                 if (ImGui::MenuItem("Save Active Document", "Cmd+S", false, activeDocument.has_value()))
-                    RunCommand([this, id = *activeDocument] { m_Project.SaveDocument(id); });
+                    RunCommand([this, id = *activeDocument] { SaveDocumentWithDraft(id); });
                 if (ImGui::MenuItem("Close Active Document", "Cmd+W", false, activeDocument.has_value()))
                     RequestCloseDocument(*activeDocument);
                 ImGui::Separator();
                 if (ImGui::MenuItem("Save Scene", nullptr, false, m_Project.HasProject()))
                     RunCommand([this] { m_Project.SaveScene(); });
                 if (ImGui::MenuItem("Save All", "Cmd+Option+S", false, m_Project.HasProject()))
-                    RunCommand([this] { m_Project.SaveAll(); });
+                    RunCommand([this] { SaveAllWithDrafts(); });
                 ImGui::EndMenu();
             }
             if (ImGui::BeginMenu("Edit"))
@@ -135,7 +136,7 @@ export namespace kairo::editor
             {
                 ImGui::Separator();
                 ImGui::TextDisabled("%s%s", m_Project.Descriptor().Name.c_str(),
-                    m_Project.HasUnsavedChanges() ? " *" : "");
+                    (m_Project.HasUnsavedChanges() || m_AuthoringWorkspace.HasDirtyTextDrafts()) ? " *" : "");
             }
             ImGui::EndMainMenuBar();
 
@@ -145,7 +146,7 @@ export namespace kairo::editor
             {
                 const auto active = m_Project.Documents().ActiveID();
                 if (m_DocumentPanelFocused && active.has_value())
-                    RunCommand([this, id = *active] { m_Project.SaveDocument(id); });
+                    RunCommand([this, id = *active] { SaveDocumentWithDraft(id); });
                 else RunCommand([this] { m_Project.SaveScene(); });
             }
             if (m_Project.HasProject() && ImGui::Shortcut(ImGuiMod_Shortcut | ImGuiKey_W))
@@ -155,7 +156,9 @@ export namespace kairo::editor
             }
             if (m_Project.HasProject() &&
                 ImGui::Shortcut(ImGuiMod_Shortcut | ImGuiMod_Alt | ImGuiKey_S))
-                RunCommand([this] { m_Project.SaveAll(); });
+            {
+                RunCommand([this] { SaveAllWithDrafts(); });
+            }
             CommandHistory& history = ActiveHistory();
             if (history.CanRedo() &&
                 ImGui::Shortcut(ImGuiMod_Shortcut | ImGuiMod_Shift | ImGuiKey_Z))
@@ -201,7 +204,9 @@ export namespace kairo::editor
                     const auto& document = m_Project.Document(*active);
                     ImGui::Separator();
                     ImGui::TextDisabled("%s%s", document.Name().c_str(),
-                        m_Project.Documents().IsDirty(*active) ? " *" : "");
+                        (m_Project.Documents().IsDirty(*active) ||
+                         (m_AuthoringWorkspace.Contains(*active) &&
+                          m_AuthoringWorkspace.At(*active).IsTextDirty())) ? " *" : "");
                 }
                 if (const auto selected = m_State.SelectedEntity(); selected.has_value())
                 {
@@ -421,7 +426,9 @@ export namespace kairo::editor
                 for (const auto& info : documents)
                 {
                     bool open = true;
-                    std::string title = info.Name + (info.Dirty ? " *" : "") + "###" +
+                    const bool draftDirty = m_AuthoringWorkspace.Contains(info.ID) &&
+                        m_AuthoringWorkspace.At(info.ID).IsTextDirty();
+                    std::string title = info.Name + ((info.Dirty || draftDirty) ? " *" : "") + "###" +
                         info.ID.ToString() + (panel == Panel::CodeEditor ? "-code" : "-graph");
                     const ImGuiTabItemFlags flags = info.Active ? ImGuiTabItemFlags_SetSelected : 0;
                     if (ImGui::BeginTabItem(title.c_str(), &open, flags))
@@ -445,9 +452,9 @@ export namespace kairo::editor
                 document.Name().c_str(), Name(document.Kind()).data(), document.NodeCount(),
                 document.ConnectionCount());
             ImGui::SameLine();
-            if (ImGui::SmallButton("Save")) RunCommand([this, id] { m_Project.SaveDocument(id); });
+            if (ImGui::SmallButton("Save")) RunCommand([this, id] { SaveDocumentWithDraft(id); });
             if (panel == Panel::CodeEditor)
-                ImGui::TextDisabled("Structured text editing is synchronized with this document model.");
+                DrawCodeEditor(id);
             else
             {
                 m_GraphCanvas.Draw(m_Project, m_AuthoringWorkspace.At(id), id);
@@ -470,7 +477,9 @@ export namespace kairo::editor
         void RequestCloseDocument(kairo::assets::AssetID id)
         {
             if (!m_Project.Documents().Contains(id)) return;
-            if (!m_Project.Documents().IsDirty(id))
+            const bool draftDirty = m_AuthoringWorkspace.Contains(id) &&
+                m_AuthoringWorkspace.At(id).IsTextDirty();
+            if (!m_Project.Documents().IsDirty(id) && !draftDirty)
             {
                 RunCommand([this, id]
                 {
@@ -538,13 +547,13 @@ export namespace kairo::editor
             if (ImGui::BeginPopupModal("Unsaved Document", nullptr,
                 ImGuiWindowFlags_AlwaysAutoResize))
             {
-                ImGui::TextWrapped("This document has unsaved changes.");
+                ImGui::TextWrapped("This document has unapplied text or unsaved authored changes.");
                 if (ImGui::Button("Save and Close", { 130.0f, 0.0f }) && m_PendingDocumentClose.has_value())
                 {
                     const auto id = *m_PendingDocumentClose;
                     RunCommand([this, id]
                     {
-                        m_Project.SaveDocument(id);
+                        SaveDocumentWithDraft(id);
                         m_Project.CloseDocument(id);
                         m_AuthoringWorkspace.Close(id);
                         m_PendingDocumentClose.reset();
@@ -591,6 +600,107 @@ export namespace kairo::editor
             return m_DocumentPanelFocused && m_Project.HasProject() &&
                 m_Project.Documents().ActiveID().has_value()
                 ? m_Project.DocumentHistory() : m_History;
+        }
+
+        void DrawCodeEditor(kairo::assets::AssetID id)
+        {
+            auto& view = m_AuthoringWorkspace.At(id);
+            view.Synchronize(m_Project.Document(id));
+            if (view.HasExternalConflict())
+            {
+                ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.95f, 0.55f, 0.27f, 1.0f));
+                ImGui::TextWrapped("The graph changed after this text draft began. Revert the draft before applying it.");
+                ImGui::PopStyleColor();
+            }
+
+            const bool canApply = view.IsTextDirty() && !view.HasExternalConflict();
+            if (!canApply) ImGui::BeginDisabled();
+            if (ImGui::Button("Apply")) RunCommand([this, id] { ApplyTextDraft(id); });
+            if (!canApply) ImGui::EndDisabled();
+            ImGui::SameLine();
+            const bool canRevert = view.IsTextDirty() || view.HasExternalConflict();
+            if (!canRevert) ImGui::BeginDisabled();
+            if (ImGui::Button("Revert")) view.ResetText(m_Project.Document(id));
+            if (!canRevert) ImGui::EndDisabled();
+            ImGui::SameLine();
+            const std::size_t lines = static_cast<std::size_t>(std::ranges::count(view.TextDraft(), '\n')) + 1u;
+            ImGui::TextDisabled("%zu lines  |  %zu bytes%s", lines, view.TextDraft().size(),
+                view.IsTextDirty() ? "  |  draft" : "");
+
+            ImGui::Separator();
+            ImFont* font = ImGui::GetFont();
+            const ImGuiIO& io = ImGui::GetIO();
+            if (io.Fonts != nullptr && io.Fonts->Fonts.Size > 1) font = io.Fonts->Fonts[1];
+            ImGui::PushFont(font);
+            ImGui::InputTextMultiline("##DocumentText", view.TextDraftData(),
+                view.TextDraftCapacity() + 1u, ImGui::GetContentRegionAvail(),
+                ImGuiInputTextFlags_AllowTabInput | ImGuiInputTextFlags_CallbackResize,
+                ResizeDocumentText, &view);
+            ImGui::PopFont();
+        }
+
+        void ApplyTextDraft(kairo::assets::AssetID id)
+        {
+            auto& view = m_AuthoringWorkspace.At(id);
+            const auto& current = m_Project.Document(id);
+            view.Synchronize(current);
+            if (view.HasExternalConflict())
+                throw std::logic_error("Cannot apply a stale text draft after the graph changed.");
+            if (!view.IsTextDirty()) return;
+
+            // Parse before requesting mutable project access so malformed text
+            // cannot mark an unchanged authoritative document dirty.
+            (void)ParseDocumentProjection(view.TextDraft(), current.ID(), current.Kind());
+            auto& document = m_Project.EditDocument(id);
+            m_Project.DocumentHistory().Execute(
+                std::make_unique<ApplyDocumentTextCommand>(document, view.TextDraft()));
+            view.TextApplySucceeded(document);
+        }
+
+        void SaveDocumentWithDraft(kairo::assets::AssetID id)
+        {
+            if (m_AuthoringWorkspace.Contains(id) && m_AuthoringWorkspace.At(id).IsTextDirty())
+                ApplyTextDraft(id);
+            m_Project.SaveDocument(id);
+        }
+
+        void SaveAllWithDrafts()
+        {
+            // Validate every draft first so one malformed tab cannot leave a
+            // partially applied set before Save All reports its failure.
+            for (const auto id : m_AuthoringWorkspace.DocumentIDs())
+            {
+                auto& view = m_AuthoringWorkspace.At(id);
+                const auto& document = m_Project.Document(id);
+                view.Synchronize(document);
+                if (view.HasExternalConflict())
+                    throw std::logic_error("Save All cannot apply a text draft that conflicts with newer graph changes.");
+                if (view.IsTextDirty())
+                    (void)ParseDocumentProjection(view.TextDraft(), document.ID(), document.Kind());
+            }
+            for (const auto id : m_AuthoringWorkspace.DocumentIDs())
+                if (m_AuthoringWorkspace.At(id).IsTextDirty()) ApplyTextDraft(id);
+            m_Project.SaveAll();
+        }
+
+        static int ResizeDocumentText(ImGuiInputTextCallbackData* data) noexcept
+        {
+            auto& view = *static_cast<DocumentViewState*>(data->UserData);
+            if (data->EventFlag != ImGuiInputTextFlags_CallbackResize) return 0;
+            if (data->BufTextLen < 0 || static_cast<std::size_t>(data->BufTextLen) > MaximumDocumentDraftBytes)
+            {
+                data->Buf = view.TextDraftData();
+                data->BufTextLen = static_cast<int>(view.TextDraft().size());
+                data->BufSize = static_cast<int>(view.TextDraftCapacity() + 1u);
+                return 0;
+            }
+            try
+            {
+                view.ResizeTextDraft(static_cast<std::size_t>(data->BufTextLen));
+                data->Buf = view.TextDraftData();
+            }
+            catch (...) { return 1; }
+            return 0;
         }
 
         [[nodiscard]] static std::string Lower(std::string_view value)
