@@ -148,6 +148,14 @@ saving. Project dirty guards and Save All include every open document, while an
 unregistered `.kdoc` must enter through the future explicit import transaction
 instead of silently bypassing metadata.
 
+The graph canvas kernel is also backend-neutral. `GraphViewport` provides
+bounded cursor-centered zoom, panning, framing, and reversible document/screen
+transforms. `GraphSpatialIndex` uses a validated uniform grid for deterministic
+node culling, z-ordered hits, and pin-radius queries without scanning an entire
+large graph. Selection supports replace/add/subtract/toggle and marquee modes;
+connection gestures normalize input- or output-initiated drags while retaining
+`AuthoringDocument` as the only compatibility authority.
+
 Code, Graph, and Split are views over the same authored-document model, not
 independent sources of truth. The current shell exposes workspace and panel
 contracts, while the production graph/text projections remain the next UI

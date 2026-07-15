@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <cmath>
 #include <filesystem>
 #include <limits>
 #include <memory>
@@ -594,6 +595,114 @@ TEST_CASE("Project document workspace owns safe multi-document disk lifecycle",
     reopened.CloseAll();
     CHECK(reopened.Empty());
     std::filesystem::remove_all(root);
+}
+
+TEST_CASE("Graph viewport navigation preserves document-space intent",
+    "[KairoEditor][Graph][Viewport]")
+{
+    GraphViewport viewport;
+    viewport.SetDocumentOrigin({ 10.0, 20.0 });
+    const GraphPoint screenOrigin{ 100.0, 200.0 };
+    const GraphPoint screen = viewport.ToScreen({ 20.0, 30.0 }, screenOrigin);
+    CHECK(screen == GraphPoint{ 110.0, 210.0 });
+    CHECK(viewport.ToDocument(screen, screenOrigin) == GraphPoint{ 20.0, 30.0 });
+
+    viewport.PanByScreenDelta({ 20.0, 10.0 });
+    CHECK(viewport.DocumentOrigin() == GraphPoint{ -10.0, 10.0 });
+    const GraphPoint anchorScreen{ 260.0, 340.0 };
+    const GraphPoint before = viewport.ToDocument(anchorScreen, screenOrigin);
+    viewport.ZoomAt(2.0, anchorScreen, screenOrigin);
+    const GraphPoint after = viewport.ToDocument(anchorScreen, screenOrigin);
+    CHECK(std::abs(before.x - after.x) < 1.0e-12);
+    CHECK(std::abs(before.y - after.y) < 1.0e-12);
+    viewport.ZoomBy(100.0, anchorScreen, screenOrigin);
+    CHECK(viewport.Zoom() == MaximumGraphZoom);
+    viewport.ZoomBy(0.0001, anchorScreen, screenOrigin);
+    CHECK(viewport.Zoom() == MinimumGraphZoom);
+
+    viewport.Frame({ { 0.0, 0.0 }, { 200.0, 100.0 } }, { 1000.0, 500.0 }, 50.0);
+    CHECK(viewport.Zoom() == 4.0);
+    CHECK(viewport.ToScreen({ 100.0, 50.0 }, {}).x == 500.0);
+    CHECK(viewport.ToScreen({ 100.0, 50.0 }, {}).y == 250.0);
+    REQUIRE_THROWS_AS(viewport.ZoomAt(0.0, {}, {}), std::invalid_argument);
+    REQUIRE_THROWS_AS(viewport.Frame({ { 0.0, 0.0 }, { 0.0, 10.0 } }, { 100.0, 100.0 }),
+        std::invalid_argument);
+}
+
+TEST_CASE("Graph spatial index supports deterministic culling hits and selection",
+    "[KairoEditor][Graph][Spatial]")
+{
+    const auto documentID = kairo::assets::AssetID::Parse("00000000-0000-4000-8000-000000000510");
+    AuthoringDocument document(documentID, DocumentKind::Logic, "Selection Cleanup");
+    const NodeSchema add = MakeAddFloatSchema();
+    (void)document.AddNode(add);
+    (void)document.AddNode(add);
+    const GraphNodeLayout back{ { 1u }, { { 0.0, 0.0 }, { 200.0, 120.0 } }, 28.0, 1u,
+        { { { 3u }, { 200.0, 60.0 } } } };
+    const GraphNodeLayout front{ { 2u }, { { 100.0, 30.0 }, { 300.0, 150.0 } }, 30.0, 2u,
+        { { { 4u }, { 100.0, 60.0 } } } };
+    GraphSpatialIndex index;
+    index.Rebuild(document, { back, front });
+    CHECK(index.NodeCount() == 2u);
+    CHECK(index.PinCount() == 2u);
+    REQUIRE(index.HitNode({ 150.0, 50.0 }).has_value());
+    CHECK(*index.HitNode({ 150.0, 50.0 }) == NodeID{ 2u });
+    REQUIRE(index.HitPin({ 202.0, 61.0 }, 8.0).has_value());
+    CHECK(*index.HitPin({ 202.0, 61.0 }, 8.0) == PinID{ 3u });
+    CHECK_FALSE(index.HitPin({ 250.0, 250.0 }, 8.0).has_value());
+    CHECK(index.Query({ { -10.0, -10.0 }, { 50.0, 20.0 } }) == std::vector<NodeID>{ NodeID{ 1u } });
+
+    GraphNodeLayout duplicate = front;
+    duplicate.ID = back.ID;
+    REQUIRE_THROWS_AS(index.Rebuild(document, { back, duplicate }), std::invalid_argument);
+    CHECK(index.NodeCount() == 2u);
+    CHECK(index.Layout({ 2u }) == front);
+
+    GraphSelection selection;
+    selection.ApplyMarquee(index, { { -10.0, -10.0 }, { 310.0, 160.0 } }, GraphSelectionMode::Replace);
+    CHECK(selection.Size() == 2u);
+    selection.Apply({ 1u }, GraphSelectionMode::Subtract);
+    CHECK_FALSE(selection.Contains({ 1u }));
+    CHECK(selection.Contains({ 2u }));
+    selection.Apply({ 1u }, GraphSelectionMode::Toggle);
+    CHECK(selection.Primary() == NodeID{ 1u });
+
+    document.RemoveNode({ 2u });
+    selection.RemoveMissing(document);
+    CHECK(selection.Size() == 1u);
+    CHECK(selection.Contains({ 1u }));
+}
+
+TEST_CASE("Graph connection gestures normalize input and output initiation",
+    "[KairoEditor][Graph][Connection]")
+{
+    const auto documentID = kairo::assets::AssetID::Parse("00000000-0000-4000-8000-000000000511");
+    AuthoringDocument document(documentID, DocumentKind::Logic, "Connection Gesture");
+    const NodeSchema add = MakeAddFloatSchema();
+    const NodeID sourceNode = document.AddNode(add);
+    const NodeID targetNode = document.AddNode(add);
+    const PinID output = document.Node(sourceNode).Pins[2].ID;
+    const PinID input = document.Node(targetNode).Pins[0].ID;
+
+    GraphConnectionDrag drag;
+    drag.Begin(document, output);
+    CHECK(drag.Active());
+    CHECK(drag.Preview(document, input).Allowed);
+    const auto forward = drag.Complete(document, input);
+    REQUIRE(forward.has_value());
+    CHECK(*forward == DocumentConnection{ output, input });
+    CHECK_FALSE(drag.Active());
+    CHECK(document.ConnectionCount() == 0u);
+
+    drag.Begin(document, input);
+    const auto reverse = drag.Complete(document, output);
+    REQUIRE(reverse.has_value());
+    CHECK(*reverse == DocumentConnection{ output, input });
+    drag.Begin(document, output);
+    CHECK_FALSE(drag.Complete(document, document.Node(targetNode).Pins[2].ID).has_value());
+    drag.Begin(document, output);
+    drag.Cancel();
+    CHECK_FALSE(drag.Active());
 }
 
 TEST_CASE("Command history preserves causal branches and bounded storage", "[KairoEditor][Commands]")

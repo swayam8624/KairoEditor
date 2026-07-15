@@ -151,7 +151,10 @@ Implemented and verified:
   replacement, and safe command-reference lifetime boundaries;
 - `ProjectSession` transactions that keep `.kdoc` identity/path synchronized
   with first-class `KairoAssets::Document` metadata and include document state
-  in project save and destructive-lifecycle guards.
+  in project save and destructive-lifecycle guards;
+- a renderer-independent graph interaction kernel with stable coordinate
+  transforms, bounded cursor zoom, uniform-grid culling, deterministic node/pin
+  hits, marquee selection modes, and typed non-mutating connection gestures.
 
 Not yet represented as complete product surfaces:
 
