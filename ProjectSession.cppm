@@ -76,8 +76,10 @@ export namespace kairo::editor
         /// the whole directory is renamed into place only after validation.
         /// Preconditions: destination must not already exist; this function is
         /// intentionally non-destructive.
-        void CreateProject(const std::filesystem::path& destination, std::string name)
+        void CreateProject(const std::filesystem::path& destination, std::string name,
+            UnsavedChangesPolicy policy = UnsavedChangesPolicy::Reject)
         {
+            RejectUnsavedReplacement(policy, "create another project");
             if (destination.empty()) throw std::invalid_argument("Project destination cannot be empty.");
             ProjectDescriptor descriptor{ std::move(name), "Assets.kassets", "Scenes/Main.kscene" };
             ValidateProjectDescriptor(descriptor);
@@ -116,14 +118,16 @@ export namespace kairo::editor
                 throw;
             }
 
-            OpenProject(absoluteDestination / DefaultProjectFileName);
+            OpenProject(absoluteDestination / DefaultProjectFileName, UnsavedChangesPolicy::Discard);
         }
 
         /// Task: load descriptor, registry, and startup scene into candidates,
         /// then replace the live session only after all files validate. Failure
         /// preserves the currently open project, assets, scene, and dirty flags.
-        void OpenProject(const std::filesystem::path& projectFile)
+        void OpenProject(const std::filesystem::path& projectFile,
+            UnsavedChangesPolicy policy = UnsavedChangesPolicy::Reject)
         {
+            RejectUnsavedReplacement(policy, "open another project");
             const std::filesystem::path canonicalFile = CanonicalExistingFile(projectFile, "project descriptor");
             const std::filesystem::path root = canonicalFile.parent_path();
             ProjectDescriptor descriptor = LoadProjectDescriptor(canonicalFile);
@@ -240,6 +244,12 @@ export namespace kairo::editor
         void RequireProject() const
         {
             if (!m_HasProject) throw std::logic_error("No Kairo project is open.");
+        }
+
+        void RejectUnsavedReplacement(UnsavedChangesPolicy policy, std::string_view action) const
+        {
+            if (HasUnsavedChanges() && policy == UnsavedChangesPolicy::Reject)
+                throw std::logic_error("Cannot " + std::string(action) + " while the current project has unsaved changes.");
         }
 
         [[nodiscard]] static bool IsWithin(const std::filesystem::path& root,

@@ -21,7 +21,7 @@ export namespace kairo::editor
     class EditorState final
     {
     public:
-        explicit EditorState(kairo::engine::Scene& scene) : m_Scene(scene) {}
+        explicit EditorState(const kairo::engine::Scene& scene) : m_Scene(scene) {}
 
         [[nodiscard]] EditorMode Mode() const noexcept { return m_Mode; }
         [[nodiscard]] Workspace ActiveWorkspace() const noexcept { return m_Workspace; }
@@ -84,7 +84,7 @@ export namespace kairo::editor
         }
 
     private:
-        kairo::engine::Scene& m_Scene;
+        const kairo::engine::Scene& m_Scene;
         EditorMode m_Mode = EditorMode::Edit;
         Workspace m_Workspace = Workspace::Scene;
         AuthoringSurface m_AuthoringSurface = AuthoringSurface::CodeAndGraph;

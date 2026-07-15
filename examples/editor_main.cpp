@@ -1,9 +1,11 @@
 #include <charconv>
 #include <cstdint>
 #include <exception>
+#include <filesystem>
 #include <iostream>
 #include <optional>
 #include <stdexcept>
+#include <string>
 #include <string_view>
 
 import Kairo.Editor;
@@ -16,18 +18,38 @@ import Kairo.Renderer;
 
 namespace
 {
-    [[nodiscard]] std::optional<std::uint64_t> ParseFrameLimit(int argc, char** argv)
+    struct AppOptions final
     {
-        if (argc == 1) return std::nullopt;
-        if (argc != 3 || std::string_view(argv[1]) != "--frames")
-            throw std::invalid_argument("Usage: KairoEditorApp [--frames positive-count]");
+        std::filesystem::path Project;
+        std::optional<std::uint64_t> FrameLimit;
+    };
 
-        std::uint64_t value = 0u;
-        const std::string_view text(argv[2]);
-        const auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), value);
-        if (error != std::errc{} || end != text.data() + text.size() || value == 0u)
-            throw std::invalid_argument("--frames requires a positive integer.");
-        return value;
+    [[nodiscard]] AppOptions ParseOptions(int argc, char** argv)
+    {
+        AppOptions options;
+        for (int index = 1; index < argc; ++index)
+        {
+            const std::string_view argument(argv[index]);
+            if (argument == "--project")
+            {
+                if (++index == argc) throw std::invalid_argument("--project requires a .kproject path.");
+                options.Project = argv[index];
+                continue;
+            }
+            if (argument != "--frames")
+                throw std::invalid_argument("Unknown option: " + std::string(argument));
+            if (++index == argc) throw std::invalid_argument("--frames requires a positive integer.");
+
+            std::uint64_t value = 0u;
+            const std::string_view text(argv[index]);
+            const auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), value);
+            if (error != std::errc{} || end != text.data() + text.size() || value == 0u)
+                throw std::invalid_argument("--frames requires a positive integer.");
+            options.FrameLimit = value;
+        }
+        if (options.Project.empty())
+            throw std::invalid_argument("Usage: KairoEditorApp --project <file.kproject> [--frames positive-count]");
+        return options;
     }
 }
 
@@ -35,36 +57,32 @@ int main(int argc, char** argv)
 {
     try
     {
-        const auto frameLimit = ParseFrameLimit(argc, argv);
-        kairo::renderer::RendererRuntime renderer({ "KairoEditor", 1600u, 1000u, true });
-        const auto cubeAsset = kairo::assets::AssetID::Parse("00000000-0000-4000-8000-000000000201");
-        const auto defaultMaterial = kairo::assets::AssetID::Parse("00000000-0000-4000-8000-000000000202");
-        kairo::assets::AssetRegistry projectAssets;
-        projectAssets.Insert({ cubeAsset, kairo::assets::AssetType::Mesh, kairo::assets::AssetOrigin::Builtin,
-            "builtin/cube", "kairo.builtin", 1u, {} });
-        projectAssets.Insert({ defaultMaterial, kairo::assets::AssetType::Material, kairo::assets::AssetOrigin::Builtin,
-            "builtin/default-material", "kairo.builtin", 1u, {} });
-        kairo::engine::Scene scene;
-        const auto cube = scene.CreateEntity("Cube");
-        scene.SetMeshRenderer(cube, { { cubeAsset }, { defaultMaterial }, true });
-        scene.Transform(cube).Local.Scale = { 0.55f, 0.55f, 0.55f };
-        kairo::editor::EditorState state(scene);
-        state.Select(cube);
-        const auto cubeMesh = renderer.CreateMesh(kairo::renderer::Mesh::MakeCube());
-        kairo::editor::RenderAssetBindings renderAssets(projectAssets);
-        renderAssets.BindMesh({ cubeAsset }, cubeMesh);
+        const AppOptions options = ParseOptions(argc, argv);
+        kairo::editor::ProjectSession project;
+        project.OpenProject(options.Project);
+        kairo::renderer::RendererRuntime renderer({ project.Descriptor().Name, 1600u, 1000u, true });
+        kairo::editor::EditorState state(project.Scene());
+        if (const auto entities = project.Scene().Entities(); !entities.empty()) state.Select(entities.front());
+        kairo::editor::RenderAssetBindings renderAssets(project.Assets());
+        for (const auto& asset : project.Assets().Snapshot())
+        {
+            if (asset.Type != kairo::assets::AssetType::Mesh) continue;
+            if (asset.Origin != kairo::assets::AssetOrigin::Builtin || asset.Path != "builtin/cube")
+                throw std::runtime_error("KairoEditor has no runtime mesh importer for asset: " + asset.Path.generic_string());
+            renderAssets.BindMesh({ asset.ID }, renderer.CreateMesh(kairo::renderer::Mesh::MakeCube()));
+        }
         kairo::editor::ImGuiRuntime imgui(renderer);
         kairo::editor::ApplyKairoEditorTheme();
-        kairo::editor::EditorShell shell(state, scene);
+        kairo::editor::EditorShell shell(state, project);
 
         std::uint64_t renderedFrames = 0u;
-        while (!renderer.NativeWindow().ShouldClose() && (!frameLimit.has_value() || renderedFrames < *frameLimit))
+        while (!renderer.NativeWindow().ShouldClose() && (!options.FrameLimit.has_value() || renderedFrames < *options.FrameLimit))
         {
             renderer.NativeWindow().PollEvents();
             imgui.BeginFrame();
             shell.Draw();
             imgui.EndFrame();
-            renderer.SubmitRenderScene(kairo::editor::BuildRenderScene(scene, renderAssets));
+            renderer.SubmitRenderScene(kairo::editor::BuildRenderScene(project.Scene(), renderAssets));
             renderer.DrawFrame();
             ++renderedFrames;
         }

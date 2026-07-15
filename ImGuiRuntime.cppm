@@ -31,6 +31,9 @@ export namespace kairo::editor
                 ImGuiIO& io = ImGui::GetIO();
                 io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard | ImGuiConfigFlags_DockingEnable;
                 io.ConfigWindowsMoveFromTitleBarOnly = true;
+#if defined(__APPLE__)
+                io.ConfigMacOSXBehaviors = true;
+#endif
 #if defined(KAIRO_EDITOR_UI_FONT_PATH)
                 if (io.Fonts->AddFontFromFileTTF(KAIRO_EDITOR_UI_FONT_PATH, 15.0f) == nullptr)
                     io.Fonts->AddFontDefault();

@@ -1,0 +1,4 @@
+kairo-project 1
+name "Kairo Starter Project"
+assets "Assets.kassets"
+startup-scene "Scenes/Main.kscene"

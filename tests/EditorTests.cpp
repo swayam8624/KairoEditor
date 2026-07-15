@@ -128,11 +128,12 @@ TEST_CASE("Failed project opens preserve the live session", "[KairoEditor][Proje
     ProjectSession session;
     session.CreateProject(good, "Good Project");
     const auto stable = session.EditScene().CreateEntity("Still Here");
-    session.SaveScene();
 
     std::filesystem::create_directories(broken);
     SaveProjectDescriptor(broken / DefaultProjectFileName,
         { "Broken Project", "Missing.kassets", "Missing.kscene" });
+    REQUIRE_THROWS_AS(session.OpenProject(broken / DefaultProjectFileName), std::logic_error);
+    session.SaveScene();
     REQUIRE_THROWS(session.OpenProject(broken / DefaultProjectFileName));
     CHECK(session.Descriptor().Name == "Good Project");
     CHECK(session.Scene().Contains(stable));

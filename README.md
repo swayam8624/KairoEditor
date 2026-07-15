@@ -38,9 +38,35 @@ It validates typed EngineCore asset handles against a live `KairoAssets`
 registry, then resolves registered mesh IDs to renderer-owned GPU handles and
 extracts visible entities every frame. The hierarchy, transform inspector, and
 viewport therefore operate on one scene instead of disconnected demo data.
-The startup cube is an editable untitled-scene object using the explicit
-`builtin/cube` metadata record with a persistent UUID; it is not hidden inside
-KairoRenderer and remains valid if its logical path moves.
+The starter cube is loaded from a committed project descriptor, asset manifest,
+and scene file using the explicit `builtin/cube` metadata record with a
+persistent UUID; it is not hidden inside KairoRenderer and remains valid if its
+logical path moves.
+
+## Project sessions
+
+The editor opens versioned `.kproject` descriptors instead of constructing a
+hardcoded startup scene. A descriptor points to one validated KairoAssets
+manifest and startup `.kscene` using project-root-relative portable paths:
+
+```text
+kairo-project 1
+name "Kairo Starter Project"
+assets "Assets.kassets"
+startup-scene "Scenes/Main.kscene"
+```
+
+`ProjectSession` owns the address-stable scene and asset registry used by editor
+state, persistence, the Content Browser, and renderer extraction. Project and
+scene replacement reject unsaved work unless the caller explicitly chooses the
+discard policy. New projects are built in a unique sibling staging directory
+and published by directory rename; descriptors, manifests, and scenes each use
+atomic same-directory replacement.
+
+The native File menu saves the active scene or all dirty project data, and
+`Cmd+S`/`Ctrl+S` saves the scene. This milestone accepts project paths through
+`--project`; native create/open dialogs will call the same session API rather
+than introducing another persistence path.
 
 Code, Graph, and Split are views over one future authored-document model, not
 independent sources of truth. The current shell exposes the workspace and panel
@@ -52,11 +78,13 @@ contracts without pretending that the typed graph compiler already exists.
 cmake -S . -B build -G Ninja -DCMAKE_CXX_COMPILER=/opt/homebrew/opt/llvm/bin/clang++
 cmake --build build
 ctest --test-dir build --output-on-failure
-./build/KairoEditorApp
+./build/KairoEditorApp \
+  --project examples/StarterProject/Project.kproject
 ```
 
-`KairoEditorApp --frames 3` runs a bounded native smoke session used by CTest
-to verify initialization, frame recording, presentation, and orderly shutdown.
+Appending `--frames 3` runs a bounded native smoke session used by CTest to
+verify project loading, asset resolution, initialization, frame recording,
+presentation, and orderly shutdown.
 
 For CI or consumers that only need the backend-neutral editor state library:
 
