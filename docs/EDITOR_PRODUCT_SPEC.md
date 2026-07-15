@@ -131,7 +131,8 @@ Implemented and verified:
   Content Browser metadata;
 - bounded command history with reversible hierarchy and Inspector edits;
 - project-scoped dock layout persistence and a live scene/status summary;
-- shared UTF-8/value boundaries and a deterministic typed node-schema registry.
+- shared UTF-8/value boundaries and a deterministic typed node-schema registry;
+- bounded deterministic graph topology with stable IDs and located validation.
 
 Not yet represented as complete product surfaces:
 

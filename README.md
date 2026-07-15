@@ -102,9 +102,17 @@ asset IDs. Schema registration rejects duplicate or malformed type/pin keys,
 invalid defaults, illegal required outputs, and ambiguous pin contracts before
 they can enter an authored graph.
 
-This is the first layer of the graph/code system, not a claim that the visual
-node canvas is complete. Graph mutation, diagnostics, canonical persistence,
-commands, and compiler projection land before the UI can create real nodes.
+`AuthoringDocument` now supplies the deterministic mutable topology: bounded
+node/pin/connection counts, stable ID restoration, finite canvas positions,
+schema-instantiated defaults, typed property mutation, non-mutating connection
+previews, cardinality enforcement, and incident-edge cleanup. Validation emits
+stable node/pin diagnostics for unknown schemas, schema drift, required inputs,
+and missing defaults. The same API is intended for graph and structured-text
+commands.
+
+This is not a claim that the visual node canvas is complete. Canonical
+persistence, reversible document commands, and compiler projection land before
+the UI can create real nodes.
 
 Code, Graph, and Split are views over one future authored-document model, not
 independent sources of truth. The current shell exposes the workspace and panel

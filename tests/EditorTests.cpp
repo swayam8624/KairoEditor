@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <filesystem>
 #include <limits>
 #include <memory>
@@ -94,6 +95,38 @@ TEST_CASE("Document schema registry validates and orders node contracts", "[Kair
 
 namespace
 {
+    [[nodiscard]] NodeSchema MakeAddFloatSchema()
+    {
+        NodeSchema schema;
+        schema.Kind = DocumentKind::Logic;
+        schema.TypeKey = "kairo.logic.add-float";
+        schema.DisplayName = "Add Float";
+        schema.Category = "Math";
+        schema.Pins = {
+            { "a", "A", PinDirection::Input, ValueType::Float, PinCardinality::Single, false, DocumentValue(0.0) },
+            { "b", "B", PinDirection::Input, ValueType::Float, PinCardinality::Single, false, DocumentValue(0.0) },
+            { "result", "Result", PinDirection::Output, ValueType::Float, PinCardinality::Multiple, false, std::nullopt }
+        };
+        schema.PropertyDefaults.emplace("clamp", DocumentValue(false));
+        return schema;
+    }
+
+    [[nodiscard]] NodeSchema MakePrintSchema()
+    {
+        NodeSchema schema;
+        schema.Kind = DocumentKind::Logic;
+        schema.TypeKey = "kairo.logic.print";
+        schema.DisplayName = "Print";
+        schema.Category = "Debug";
+        schema.Pins = {
+            { "in", "In", PinDirection::Input, ValueType::Flow, PinCardinality::Single, true, std::nullopt },
+            { "out", "Out", PinDirection::Output, ValueType::Flow, PinCardinality::Multiple, false, std::nullopt },
+            { "message", "Message", PinDirection::Input, ValueType::String, PinCardinality::Single,
+                false, DocumentValue(std::string{}) }
+        };
+        return schema;
+    }
+
     class IntegerCommand final : public EditorCommand
     {
     public:
@@ -111,6 +144,110 @@ namespace
         int m_Delta;
         bool m_Fail;
     };
+}
+
+TEST_CASE("Authoring documents enforce typed deterministic graph topology", "[KairoEditor][Document][Graph]")
+{
+    const auto documentID = kairo::assets::AssetID::Parse("00000000-0000-4000-8000-000000000501");
+    const NodeSchema add = MakeAddFloatSchema();
+    AuthoringDocument document(documentID, DocumentKind::Logic, "Damage Formula");
+    const NodeID left = document.AddNode(add, { -120.0, 40.0 });
+    const NodeID right = document.AddNode(add, { 180.0, 40.0 });
+    REQUIRE(left.Value == 1u);
+    REQUIRE(right.Value == 2u);
+    REQUIRE(document.Node(left).Pins.size() == 3u);
+    CHECK(document.PinCount() == 6u);
+    const PinID leftResult = document.Node(left).Pins[2].ID;
+    const PinID rightA = document.Node(right).Pins[0].ID;
+    const PinID rightB = document.Node(right).Pins[1].ID;
+
+    CHECK(document.CanConnect(leftResult, rightA).Allowed);
+    document.Connect(leftResult, rightA);
+    CHECK(document.ConnectionCount() == 1u);
+    CHECK(document.IsConnected(rightA));
+    CHECK(document.NodeForPin(rightA) == right);
+    CHECK(document.CanConnect(leftResult, rightA).Code == "duplicate");
+    CHECK(document.CanConnect(rightA, leftResult).Code == "direction");
+    document.Connect(leftResult, rightB);
+    CHECK(document.ConnectionCount() == 2u);
+    CHECK(document.CanConnect(document.Node(right).Pins[2].ID, rightA).Code == "input-cardinality");
+
+    document.SetProperty(left, "clamp", DocumentValue(true));
+    CHECK(document.Node(left).Properties.at("clamp").Get<bool>());
+    REQUIRE_THROWS_AS(document.SetProperty(left, "clamp", DocumentValue(1.0)), std::invalid_argument);
+    document.SetPinDefault(rightB, DocumentValue(8.5));
+    CHECK(document.Pin(rightB).DefaultValue->Get<double>() == 8.5);
+    REQUIRE_THROWS_AS(document.SetNodePosition(left,
+        { std::numeric_limits<double>::quiet_NaN(), 0.0 }), std::invalid_argument);
+
+    document.RemoveNode(left);
+    CHECK_FALSE(document.Contains(left));
+    CHECK(document.ConnectionCount() == 0u);
+    CHECK(document.PinCount() == 3u);
+    REQUIRE_THROWS_AS(document.Disconnect(leftResult, rightA), std::out_of_range);
+
+    REQUIRE_THROWS_AS(AuthoringDocument({}, DocumentKind::Logic, "Invalid"), std::invalid_argument);
+    REQUIRE_THROWS_AS(AuthoringDocument(documentID, DocumentKind::Logic, "bad\nname"), std::invalid_argument);
+    NodeSchema material = add;
+    material.Kind = DocumentKind::Material;
+    material.TypeKey = "kairo.material.add-float";
+    REQUIRE_THROWS_AS(document.AddNode(material), std::invalid_argument);
+}
+
+TEST_CASE("Authoring documents restore IDs and report schema-aware diagnostics", "[KairoEditor][Document][Validation]")
+{
+    const auto documentID = kairo::assets::AssetID::Parse("00000000-0000-4000-8000-000000000502");
+    const NodeSchema add = MakeAddFloatSchema();
+    const NodeSchema print = MakePrintSchema();
+    DocumentSchemaRegistry schemas;
+    schemas.Register(add);
+    schemas.Register(print);
+
+    AuthoringDocument document(documentID, DocumentKind::Logic, "Restored Graph");
+    document.AddNodeWithIDs(add, { 42u }, { PinID{ 100u }, PinID{ 101u }, PinID{ 102u } }, { 10.0, 20.0 });
+    REQUIRE_THROWS_AS(document.AddNodeWithIDs(add, { 42u },
+        { PinID{ 110u }, PinID{ 111u }, PinID{ 112u } }), std::invalid_argument);
+    REQUIRE_THROWS_AS(document.AddNodeWithIDs(add, { 50u },
+        { PinID{ 100u }, PinID{ 111u }, PinID{ 112u } }), std::invalid_argument);
+    const NodeID printNode = document.AddNode(print);
+    CHECK(printNode.Value == 43u);
+    CHECK(document.Node(printNode).Pins.front().ID.Value == 103u);
+
+    auto diagnostics = ValidateDocument(document, schemas);
+    REQUIRE(HasErrors(diagnostics));
+    const auto required = std::ranges::find(diagnostics, std::string("required-input"), &DocumentDiagnostic::Code);
+    REQUIRE(required != diagnostics.end());
+    CHECK(required->Node == printNode);
+    CHECK(required->Pin == document.Node(printNode).Pins.front().ID);
+    document.ClearPinDefault(document.Node(printNode).Pins[2].ID);
+    diagnostics = ValidateDocument(document, schemas);
+    CHECK(std::ranges::find(diagnostics, std::string("missing-input-value"),
+        &DocumentDiagnostic::Code) != diagnostics.end());
+
+    DocumentSchemaRegistry missingSchemas;
+    diagnostics = ValidateDocument(document, missingSchemas);
+    CHECK(HasErrors(diagnostics));
+    CHECK(diagnostics.front().Code == "unknown-node-type");
+
+    AuthoringDocument complete(documentID, DocumentKind::Logic, "Complete Graph");
+    NodeSchema start;
+    start.Kind = DocumentKind::Logic;
+    start.TypeKey = "kairo.logic.start";
+    start.DisplayName = "Start";
+    start.Category = "Events";
+    start.Pins = {
+        { "out", "Out", PinDirection::Output, ValueType::Flow, PinCardinality::Multiple, false, std::nullopt }
+    };
+    schemas.Register(start);
+    const NodeID startNode = complete.AddNode(start);
+    const NodeID completePrint = complete.AddNode(print);
+    complete.Connect(complete.Node(startNode).Pins[0].ID, complete.Node(completePrint).Pins[0].ID);
+    CHECK_FALSE(HasErrors(ValidateDocument(complete, schemas)));
+
+    const auto mismatch = complete.CanConnect(complete.Node(startNode).Pins[0].ID,
+        complete.Node(completePrint).Pins[2].ID);
+    CHECK_FALSE(mismatch.Allowed);
+    CHECK(mismatch.Code == "type");
 }
 
 TEST_CASE("Command history preserves causal branches and bounded storage", "[KairoEditor][Commands]")
