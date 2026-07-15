@@ -19,6 +19,11 @@ export namespace kairo::editor
     /// both visible for users who learn visually but still need exact code.
     enum class AuthoringSurface : std::uint8_t { Code, Graph, CodeAndGraph };
 
+    /// Explicit data-loss policy shared by scenes, assets, and structured
+    /// authoring documents. Destructive lifecycle operations reject dirty state
+    /// unless the caller has already obtained an intentional discard decision.
+    enum class UnsavedChangesPolicy : std::uint8_t { Reject, Discard };
+
     enum class Panel : std::uint8_t
     {
         Hierarchy,

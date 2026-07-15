@@ -2,6 +2,7 @@ export module Kairo.Editor;
 export import Kairo.Editor.Types;
 export import Kairo.Editor.TextValidation;
 export import Kairo.Editor.TextFormat;
+export import Kairo.Editor.ProjectPaths;
 export import Kairo.Editor.DocumentTypes;
 export import Kairo.Editor.DocumentSchema;
 export import Kairo.Editor.AuthoringDocument;

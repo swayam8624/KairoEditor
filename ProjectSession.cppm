@@ -11,18 +11,14 @@ module;
 export module Kairo.Editor.ProjectSession;
 
 import Kairo.Assets;
+import Kairo.Editor.Types;
 import Kairo.Editor.ProjectDescriptor;
+import Kairo.Editor.ProjectPaths;
 import Kairo.EngineCore;
 
 export namespace kairo::editor
 {
     inline constexpr std::string_view DefaultProjectFileName = "Project.kproject";
-
-    enum class UnsavedChangesPolicy
-    {
-        Reject,
-        Discard
-    };
 
     /// Owns one editor project's metadata registry and authored scene.
     ///
@@ -252,47 +248,5 @@ export namespace kairo::editor
                 throw std::logic_error("Cannot " + std::string(action) + " while the current project has unsaved changes.");
         }
 
-        [[nodiscard]] static bool IsWithin(const std::filesystem::path& root,
-            const std::filesystem::path& candidate) noexcept
-        {
-            auto rootPart = root.begin();
-            auto candidatePart = candidate.begin();
-            for (; rootPart != root.end(); ++rootPart, ++candidatePart)
-                if (candidatePart == candidate.end() || *rootPart != *candidatePart) return false;
-            return true;
-        }
-
-        [[nodiscard]] static std::filesystem::path CanonicalExistingFile(
-            const std::filesystem::path& path, std::string_view role)
-        {
-            if (path.empty()) throw std::invalid_argument(std::string(role) + " path cannot be empty.");
-            std::error_code error;
-            const auto canonical = std::filesystem::canonical(path, error);
-            if (error) throw std::runtime_error("Cannot resolve " + std::string(role) + ": " + error.message());
-            if (!std::filesystem::is_regular_file(canonical, error) || error)
-                throw std::runtime_error(std::string(role) + " is not a regular file.");
-            return canonical;
-        }
-
-        [[nodiscard]] static std::filesystem::path ResolveExistingProjectFile(
-            const std::filesystem::path& root, const std::filesystem::path& relative,
-            std::string_view role)
-        {
-            const auto normalized = kairo::assets::NormalizeAssetPath(relative);
-            const auto canonical = CanonicalExistingFile(root / normalized, role);
-            if (!IsWithin(root, canonical)) throw std::invalid_argument(std::string(role) + " escapes the project root.");
-            return canonical;
-        }
-
-        [[nodiscard]] static std::filesystem::path ResolveProjectOutput(
-            const std::filesystem::path& root, const std::filesystem::path& relative)
-        {
-            const auto normalized = kairo::assets::NormalizeAssetPath(relative);
-            std::error_code error;
-            const auto weak = std::filesystem::weakly_canonical(root / normalized, error);
-            if (error) throw std::runtime_error("Cannot resolve project output path: " + error.message());
-            if (!IsWithin(root, weak)) throw std::invalid_argument("Project output path escapes the project root.");
-            return weak;
-        }
     };
 }
