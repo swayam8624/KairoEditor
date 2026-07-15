@@ -141,6 +141,13 @@ non-destructive create, atomic save/save-as, explicit replacement policy, and
 strong failure behavior. Closing a document clears the shared document command
 journal before referenced object lifetimes end.
 
+`ProjectSession` binds that workspace to `KairoAssets`: document creation uses
+one persistent ID for asset metadata, file content, compiler artifacts, and UI
+selection; registered type and portable path must agree before opening or
+saving. Project dirty guards and Save All include every open document, while an
+unregistered `.kdoc` must enter through the future explicit import transaction
+instead of silently bypassing metadata.
+
 Code, Graph, and Split are views over the same authored-document model, not
 independent sources of truth. The current shell exposes workspace and panel
 contracts, while the production graph/text projections remain the next UI

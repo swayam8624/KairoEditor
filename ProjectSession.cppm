@@ -1,6 +1,9 @@
 module;
 
+#include <cstddef>
+#include <cstdint>
 #include <filesystem>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -11,8 +14,12 @@ module;
 export module Kairo.Editor.ProjectSession;
 
 import Kairo.Assets;
+import Kairo.Editor.AuthoringDocument;
+import Kairo.Editor.CommandHistory;
+import Kairo.Editor.DocumentTypes;
 import Kairo.Editor.Types;
 import Kairo.Editor.ProjectDescriptor;
+import Kairo.Editor.ProjectDocuments;
 import Kairo.Editor.ProjectPaths;
 import Kairo.EngineCore;
 
@@ -41,7 +48,10 @@ export namespace kairo::editor
         [[nodiscard]] bool HasProject() const noexcept { return m_HasProject; }
         [[nodiscard]] bool IsSceneDirty() const noexcept { return m_SceneDirty; }
         [[nodiscard]] bool AreAssetsDirty() const noexcept { return m_AssetsDirty; }
-        [[nodiscard]] bool HasUnsavedChanges() const noexcept { return m_SceneDirty || m_AssetsDirty; }
+        [[nodiscard]] bool HasUnsavedChanges() const noexcept
+        {
+            return m_SceneDirty || m_AssetsDirty || m_Documents.HasUnsavedChanges();
+        }
 
         [[nodiscard]] const ProjectDescriptor& Descriptor() const { RequireProject(); return m_Descriptor; }
         [[nodiscard]] const std::filesystem::path& ProjectFile() const { RequireProject(); return m_ProjectFile; }
@@ -66,6 +76,110 @@ export namespace kairo::editor
 
         void MarkSceneDirty() { RequireProject(); m_SceneDirty = true; }
         void MarkAssetsDirty() { RequireProject(); m_AssetsDirty = true; }
+
+        [[nodiscard]] const ProjectDocuments& Documents() const { RequireProject(); return m_Documents; }
+        [[nodiscard]] const AuthoringDocument& Document(kairo::assets::AssetID id) const
+        {
+            RequireProject();
+            return m_Documents.Get(id);
+        }
+        [[nodiscard]] AuthoringDocument& EditDocument(kairo::assets::AssetID id)
+        {
+            RequireProject();
+            return m_Documents.Edit(id);
+        }
+        [[nodiscard]] CommandHistory& DocumentHistory()
+        {
+            RequireProject();
+            return m_Documents.History();
+        }
+
+        /// Creates one unsaved typed document and matching asset metadata as a
+        /// single in-memory transaction. The persistent ID is shared by file,
+        /// tab, compiler artifact, and registry; no path-derived identity exists.
+        [[nodiscard]] kairo::assets::AssetID CreateDocument(DocumentKind kind, std::string name,
+            const std::filesystem::path& projectRelativePath)
+        {
+            RequireProject();
+            const auto relative = kairo::assets::NormalizeAssetPath(projectRelativePath);
+            kairo::assets::AssetID id;
+            for (std::size_t attempt = 0u; attempt < 64u; ++attempt)
+            {
+                id = kairo::assets::GenerateAssetID();
+                if (!m_Assets.Contains(id)) break;
+            }
+            if (!id.IsValid() || m_Assets.Contains(id))
+                throw std::runtime_error("Cannot allocate a unique authoring-document asset ID.");
+
+            m_Documents.Create(id, kind, std::move(name), relative);
+            try
+            {
+                m_Assets.Insert({ id, kairo::assets::AssetType::Document,
+                    kairo::assets::AssetOrigin::SourceFile, relative,
+                    "kairo.document-v1", 1u, {} });
+            }
+            catch (...)
+            {
+                m_Documents.Close(id, UnsavedChangesPolicy::Discard);
+                throw;
+            }
+            m_AssetsDirty = true;
+            return id;
+        }
+
+        /// Opens only registry-owned document files. Importing an unregistered
+        /// file is a distinct asset-import transaction, preventing a tab from
+        /// silently bypassing dependency metadata and path uniqueness.
+        [[nodiscard]] kairo::assets::AssetID OpenDocument(
+            const std::filesystem::path& projectRelativePath)
+        {
+            RequireProject();
+            const auto metadata = m_Assets.FindByPath(projectRelativePath);
+            if (!metadata.has_value())
+                throw std::out_of_range("No asset metadata exists for this authoring-document path.");
+            if (metadata->Type != kairo::assets::AssetType::Document)
+                throw std::invalid_argument("The requested project asset is not an authoring document.");
+            return m_Documents.Open(metadata->Path, metadata->ID);
+        }
+
+        void SaveDocument(kairo::assets::AssetID id)
+        {
+            RequireDocumentMetadata(id);
+            m_Documents.Save(id);
+        }
+
+        void SaveDocumentAs(kairo::assets::AssetID id,
+            const std::filesystem::path& projectRelativePath,
+            ExistingDocumentPolicy policy = ExistingDocumentPolicy::Reject)
+        {
+            const auto metadata = RequireDocumentMetadata(id);
+            const auto relative = kairo::assets::NormalizeAssetPath(projectRelativePath);
+            if (kairo::assets::PortableAssetPathKey(relative) ==
+                kairo::assets::PortableAssetPathKey(metadata.Path))
+            {
+                m_Documents.Save(id);
+                return;
+            }
+            if (const auto owner = m_Assets.FindByPath(relative);
+                owner.has_value() && owner->ID != id)
+                throw std::invalid_argument("Another project asset already owns the document destination path.");
+            if (metadata.Revision == std::numeric_limits<std::uint64_t>::max())
+                throw std::overflow_error("Document asset revision is exhausted and cannot be moved.");
+
+            // Registry preconditions are proven before disk publication. Under
+            // ProjectSession's single-writer editor contract, Move cannot then
+            // fail due to an intervening metadata mutation.
+            m_Documents.SaveAs(id, relative, policy);
+            m_Assets.Move(id, relative);
+            m_AssetsDirty = true;
+        }
+
+        void CloseDocument(kairo::assets::AssetID id,
+            UnsavedChangesPolicy policy = UnsavedChangesPolicy::Reject)
+        {
+            RequireProject();
+            m_Documents.Close(id, policy);
+        }
 
         /// Task: create an empty project without exposing partially written
         /// state. Files are built inside a unique sibling staging directory and
@@ -124,9 +238,10 @@ export namespace kairo::editor
             UnsavedChangesPolicy policy = UnsavedChangesPolicy::Reject)
         {
             RejectUnsavedReplacement(policy, "open another project");
-            const std::filesystem::path canonicalFile = CanonicalExistingFile(projectFile, "project descriptor");
-            const std::filesystem::path root = canonicalFile.parent_path();
+            std::filesystem::path canonicalFile = CanonicalExistingFile(projectFile, "project descriptor");
+            std::filesystem::path root = canonicalFile.parent_path();
             ProjectDescriptor descriptor = LoadProjectDescriptor(canonicalFile);
+            std::filesystem::path activeScenePath = descriptor.StartupScene;
             const std::filesystem::path manifest = ResolveExistingProjectFile(root, descriptor.AssetManifest, "asset manifest");
             const std::filesystem::path scenePath = ResolveExistingProjectFile(root, descriptor.StartupScene, "startup scene");
 
@@ -134,18 +249,21 @@ export namespace kairo::editor
             kairo::assets::LoadAssetManifest(manifest, candidateAssets);
             kairo::engine::Scene candidateScene;
             kairo::engine::LoadScene(scenePath, candidateAssets, candidateScene);
+            ProjectDocuments candidateDocuments(root);
 
             // Registry replacement provides the strong exception guarantee. All
             // following moves are non-throwing for these standard allocator types.
             static_assert(std::is_nothrow_move_assignable_v<kairo::engine::Scene>);
             static_assert(std::is_nothrow_move_assignable_v<ProjectDescriptor>);
             static_assert(std::is_nothrow_move_assignable_v<std::filesystem::path>);
+            static_assert(std::is_nothrow_move_assignable_v<ProjectDocuments>);
             m_Assets.ReplaceAll(candidateAssets.Snapshot());
             m_Scene = std::move(candidateScene);
+            m_Documents = std::move(candidateDocuments);
             m_Descriptor = std::move(descriptor);
-            m_ProjectFile = canonicalFile;
-            m_ProjectRoot = root;
-            m_ActiveScenePath = m_Descriptor.StartupScene;
+            m_ProjectFile = std::move(canonicalFile);
+            m_ProjectRoot = std::move(root);
+            m_ActiveScenePath = std::move(activeScenePath);
             m_HasProject = true;
             m_SceneDirty = false;
             m_AssetsDirty = false;
@@ -206,6 +324,7 @@ export namespace kairo::editor
         {
             RequireProject();
             (void)kairo::engine::SerializeScene(m_Scene, m_Assets);
+            m_Documents.SaveAll();
             SaveAssets();
             SaveScene();
         }
@@ -215,6 +334,7 @@ export namespace kairo::editor
             if (!m_HasProject) return;
             if (HasUnsavedChanges() && policy == UnsavedChangesPolicy::Reject)
                 throw std::logic_error("Cannot close a project with unsaved changes.");
+            m_Documents.CloseAll(UnsavedChangesPolicy::Discard);
             m_Assets.ReplaceAll({});
             m_Scene = {};
             m_Descriptor = {};
@@ -233,6 +353,7 @@ export namespace kairo::editor
         std::filesystem::path m_ActiveScenePath;
         kairo::assets::AssetRegistry m_Assets;
         kairo::engine::Scene m_Scene;
+        ProjectDocuments m_Documents;
         bool m_HasProject = false;
         bool m_SceneDirty = false;
         bool m_AssetsDirty = false;
@@ -246,6 +367,21 @@ export namespace kairo::editor
         {
             if (HasUnsavedChanges() && policy == UnsavedChangesPolicy::Reject)
                 throw std::logic_error("Cannot " + std::string(action) + " while the current project has unsaved changes.");
+        }
+
+        [[nodiscard]] kairo::assets::AssetMetadata RequireDocumentMetadata(
+            kairo::assets::AssetID id) const
+        {
+            RequireProject();
+            const auto metadata = m_Assets.Find(id);
+            if (!metadata.has_value()) throw std::out_of_range("Authoring document is not registered as a project asset.");
+            if (metadata->Type != kairo::assets::AssetType::Document)
+                throw std::invalid_argument("Asset ID does not identify an authoring document.");
+            if (!m_Documents.Contains(id)) throw std::logic_error("Authoring document asset is not open.");
+            if (kairo::assets::PortableAssetPathKey(metadata->Path) !=
+                kairo::assets::PortableAssetPathKey(m_Documents.RelativePath(id)))
+                throw std::logic_error("Open document path disagrees with its asset metadata.");
+            return *metadata;
         }
 
     };

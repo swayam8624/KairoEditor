@@ -148,7 +148,10 @@ Implemented and verified:
   bounded identity-bearing artifacts; no placeholder execution semantics;
 - a project-bound multi-document workspace with stable asset identity,
   portable path uniqueness, explicit dirty/overwrite policy, atomic file
-  replacement, and safe command-reference lifetime boundaries.
+  replacement, and safe command-reference lifetime boundaries;
+- `ProjectSession` transactions that keep `.kdoc` identity/path synchronized
+  with first-class `KairoAssets::Document` metadata and include document state
+  in project save and destructive-lifecycle guards.
 
 Not yet represented as complete product surfaces:
 

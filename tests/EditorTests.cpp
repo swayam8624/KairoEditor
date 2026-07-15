@@ -701,16 +701,58 @@ TEST_CASE("Project sessions create save and reopen complete projects", "[KairoEd
     auto& scene = session.EditScene();
     const auto cube = scene.CreateEntityWithID({ 27u }, "Saved Cube");
     scene.SetMeshRenderer(cube, { { mesh }, { material }, true });
+    const auto document = session.CreateDocument(DocumentKind::Logic,
+        "Player Logic", "Logic/Player.kdoc");
+    AuthoringDocument& logic = session.EditDocument(document);
+    session.DocumentHistory().Execute(
+        std::make_unique<AddDocumentNodeCommand>(logic, MakeAddFloatSchema(), CanvasPosition{ 15.0, 25.0 }));
     REQUIRE(session.IsSceneDirty());
     REQUIRE(session.AreAssetsDirty());
+    REQUIRE(session.Documents().IsDirty(document));
+    CHECK(session.Assets().At(document).Type == kairo::assets::AssetType::Document);
+    CHECK(session.Assets().At(document).Path == std::filesystem::path("Logic/Player.kdoc"));
     session.SaveAll();
     CHECK_FALSE(session.HasUnsavedChanges());
+    CHECK(std::filesystem::is_regular_file(root / "Logic/Player.kdoc"));
 
     ProjectSession reopened;
     reopened.OpenProject(root / DefaultProjectFileName);
     CHECK(reopened.Scene().Contains(cube));
     CHECK(reopened.Scene().Name(cube).Value == "Saved Cube");
     CHECK(reopened.Assets().Contains(mesh));
+    CHECK(reopened.OpenDocument("Logic/Player.kdoc") == document);
+    CHECK(reopened.Document(document).NodeCount() == 1u);
+    reopened.SaveDocumentAs(document, "Logic/PlayerRenamed.kdoc");
+    CHECK(reopened.Assets().At(document).Path == std::filesystem::path("Logic/PlayerRenamed.kdoc"));
+    REQUIRE(reopened.AreAssetsDirty());
+    reopened.SaveAll();
+    CHECK_FALSE(reopened.HasUnsavedChanges());
+    CHECK(std::filesystem::is_regular_file(root / "Logic/PlayerRenamed.kdoc"));
+    std::filesystem::remove_all(root);
+}
+
+TEST_CASE("Project sessions include document dirtiness in destructive lifecycle guards",
+    "[KairoEditor][Project][Session][Document]")
+{
+    const auto root = std::filesystem::temp_directory_path() /
+        ("kairo-session-document-dirty-" + kairo::assets::GenerateAssetID().ToString());
+    ProjectSession session;
+    session.CreateProject(root, "Document Dirty Guard");
+    const auto document = session.CreateDocument(DocumentKind::Material,
+        "Material Graph", "Materials/Test.kdoc");
+    session.SaveAll();
+    CHECK_FALSE(session.HasUnsavedChanges());
+
+    session.EditDocument(document).Rename("Unsaved Material Graph");
+    REQUIRE(session.HasUnsavedChanges());
+    REQUIRE_THROWS_AS(session.Close(), std::logic_error);
+    REQUIRE_THROWS_AS(session.OpenProject(root / DefaultProjectFileName), std::logic_error);
+    CHECK(session.Document(document).Name() == "Unsaved Material Graph");
+
+    session.CloseDocument(document, UnsavedChangesPolicy::Discard);
+    CHECK_FALSE(session.HasUnsavedChanges());
+    CHECK_FALSE(session.DocumentHistory().CanUndo());
+    session.Close();
     std::filesystem::remove_all(root);
 }
 
