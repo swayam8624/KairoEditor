@@ -103,9 +103,12 @@ TEST_CASE("Document compiler boundary publishes validated artifacts",
     const DocumentCompileResult compiled = CompileDocument(fixture.Valid, fixture.Schemas, compiler);
     REQUIRE(compiled.Succeeded());
     REQUIRE(compiled.Artifact.has_value());
-    CHECK(compiled.Artifact->Source == fixture.DocumentID);
-    CHECK(compiled.Artifact->Target == "kairo.logic.test-v1");
-    CHECK(compiled.Artifact->Payload == compiler.Output.Payload);
+    const bool sourceMatches = compiled.Artifact->Source == fixture.DocumentID;
+    const bool targetMatches = compiled.Artifact->Target == "kairo.logic.test-v1";
+    const bool payloadMatches = compiled.Artifact->Payload == compiler.Output.Payload;
+    CHECK(sourceMatches);
+    CHECK(targetMatches);
+    CHECK(payloadMatches);
     CHECK(compiler.Calls == 1u);
 }
 
