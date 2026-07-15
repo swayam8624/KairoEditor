@@ -45,7 +45,22 @@ export namespace kairo::editor
         std::vector<PinSchema> Pins;
         std::map<std::string, DocumentValue, std::less<>> PropertyDefaults;
 
-        friend bool operator==(const NodeSchema&, const NodeSchema&) = default;
+        /// Explicit comparison keeps schema tests portable across C++ module
+        /// implementations. Some MSVC versions delete a defaulted comparison
+        /// for std::map members even though DocumentValue is comparable.
+        [[nodiscard]] friend bool operator==(const NodeSchema& left, const NodeSchema& right)
+        {
+            if (left.Kind != right.Kind || left.TypeKey != right.TypeKey ||
+                left.DisplayName != right.DisplayName || left.Category != right.Category ||
+                left.Pins != right.Pins || left.PropertyDefaults.size() != right.PropertyDefaults.size())
+                return false;
+            auto leftProperty = left.PropertyDefaults.begin();
+            auto rightProperty = right.PropertyDefaults.begin();
+            for (; leftProperty != left.PropertyDefaults.end(); ++leftProperty, ++rightProperty)
+                if (leftProperty->first != rightProperty->first || leftProperty->second != rightProperty->second)
+                    return false;
+            return true;
+        }
     };
 
     [[nodiscard]] inline bool IsSchemaKey(std::string_view key, bool allowDots) noexcept
