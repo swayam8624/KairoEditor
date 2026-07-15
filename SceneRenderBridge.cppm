@@ -61,8 +61,7 @@ export namespace kairo::editor
             const auto& meshRenderer = scene.MeshRenderer(entity);
             result.Add({
                 assets.ResolveMesh(meshRenderer.MeshAsset),
-                kairo::foundation::math::ToMatrix4(scene.Transform(entity).Local),
-                { 1.0f, 1.0f, 1.0f }
+                kairo::foundation::math::ToMatrix4(scene.Transform(entity).Local)
             });
         }
         return result;
