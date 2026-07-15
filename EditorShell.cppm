@@ -22,6 +22,7 @@ export module Kairo.Editor.ImGuiShell;
 
 import Kairo.Editor;
 import Kairo.Editor.ImGuiGraphCanvas;
+import Kairo.Editor.UI;
 import Kairo.EngineCore;
 
 export namespace kairo::editor
@@ -127,9 +128,7 @@ export namespace kairo::editor
             for (const Workspace workspace : workspaces)
             {
                 const bool isActive = workspace == m_State.ActiveWorkspace();
-                if (isActive) ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_Header));
-                if (ImGui::Button(Name(workspace).data())) m_State.SwitchWorkspace(workspace);
-                if (isActive) ImGui::PopStyleColor();
+                if (ToolbarButton(Name(workspace), isActive)) m_State.SwitchWorkspace(workspace);
                 ImGui::SameLine();
             }
             ImGui::Separator();
@@ -173,14 +172,14 @@ export namespace kairo::editor
         {
             if (m_State.Mode() == EditorMode::Edit)
             {
-                if (ImGui::Button("Play")) m_State.Play();
+                if (ActionButton("Play", UIButtonTone::Primary)) m_State.Play();
             }
             else
             {
-                if (ImGui::Button("Stop")) m_State.Stop();
+                if (ActionButton("Stop", UIButtonTone::Destructive)) m_State.Stop();
                 ImGui::SameLine();
-                if (m_State.Mode() == EditorMode::Play && ImGui::Button("Pause")) m_State.Pause();
-                else if (m_State.Mode() == EditorMode::Pause && ImGui::Button("Resume")) m_State.Resume();
+                if (m_State.Mode() == EditorMode::Play && ActionButton("Pause")) m_State.Pause();
+                else if (m_State.Mode() == EditorMode::Pause && ActionButton("Resume", UIButtonTone::Primary)) m_State.Resume();
             }
         }
 
@@ -263,7 +262,7 @@ export namespace kairo::editor
         void DrawHierarchy()
         {
             if (!ImGui::Begin("Hierarchy")) { ImGui::End(); return; }
-            if (ImGui::Button("+ Entity"))
+            if (ActionButton("+ Entity", UIButtonTone::Primary))
             {
                 auto command = std::make_unique<CreateEntityCommand>(m_Project, "Entity");
                 auto* created = command.get();
@@ -273,8 +272,7 @@ export namespace kairo::editor
             if (ImGui::IsItemHovered()) ImGui::SetTooltip("Create entity");
             ImGui::SameLine();
             const auto selectedEntity = m_State.SelectedEntity();
-            if (!selectedEntity.has_value()) ImGui::BeginDisabled();
-            if (ImGui::Button("- Entity") && selectedEntity.has_value())
+            if (ActionButton("- Entity", UIButtonTone::Destructive, selectedEntity.has_value()) && selectedEntity.has_value())
             {
                 RunCommand([this, entity = *selectedEntity]
                 {
@@ -283,7 +281,6 @@ export namespace kairo::editor
                 });
             }
             if (ImGui::IsItemHovered()) ImGui::SetTooltip("Delete selected entity");
-            if (!selectedEntity.has_value()) ImGui::EndDisabled();
             ImGui::Separator();
             const auto& scene = m_Project.Scene();
             for (const auto entity : scene.Entities())
@@ -318,7 +315,7 @@ export namespace kairo::editor
                     });
             }
             auto transform = scene.Transform(*selected).Local;
-            ImGui::SeparatorText("Transform");
+            SectionHeader("Transform");
             bool changed = ImGui::DragFloat3("Position", &transform.Translation.x, 0.05f);
             changed |= ImGui::DragFloat3("Scale", &transform.Scale.x, 0.02f, 0.001f, 1000.0f,
                 "%.3f", ImGuiSliderFlags_AlwaysClamp);
@@ -373,8 +370,7 @@ export namespace kairo::editor
 
         void DrawContentBrowser()
         {
-            ImGui::SetNextItemWidth(-1.0f);
-            ImGui::InputTextWithHint("##AssetFilter", "Filter assets", m_AssetFilter.data(), m_AssetFilter.size());
+            (void)SearchField("##AssetFilter", "Filter assets", m_AssetFilter.data(), m_AssetFilter.size());
             const auto records = m_Project.Assets().Snapshot();
             const std::string filter = Lower(m_AssetFilter.data());
             std::size_t visible = 0u;

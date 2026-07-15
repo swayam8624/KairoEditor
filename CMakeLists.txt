@@ -88,7 +88,7 @@ if(KAIRO_EDITOR_BUILD_APP)
 
     add_library(KairoEditorImGui)
     target_sources(KairoEditorImGui PUBLIC FILE_SET CXX_MODULES BASE_DIRS ${CMAKE_CURRENT_SOURCE_DIR} FILES
-        EditorTheme.cppm ImGuiRuntime.cppm ImGuiGraphCanvas.cppm EditorShell.cppm)
+        KairoUI.cppm EditorTheme.cppm ImGuiRuntime.cppm ImGuiGraphCanvas.cppm EditorShell.cppm)
     target_link_libraries(KairoEditorImGui PUBLIC KairoEditor KairoRenderer KairoDearImGui)
 
     add_library(KairoEditorRendererBridge)
@@ -120,6 +120,9 @@ if(KAIRO_EDITOR_BUILD_TESTS)
         add_executable(KairoEditorRenderBridgeTests tests/SceneRenderBridgeTests.cpp)
         target_link_libraries(KairoEditorRenderBridgeTests PRIVATE KairoEditorRendererBridge Catch2::Catch2WithMain)
         add_test(NAME KairoEditorRenderBridgeTests COMMAND KairoEditorRenderBridgeTests)
+        add_executable(KairoEditorUITests tests/KairoUITests.cpp)
+        target_link_libraries(KairoEditorUITests PRIVATE KairoEditorImGui Catch2::Catch2WithMain)
+        add_test(NAME KairoEditorUITests COMMAND KairoEditorUITests)
         add_test(NAME KairoEditorNativeSmoke COMMAND KairoEditorApp
             --project ${CMAKE_CURRENT_SOURCE_DIR}/examples/StarterProject/Project.kproject
             --document Logic/Player.kdoc

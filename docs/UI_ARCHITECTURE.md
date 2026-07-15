@@ -3,9 +3,10 @@
 ## Decision
 
 KairoEditor uses the Dear ImGui docking branch as its current native desktop
-shell and interaction backend. Kairo-owned draw-list widgets provide the visual
-and behavioral identity for the graph canvas, viewport chrome, asset browser,
-timeline, inspectors, and other domain-specific tools.
+shell and interaction backend. `Kairo.Editor.UI` provides engine-owned visual
+tokens and semantic widgets on top of it, while Kairo-owned draw-list widgets
+provide the visual and behavioral identity for the graph canvas, viewport
+chrome, asset browser, timeline, inspectors, and other domain-specific tools.
 
 ImGui is not the editor data model. It may translate input and draw state, but
 it must not own project identity, scene data, document topology, validation,
@@ -58,6 +59,7 @@ Only native-shell modules may import Dear ImGui:
 
 ```text
 KairoEditorImGui
+    Kairo.Editor.UI
     EditorTheme
     ImGuiRuntime
     EditorShell
@@ -97,7 +99,28 @@ vectors and explicit viewport transforms.
   A visible control must execute a real command or clearly represent current
   read-only state.
 
-## Future KairoUI migration
+## Semantic KairoUI boundary
+
+`Kairo.Editor.UI` is not a second window toolkit. It is a small semantic
+surface over the current implementation: design tokens, action buttons,
+toolbar controls, search fields, section headings, muted metadata, and status
+labels. A panel may use low-level ImGui only for primitives that do not yet
+have a KairoUI counterpart; new ordinary controls should be added to this
+semantic layer first.
+
+The boundary prevents raw backend styling from becoming editor policy:
+
+```text
+Editor feature
+        |
+        v
+Kairo.Editor.UI semantic control
+        |
+        v
+Dear ImGui implementation today
+```
+
+## Future toolkit migration
 
 The long-term native toolkit may replace docking, layout, text rendering,
 widgets, animation, and input routing. It should consume the same editor APIs:
@@ -105,9 +128,9 @@ widgets, animation, and input routing. It should consume the same editor APIs:
 ```text
 KairoEditor domain state
         |
-        +-- KairoEditorImGui (current)
+        +-- Kairo.Editor.UI -> KairoEditorImGui (current)
         |
-        +-- KairoUI editor shell (future)
+        +-- alternative Kairo.Editor.UI implementation (future)
 ```
 
 Migration is permitted when KairoUI can match the current shell's docking,

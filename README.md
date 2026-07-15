@@ -30,6 +30,21 @@ and focused workspace presets. See [docs/EDITOR_PRODUCT_SPEC.md](docs/EDITOR_PRO
 The current and future UI ownership boundaries are recorded in
 [docs/UI_ARCHITECTURE.md](docs/UI_ARCHITECTURE.md).
 
+## KairoUI design system
+
+`Kairo.Editor.UI` is the semantic UI boundary inside the native shell. It owns
+the charcoal/yellow design tokens and reusable `ActionButton`, `ToolbarButton`,
+`SearchField`, `SectionHeader`, `MutedText`, and `StatusText` controls. Editor
+features call those named controls rather than adding ad hoc colors and widget
+styling directly to their panels. The initial migration covers the workspace
+toolbar, play controls, hierarchy commands, asset filtering, and inspector
+sections; more panels move over incrementally without changing project or
+authoring state.
+
+The module is intentionally implemented on Dear ImGui today, but its public
+tokens and semantic intent are engine-owned. This preserves one visual language
+for a later custom or Qt backend without introducing a second editor model.
+
 `KairoEditorApp` is the first native shell milestone. It uses the official
 Dear ImGui docking release, KairoRenderer's existing Vulkan device/render pass,
 the Kairo neutral theme, curated docking, workspace controls, live hierarchy
@@ -200,8 +215,8 @@ document: graph pan/zoom, graph selection, canonical structured-text baseline,
 and the live text draft. Clean drafts automatically follow graph and undo/redo
 changes. Dirty drafts are retained, and an external graph change raises an
 explicit conflict instead of silently discarding text or applying it over a
-newer document. This state is UI-backend-neutral so styled ImGui and the future
-native KairoUI shell can share identical conflict and tab-switch behavior.
+newer document. This state is UI-backend-neutral so styled ImGui and a future
+KairoUI implementation can share identical conflict and tab-switch behavior.
 
 ## Build and run
 
