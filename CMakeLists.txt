@@ -113,10 +113,16 @@ if(KAIRO_EDITOR_BUILD_TESTS)
     include(FetchContent)
     FetchContent_Declare(Catch2 GIT_REPOSITORY https://github.com/catchorg/Catch2.git GIT_TAG v3.5.4)
     FetchContent_MakeAvailable(Catch2)
-    add_executable(KairoEditorTests tests/EditorTests.cpp tests/DocumentCompilerTests.cpp)
+    add_executable(KairoEditorTests tests/EditorTests.cpp)
     target_link_libraries(KairoEditorTests PRIVATE KairoEditor Catch2::Catch2WithMain)
+    # Keep the module-heavy compiler boundary tests independent from Catch2's
+    # generated test functions. MSVC 19.44 otherwise ICEs while emitting module
+    # symbols for the fixture, before any test can run.
+    add_executable(KairoEditorDocumentCompilerTests tests/DocumentCompilerTests.cpp)
+    target_link_libraries(KairoEditorDocumentCompilerTests PRIVATE KairoEditor)
     enable_testing()
     add_test(NAME KairoEditorTests COMMAND KairoEditorTests)
+    add_test(NAME KairoEditorDocumentCompilerTests COMMAND KairoEditorDocumentCompilerTests)
     if(TARGET KairoEditorApp)
         add_executable(KairoEditorRenderBridgeTests tests/SceneRenderBridgeTests.cpp)
         target_link_libraries(KairoEditorRenderBridgeTests PRIVATE KairoEditorRendererBridge Catch2::Catch2WithMain)
