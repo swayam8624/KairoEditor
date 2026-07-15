@@ -61,10 +61,15 @@ It validates typed EngineCore asset handles against a live `KairoAssets`
 registry, then resolves registered mesh IDs to renderer-owned GPU handles and
 extracts visible entities every frame. The hierarchy, transform inspector, and
 viewport therefore operate on one scene instead of disconnected demo data.
-The starter cube is loaded from a committed project descriptor, asset manifest,
-and scene file using the explicit `builtin/cube` metadata record with a
-persistent UUID; it is not hidden inside KairoRenderer and remains valid if its
-logical path moves.
+Source OBJ meshes execute the shared KairoAssets transaction on project open:
+the importer fingerprints source bytes, reuses or publishes an immutable entry
+under `.kairo/derived-data`, parses the portable `kairo.mesh.v1` artifact, and
+adapts it once into KairoRenderer upload geometry. The starter cube is therefore
+a committed `Meshes/ShowcaseCube.obj` referenced by the project manifest and a
+persistent UUID, not geometry hidden in the editor or renderer. Unknown
+importers, missing files, corrupt cache entries, invalid topology, and
+line/column-located OBJ errors abort loading rather than producing partial GPU
+state. The import bridge test exercises both cache-miss and cache-hit paths.
 
 ## Project sessions
 
