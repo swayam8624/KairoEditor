@@ -26,7 +26,7 @@ endif()
 
 add_library(KairoEditor)
 target_sources(KairoEditor PUBLIC FILE_SET CXX_MODULES BASE_DIRS ${CMAKE_CURRENT_SOURCE_DIR} FILES
-    EditorTypes.cppm EditorState.cppm PanelState.cppm KairoEditor.cppm)
+    EditorTypes.cppm ProjectDescriptor.cppm EditorState.cppm PanelState.cppm KairoEditor.cppm)
 target_link_libraries(KairoEditor PUBLIC KairoEngineCore)
 
 if(KAIRO_EDITOR_BUILD_APP)
