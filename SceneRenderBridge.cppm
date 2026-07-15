@@ -2,7 +2,6 @@ module;
 
 #include <stdexcept>
 #include <string>
-#include <string_view>
 #include <unordered_map>
 
 export module Kairo.Editor.SceneRenderBridge;
@@ -13,9 +12,9 @@ import Kairo.Renderer;
 
 export namespace kairo::editor
 {
-    /// Maps serialized EngineCore mesh asset keys to renderer-owned handles.
+    /// Maps registered persistent mesh assets to renderer-owned GPU handles.
     ///
-    /// Input: non-empty project asset keys and valid handles created by
+    /// Input: a live project registry and valid handles created by
     /// RendererRuntime::CreateMesh.
     /// Output: deterministic lookup for scene render extraction.
     /// Task: keep GPU ownership in KairoRenderer while preventing EngineCore
@@ -23,24 +22,37 @@ export namespace kairo::editor
     class RenderAssetBindings final
     {
     public:
-        void BindMesh(std::string assetKey, kairo::renderer::MeshHandle handle)
+        explicit RenderAssetBindings(const kairo::assets::AssetRegistry& registry) noexcept
+            : m_Registry(registry) {}
+
+        void BindMesh(kairo::assets::MeshAssetHandle asset, kairo::renderer::MeshHandle handle)
         {
-            if (assetKey.empty()) throw std::invalid_argument("A render mesh asset key cannot be empty.");
+            (void)m_Registry.Resolve(asset);
             if (handle == kairo::renderer::InvalidMeshHandle) throw std::invalid_argument("A render mesh binding requires a valid handle.");
-            if (!m_Meshes.emplace(std::move(assetKey), handle).second)
-                throw std::invalid_argument("A render mesh asset key is already bound.");
+            if (!m_Meshes.emplace(asset.ID, handle).second)
+                throw std::invalid_argument("A render mesh asset is already bound.");
         }
 
-        [[nodiscard]] kairo::renderer::MeshHandle ResolveMesh(std::string_view assetKey) const
+        [[nodiscard]] kairo::renderer::MeshHandle ResolveMesh(kairo::assets::MeshAssetHandle asset) const
         {
-            const auto found = m_Meshes.find(std::string(assetKey));
+            (void)m_Registry.Resolve(asset);
+            const auto found = m_Meshes.find(asset.ID);
             if (found == m_Meshes.end())
-                throw std::out_of_range("No renderer mesh is bound for EngineCore asset key: " + std::string(assetKey));
+                throw std::out_of_range("No renderer mesh is bound for asset ID: " + asset.ID.ToString());
             return found->second;
         }
 
+        /// Task: prove the authored material reference remains registered and
+        /// correctly typed even while the M10 renderer uses factor-only PBR.
+        void ValidateMaterial(kairo::assets::MaterialAssetHandle asset) const
+        {
+            (void)m_Registry.Resolve(asset);
+        }
+
     private:
-        std::unordered_map<std::string, kairo::renderer::MeshHandle> m_Meshes;
+        const kairo::assets::AssetRegistry& m_Registry;
+        std::unordered_map<kairo::assets::AssetID, kairo::renderer::MeshHandle,
+            kairo::assets::AssetIDHash> m_Meshes;
     };
 
     /// Converts visible EngineCore mesh components into renderer-local draws.
@@ -59,6 +71,7 @@ export namespace kairo::editor
         for (const kairo::engine::Entity entity : scene.RenderableEntities())
         {
             const auto& meshRenderer = scene.MeshRenderer(entity);
+            assets.ValidateMaterial(meshRenderer.MaterialAsset);
             result.Add({
                 assets.ResolveMesh(meshRenderer.MeshAsset),
                 kairo::foundation::math::ToMatrix4(scene.Transform(entity).Local)

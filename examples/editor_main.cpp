@@ -37,15 +37,22 @@ int main(int argc, char** argv)
     {
         const auto frameLimit = ParseFrameLimit(argc, argv);
         kairo::renderer::RendererRuntime renderer({ "KairoEditor", 1600u, 1000u, true });
+        const auto cubeAsset = kairo::assets::AssetID::Parse("00000000-0000-4000-8000-000000000201");
+        const auto defaultMaterial = kairo::assets::AssetID::Parse("00000000-0000-4000-8000-000000000202");
+        kairo::assets::AssetRegistry projectAssets;
+        projectAssets.Insert({ cubeAsset, kairo::assets::AssetType::Mesh, kairo::assets::AssetOrigin::Builtin,
+            "builtin/cube", "kairo.builtin", 1u, {} });
+        projectAssets.Insert({ defaultMaterial, kairo::assets::AssetType::Material, kairo::assets::AssetOrigin::Builtin,
+            "builtin/default-material", "kairo.builtin", 1u, {} });
         kairo::engine::Scene scene;
         const auto cube = scene.CreateEntity("Cube");
-        scene.SetMeshRenderer(cube, { "builtin:cube", "builtin:default", true });
+        scene.SetMeshRenderer(cube, { { cubeAsset }, { defaultMaterial }, true });
         scene.Transform(cube).Local.Scale = { 0.55f, 0.55f, 0.55f };
         kairo::editor::EditorState state(scene);
         state.Select(cube);
         const auto cubeMesh = renderer.CreateMesh(kairo::renderer::Mesh::MakeCube());
-        kairo::editor::RenderAssetBindings renderAssets;
-        renderAssets.BindMesh("builtin:cube", cubeMesh);
+        kairo::editor::RenderAssetBindings renderAssets(projectAssets);
+        renderAssets.BindMesh({ cubeAsset }, cubeMesh);
         kairo::editor::ImGuiRuntime imgui(renderer);
         kairo::editor::ApplyKairoEditorTheme();
         kairo::editor::EditorShell shell(state, scene);

@@ -34,11 +34,13 @@ The editor never creates a second Vulkan device or render pass; ImGui records
 through the renderer's validated tooling-overlay contract.
 
 The native host also contains a narrow `KairoEditorRendererBridge` boundary.
-It resolves serialized EngineCore mesh keys to renderer-owned GPU handles and
+It validates typed EngineCore asset handles against a live `KairoAssets`
+registry, then resolves registered mesh IDs to renderer-owned GPU handles and
 extracts visible entities every frame. The hierarchy, transform inspector, and
 viewport therefore operate on one scene instead of disconnected demo data.
 The startup cube is an editable untitled-scene object using the explicit
-`builtin:cube` binding; it is not hidden inside KairoRenderer.
+`builtin/cube` metadata record with a persistent UUID; it is not hidden inside
+KairoRenderer and remains valid if its logical path moves.
 
 Code, Graph, and Split are views over one future authored-document model, not
 independent sources of truth. The current shell exposes the workspace and panel
