@@ -10,7 +10,9 @@ module;
 #include <cstdio>
 #include <cstring>
 #include <exception>
+#include <filesystem>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -39,6 +41,7 @@ export namespace kairo::editor
             BuildDefaultLayout(dockspace);
             ImGui::DockSpaceOverViewport(dockspace, nullptr, ImGuiDockNodeFlags_PassthruCentralNode);
             DrawVisiblePanels();
+            DrawDocumentLifecyclePopups();
             DrawErrorPopup();
         }
 
@@ -46,8 +49,16 @@ export namespace kairo::editor
         EditorState& m_State;
         ProjectSession& m_Project;
         CommandHistory m_History;
+        AuthoringWorkspaceState m_AuthoringWorkspace;
         bool m_LayoutBuilt = false;
+        bool m_DocumentPanelFocused = false;
         std::array<char, 256> m_AssetFilter{};
+        std::array<char, 256> m_NewDocumentName{};
+        std::array<char, 512> m_NewDocumentPath{};
+        int m_NewDocumentKind = 0;
+        bool m_RequestNewDocumentPopup = false;
+        bool m_RequestCloseDocumentPopup = false;
+        std::optional<kairo::assets::AssetID> m_PendingDocumentClose;
         std::string m_LastError;
         bool m_RequestErrorPopup = false;
 
@@ -56,7 +67,17 @@ export namespace kairo::editor
             if (!ImGui::BeginMainMenuBar()) return;
             if (ImGui::BeginMenu("File"))
             {
-                if (ImGui::MenuItem("Save Scene", "Cmd+S", false, m_Project.HasProject()))
+                if (ImGui::MenuItem("New Document...", "Cmd+N", false, m_Project.HasProject()))
+                    RequestNewDocument();
+                ImGui::Separator();
+                const auto activeDocument = m_Project.HasProject()
+                    ? m_Project.Documents().ActiveID() : std::nullopt;
+                if (ImGui::MenuItem("Save Active Document", "Cmd+S", false, activeDocument.has_value()))
+                    RunCommand([this, id = *activeDocument] { m_Project.SaveDocument(id); });
+                if (ImGui::MenuItem("Close Active Document", "Cmd+W", false, activeDocument.has_value()))
+                    RequestCloseDocument(*activeDocument);
+                ImGui::Separator();
+                if (ImGui::MenuItem("Save Scene", nullptr, false, m_Project.HasProject()))
                     RunCommand([this] { m_Project.SaveScene(); });
                 if (ImGui::MenuItem("Save All", "Cmd+Option+S", false, m_Project.HasProject()))
                     RunCommand([this] { m_Project.SaveAll(); });
@@ -64,14 +85,15 @@ export namespace kairo::editor
             }
             if (ImGui::BeginMenu("Edit"))
             {
-                const std::string undo = m_History.CanUndo()
-                    ? "Undo " + std::string(m_History.UndoName()) : "Undo";
-                const std::string redo = m_History.CanRedo()
-                    ? "Redo " + std::string(m_History.RedoName()) : "Redo";
-                if (ImGui::MenuItem(undo.c_str(), "Cmd+Z", false, m_History.CanUndo()))
-                    RunCommand([this] { m_History.Undo(); });
-                if (ImGui::MenuItem(redo.c_str(), "Cmd+Shift+Z", false, m_History.CanRedo()))
-                    RunCommand([this] { m_History.Redo(); });
+                CommandHistory& history = ActiveHistory();
+                const std::string undo = history.CanUndo()
+                    ? "Undo " + std::string(history.UndoName()) : "Undo";
+                const std::string redo = history.CanRedo()
+                    ? "Redo " + std::string(history.RedoName()) : "Redo";
+                if (ImGui::MenuItem(undo.c_str(), "Cmd+Z", false, history.CanUndo()))
+                    RunCommand([&history] { history.Undo(); });
+                if (ImGui::MenuItem(redo.c_str(), "Cmd+Shift+Z", false, history.CanRedo()))
+                    RunCommand([&history] { history.Redo(); });
                 ImGui::EndMenu();
             }
             if (ImGui::BeginMenu("View"))
@@ -106,16 +128,29 @@ export namespace kairo::editor
             }
             ImGui::EndMainMenuBar();
 
+            if (m_Project.HasProject() && ImGui::Shortcut(ImGuiMod_Shortcut | ImGuiKey_N))
+                RequestNewDocument();
             if (m_Project.HasProject() && ImGui::Shortcut(ImGuiMod_Shortcut | ImGuiKey_S))
-                RunCommand([this] { m_Project.SaveScene(); });
+            {
+                const auto active = m_Project.Documents().ActiveID();
+                if (m_DocumentPanelFocused && active.has_value())
+                    RunCommand([this, id = *active] { m_Project.SaveDocument(id); });
+                else RunCommand([this] { m_Project.SaveScene(); });
+            }
+            if (m_Project.HasProject() && ImGui::Shortcut(ImGuiMod_Shortcut | ImGuiKey_W))
+            {
+                const auto active = m_Project.Documents().ActiveID();
+                if (m_DocumentPanelFocused && active.has_value()) RequestCloseDocument(*active);
+            }
             if (m_Project.HasProject() &&
                 ImGui::Shortcut(ImGuiMod_Shortcut | ImGuiMod_Alt | ImGuiKey_S))
                 RunCommand([this] { m_Project.SaveAll(); });
-            if (m_History.CanRedo() &&
+            CommandHistory& history = ActiveHistory();
+            if (history.CanRedo() &&
                 ImGui::Shortcut(ImGuiMod_Shortcut | ImGuiMod_Shift | ImGuiKey_Z))
-                RunCommand([this] { m_History.Redo(); });
-            else if (m_History.CanUndo() && ImGui::Shortcut(ImGuiMod_Shortcut | ImGuiKey_Z))
-                RunCommand([this] { m_History.Undo(); });
+                RunCommand([&history] { history.Redo(); });
+            else if (history.CanUndo() && ImGui::Shortcut(ImGuiMod_Shortcut | ImGuiKey_Z))
+                RunCommand([&history] { history.Undo(); });
         }
 
         void DrawPlayControls()
@@ -150,6 +185,13 @@ export namespace kairo::editor
                 ImGui::TextDisabled("%zu entities", m_Project.Scene().Size());
                 ImGui::Separator();
                 ImGui::TextDisabled("%zu assets", m_Project.Assets().Size());
+                if (const auto active = m_Project.Documents().ActiveID(); active.has_value())
+                {
+                    const auto& document = m_Project.Document(*active);
+                    ImGui::Separator();
+                    ImGui::TextDisabled("%s%s", document.Name().c_str(),
+                        m_Project.Documents().IsDirty(*active) ? " *" : "");
+                }
                 if (const auto selected = m_State.SelectedEntity(); selected.has_value())
                 {
                     ImGui::Separator();
@@ -188,6 +230,7 @@ export namespace kairo::editor
 
         void DrawVisiblePanels()
         {
+            m_DocumentPanelFocused = false;
             if (m_State.Panels().IsVisible(Panel::Hierarchy)) DrawHierarchy();
             if (m_State.Panels().IsVisible(Panel::Inspector)) DrawInspector();
             if (m_State.Panels().IsVisible(Panel::Viewport)) DrawViewport();
@@ -294,13 +337,15 @@ export namespace kairo::editor
             }
             else if (panel == Panel::CodeEditor || panel == Panel::NodeGraph)
             {
-                ImGui::TextDisabled("No authored document is open.");
-                ImGui::Separator();
-                if (ImGui::RadioButton("Code", m_State.ActiveAuthoringSurface() == AuthoringSurface::Code)) m_State.SetAuthoringSurface(AuthoringSurface::Code);
-                ImGui::SameLine();
-                if (ImGui::RadioButton("Graph", m_State.ActiveAuthoringSurface() == AuthoringSurface::Graph)) m_State.SetAuthoringSurface(AuthoringSurface::Graph);
-                ImGui::SameLine();
-                if (ImGui::RadioButton("Split", m_State.ActiveAuthoringSurface() == AuthoringSurface::CodeAndGraph)) m_State.SetAuthoringSurface(AuthoringSurface::CodeAndGraph);
+                if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows))
+                    m_DocumentPanelFocused = true;
+                const auto active = DrawDocumentTabs(panel);
+                if (active.has_value()) DrawDocumentSummary(panel, *active);
+                else
+                {
+                    ImGui::TextDisabled("Open a document asset or create a typed document.");
+                    if (ImGui::Button("New Document")) RequestNewDocument();
+                }
             }
             else if (panel == Panel::Console) ImGui::TextDisabled("No engine messages.");
             else if (panel == Panel::ContentBrowser) DrawContentBrowser();
@@ -334,7 +379,16 @@ export namespace kairo::editor
                     ImGui::TableSetColumnIndex(0);
                     ImGui::TextUnformatted(type.c_str());
                     ImGui::TableSetColumnIndex(1);
-                    ImGui::TextUnformatted(path.c_str());
+                    const std::string row = path + "##" + asset.ID.ToString();
+                    const bool isDocument = asset.Type == kairo::assets::AssetType::Document;
+                    if (isDocument)
+                    {
+                        ImGui::Selectable(row.c_str(), false,
+                            ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_AllowDoubleClick);
+                        if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
+                            OpenDocument(asset.Path);
+                    }
+                    else ImGui::TextUnformatted(path.c_str());
                     if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s\n%s\n%s", path.c_str(),
                         asset.ID.ToString().c_str(), kairo::assets::NameOfAssetOrigin(asset.Origin).data());
                     ImGui::TableSetColumnIndex(2);
@@ -343,6 +397,183 @@ export namespace kairo::editor
                 ImGui::EndTable();
             }
             ImGui::TextDisabled("%zu of %zu assets", visible, records.size());
+        }
+
+        [[nodiscard]] std::optional<kairo::assets::AssetID> DrawDocumentTabs(Panel panel)
+        {
+            const auto documents = m_Project.Documents().Snapshot();
+            if (documents.empty()) return std::nullopt;
+            std::optional<kairo::assets::AssetID> active = m_Project.Documents().ActiveID();
+            const std::string tabBarID = panel == Panel::CodeEditor ? "##CodeDocuments" : "##GraphDocuments";
+            if (ImGui::BeginTabBar(tabBarID.c_str(), ImGuiTabBarFlags_Reorderable |
+                ImGuiTabBarFlags_AutoSelectNewTabs | ImGuiTabBarFlags_FittingPolicyScroll))
+            {
+                for (const auto& info : documents)
+                {
+                    bool open = true;
+                    std::string title = info.Name + (info.Dirty ? " *" : "") + "###" +
+                        info.ID.ToString() + (panel == Panel::CodeEditor ? "-code" : "-graph");
+                    const ImGuiTabItemFlags flags = info.Active ? ImGuiTabItemFlags_SetSelected : 0;
+                    if (ImGui::BeginTabItem(title.c_str(), &open, flags))
+                    {
+                        if (!info.Active) m_Project.ActivateDocument(info.ID);
+                        active = info.ID;
+                        (void)m_AuthoringWorkspace.Open(m_Project.Document(info.ID));
+                        ImGui::EndTabItem();
+                    }
+                    if (!open) RequestCloseDocument(info.ID);
+                }
+                ImGui::EndTabBar();
+            }
+            return active;
+        }
+
+        void DrawDocumentSummary(Panel panel, kairo::assets::AssetID id)
+        {
+            const auto& document = m_Project.Document(id);
+            (void)m_AuthoringWorkspace.Open(document);
+            ImGui::TextDisabled("%s  |  %s  |  %zu nodes  |  %zu connections",
+                document.Name().c_str(), Name(document.Kind()).data(), document.NodeCount(),
+                document.ConnectionCount());
+            ImGui::SameLine();
+            if (ImGui::SmallButton("Save")) RunCommand([this, id] { m_Project.SaveDocument(id); });
+            if (panel == Panel::CodeEditor)
+                ImGui::TextDisabled("Structured text editing is synchronized with this document model.");
+            else ImGui::TextDisabled("Graph navigation and selection are retained for this document.");
+        }
+
+        void RequestNewDocument()
+        {
+            std::snprintf(m_NewDocumentName.data(), m_NewDocumentName.size(), "%s", "Untitled Logic");
+            std::snprintf(m_NewDocumentPath.data(), m_NewDocumentPath.size(), "%s", "Logic/Untitled.kdoc");
+            m_NewDocumentKind = 0;
+            m_RequestNewDocumentPopup = true;
+        }
+
+        void RequestCloseDocument(kairo::assets::AssetID id)
+        {
+            if (!m_Project.Documents().Contains(id)) return;
+            if (!m_Project.Documents().IsDirty(id))
+            {
+                RunCommand([this, id]
+                {
+                    m_Project.CloseDocument(id);
+                    m_AuthoringWorkspace.Close(id);
+                });
+                return;
+            }
+            m_PendingDocumentClose = id;
+            m_RequestCloseDocumentPopup = true;
+        }
+
+        void OpenDocument(const std::filesystem::path& path)
+        {
+            RunCommand([this, path]
+            {
+                const auto id = m_Project.OpenDocument(path);
+                const auto& document = m_Project.Document(id);
+                (void)m_AuthoringWorkspace.Open(document);
+                m_State.SwitchWorkspace(WorkspaceFor(document.Kind()));
+                m_State.SetAuthoringSurface(AuthoringSurface::CodeAndGraph);
+            });
+        }
+
+        void DrawDocumentLifecyclePopups()
+        {
+            if (m_RequestNewDocumentPopup)
+            {
+                ImGui::OpenPopup("Create Authoring Document");
+                m_RequestNewDocumentPopup = false;
+            }
+            if (ImGui::BeginPopupModal("Create Authoring Document", nullptr,
+                ImGuiWindowFlags_AlwaysAutoResize))
+            {
+                constexpr const char* kinds[] = { "Logic", "Material", "Audio", "Animation State", "Simulation" };
+                ImGui::SetNextItemWidth(420.0f);
+                ImGui::InputText("Name", m_NewDocumentName.data(), m_NewDocumentName.size());
+                ImGui::SetNextItemWidth(420.0f);
+                ImGui::InputText("Project path", m_NewDocumentPath.data(), m_NewDocumentPath.size());
+                ImGui::SetNextItemWidth(220.0f);
+                ImGui::Combo("Kind", &m_NewDocumentKind, kinds, static_cast<int>(std::size(kinds)));
+                if (ImGui::Button("Create", { 110.0f, 0.0f }))
+                {
+                    RunCommand([this]
+                    {
+                        const auto kind = static_cast<DocumentKind>(m_NewDocumentKind);
+                        const auto id = m_Project.CreateDocument(kind, m_NewDocumentName.data(),
+                            m_NewDocumentPath.data());
+                        (void)m_AuthoringWorkspace.Open(m_Project.Document(id));
+                        m_State.SwitchWorkspace(WorkspaceFor(kind));
+                        m_State.SetAuthoringSurface(AuthoringSurface::CodeAndGraph);
+                        ImGui::CloseCurrentPopup();
+                    });
+                }
+                ImGui::SameLine();
+                if (ImGui::Button("Cancel", { 110.0f, 0.0f })) ImGui::CloseCurrentPopup();
+                ImGui::EndPopup();
+            }
+
+            if (m_RequestCloseDocumentPopup)
+            {
+                ImGui::OpenPopup("Unsaved Document");
+                m_RequestCloseDocumentPopup = false;
+            }
+            if (ImGui::BeginPopupModal("Unsaved Document", nullptr,
+                ImGuiWindowFlags_AlwaysAutoResize))
+            {
+                ImGui::TextWrapped("This document has unsaved changes.");
+                if (ImGui::Button("Save and Close", { 130.0f, 0.0f }) && m_PendingDocumentClose.has_value())
+                {
+                    const auto id = *m_PendingDocumentClose;
+                    RunCommand([this, id]
+                    {
+                        m_Project.SaveDocument(id);
+                        m_Project.CloseDocument(id);
+                        m_AuthoringWorkspace.Close(id);
+                        m_PendingDocumentClose.reset();
+                        ImGui::CloseCurrentPopup();
+                    });
+                }
+                ImGui::SameLine();
+                if (ImGui::Button("Discard", { 100.0f, 0.0f }) && m_PendingDocumentClose.has_value())
+                {
+                    const auto id = *m_PendingDocumentClose;
+                    RunCommand([this, id]
+                    {
+                        m_Project.CloseDocument(id, UnsavedChangesPolicy::Discard);
+                        m_AuthoringWorkspace.Close(id);
+                        m_PendingDocumentClose.reset();
+                        ImGui::CloseCurrentPopup();
+                    });
+                }
+                ImGui::SameLine();
+                if (ImGui::Button("Cancel", { 100.0f, 0.0f }))
+                {
+                    m_PendingDocumentClose.reset();
+                    ImGui::CloseCurrentPopup();
+                }
+                ImGui::EndPopup();
+            }
+        }
+
+        [[nodiscard]] static Workspace WorkspaceFor(DocumentKind kind) noexcept
+        {
+            switch (kind)
+            {
+                case DocumentKind::Logic: return Workspace::Logic;
+                case DocumentKind::Material: return Workspace::Materials;
+                case DocumentKind::Audio: return Workspace::Audio;
+                case DocumentKind::AnimationState: return Workspace::Animation;
+                case DocumentKind::Simulation: return Workspace::Simulation;
+            }
+            return Workspace::Logic;
+        }
+
+        [[nodiscard]] CommandHistory& ActiveHistory()
+        {
+            return m_DocumentPanelFocused && m_Project.HasProject() &&
+                m_Project.Documents().ActiveID().has_value()
+                ? m_Project.DocumentHistory() : m_History;
         }
 
         [[nodiscard]] static std::string Lower(std::string_view value)

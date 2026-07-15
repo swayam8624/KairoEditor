@@ -94,6 +94,14 @@ export namespace kairo::editor
             return m_Documents.History();
         }
 
+        /// Task: make one already-open authoring document the active project
+        /// document without exposing mutable ProjectDocuments ownership.
+        void ActivateDocument(kairo::assets::AssetID id)
+        {
+            RequireProject();
+            m_Documents.Activate(id);
+        }
+
         /// Creates one unsaved typed document and matching asset metadata as a
         /// single in-memory transaction. The persistent ID is shared by file,
         /// tab, compiler artifact, and registry; no path-derived identity exists.
@@ -144,7 +152,7 @@ export namespace kairo::editor
 
         void SaveDocument(kairo::assets::AssetID id)
         {
-            RequireDocumentMetadata(id);
+            (void)RequireDocumentMetadata(id);
             m_Documents.Save(id);
         }
 

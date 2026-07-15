@@ -70,10 +70,12 @@ if(KAIRO_EDITOR_BUILD_APP)
         ${dearimgui_SOURCE_DIR}/imgui_draw.cpp
         ${dearimgui_SOURCE_DIR}/imgui_tables.cpp
         ${dearimgui_SOURCE_DIR}/imgui_widgets.cpp
+        ${dearimgui_SOURCE_DIR}/misc/cpp/imgui_stdlib.cpp
         ${dearimgui_SOURCE_DIR}/backends/imgui_impl_glfw.cpp
         ${dearimgui_SOURCE_DIR}/backends/imgui_impl_vulkan.cpp)
     target_include_directories(KairoDearImGui PUBLIC
         ${dearimgui_SOURCE_DIR}
+        ${dearimgui_SOURCE_DIR}/misc/cpp
         ${dearimgui_SOURCE_DIR}/backends
         ${KAIRO_EDITOR_VULKAN_INCLUDE_DIR})
     target_link_libraries(KairoDearImGui PUBLIC ${KAIRO_EDITOR_GLFW_LIBRARY} ${KAIRO_EDITOR_VULKAN_LOADER_LIBRARY})
@@ -111,6 +113,7 @@ if(KAIRO_EDITOR_BUILD_TESTS)
         add_test(NAME KairoEditorRenderBridgeTests COMMAND KairoEditorRenderBridgeTests)
         add_test(NAME KairoEditorNativeSmoke COMMAND KairoEditorApp
             --project ${CMAKE_CURRENT_SOURCE_DIR}/examples/StarterProject/Project.kproject
+            --document Logic/Player.kdoc
             --frames 3 --no-layout-persistence)
         set_tests_properties(KairoEditorNativeSmoke PROPERTIES TIMEOUT 20)
         add_test(NAME KairoEditorRequiresProject COMMAND KairoEditorApp --frames 1)

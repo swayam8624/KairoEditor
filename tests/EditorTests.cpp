@@ -924,6 +924,23 @@ TEST_CASE("Project sessions include document dirtiness in destructive lifecycle 
     std::filesystem::remove_all(root);
 }
 
+TEST_CASE("Project sessions activate only open authoring documents",
+    "[KairoEditor][Project][Session][Document]")
+{
+    const auto root = std::filesystem::temp_directory_path() /
+        ("kairo-session-document-activation-" + kairo::assets::GenerateAssetID().ToString());
+    ProjectSession session;
+    session.CreateProject(root, "Document Activation");
+    const auto first = session.CreateDocument(DocumentKind::Logic, "First", "Logic/First.kdoc");
+    const auto second = session.CreateDocument(DocumentKind::Material, "Second", "Materials/Second.kdoc");
+    REQUIRE(session.Documents().ActiveID() == second);
+    session.ActivateDocument(first);
+    CHECK(session.Documents().ActiveID() == first);
+    REQUIRE_THROWS_AS(session.ActivateDocument(kairo::assets::GenerateAssetID()), std::out_of_range);
+    session.Close(UnsavedChangesPolicy::Discard);
+    std::filesystem::remove_all(root);
+}
+
 TEST_CASE("Project sessions enforce dirty scene transitions and portable save-as", "[KairoEditor][Project][Session]")
 {
     const auto root = std::filesystem::temp_directory_path() /

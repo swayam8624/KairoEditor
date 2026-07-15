@@ -21,6 +21,7 @@ namespace
     struct AppOptions final
     {
         std::filesystem::path Project;
+        std::optional<std::filesystem::path> Document;
         std::optional<std::uint64_t> FrameLimit;
         bool PersistLayout = true;
     };
@@ -42,6 +43,12 @@ namespace
                 options.Project = argv[index];
                 continue;
             }
+            if (argument == "--document")
+            {
+                if (++index == argc) throw std::invalid_argument("--document requires a project-relative .kdoc path.");
+                options.Document = std::filesystem::path(argv[index]);
+                continue;
+            }
             if (argument != "--frames")
                 throw std::invalid_argument("Unknown option: " + std::string(argument));
             if (++index == argc) throw std::invalid_argument("--frames requires a positive integer.");
@@ -55,7 +62,7 @@ namespace
         }
         if (options.Project.empty())
             throw std::invalid_argument("Usage: KairoEditorApp --project <file.kproject> "
-                "[--frames positive-count] [--no-layout-persistence]");
+                "[--document project-relative.kdoc] [--frames positive-count] [--no-layout-persistence]");
         return options;
     }
 }
@@ -67,6 +74,7 @@ int main(int argc, char** argv)
         const AppOptions options = ParseOptions(argc, argv);
         kairo::editor::ProjectSession project;
         project.OpenProject(options.Project);
+        if (options.Document.has_value()) (void)project.OpenDocument(*options.Document);
         kairo::renderer::RendererRuntime renderer({ project.Descriptor().Name, 1600u, 1000u, true });
         kairo::editor::EditorState state(project.Scene());
         if (const auto entities = project.Scene().Entities(); !entities.empty()) state.Select(entities.front());

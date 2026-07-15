@@ -3,3 +3,5 @@ asset 00000000-0000-4000-8000-000000000201 mesh builtin 1 "builtin/cube" "kairo.
 end
 asset 00000000-0000-4000-8000-000000000202 material builtin 1 "builtin/default-material" "kairo.builtin"
 end
+asset 00000000-0000-4000-8000-000000000203 document source 1 "Logic/Player.kdoc" "kairo.document-v1"
+end

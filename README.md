@@ -71,8 +71,13 @@ project instead of leaking one global layout across unrelated work. The
 user-specific `.kairo/` directory is ignored by this repository. Pass
 `--no-layout-persistence` for read-only or deterministic bounded runs.
 
-The native File menu saves the active scene or all dirty project data, and
-`Cmd+S`/`Ctrl+S` saves the scene. This milestone accepts project paths through
+The native File menu creates, saves, and closes typed authoring documents in
+addition to saving the scene or all dirty project data. Registered `.kdoc`
+assets open from the Content Browser with a double-click; open-document tabs
+retain their view state and require an explicit Save, Discard, or Cancel choice
+before closing dirty work. `Cmd+S`/`Ctrl+S` saves the focused document or the
+scene according to editor focus, and undo/redo routes to the corresponding
+command history. This milestone accepts project paths through
 `--project`; native create/open dialogs will call the same session API rather
 than introducing another persistence path.
 
@@ -183,7 +188,8 @@ cmake -S . -B build -G Ninja -DCMAKE_CXX_COMPILER=/opt/homebrew/opt/llvm/bin/cla
 cmake --build build
 ctest --test-dir build --output-on-failure
 ./build/KairoEditorApp \
-  --project examples/StarterProject/Project.kproject
+  --project examples/StarterProject/Project.kproject \
+  --document Logic/Player.kdoc
 ```
 
 Appending `--frames 3` runs a bounded native smoke session used by CTest to
