@@ -33,9 +33,21 @@ history, or authored assets. Users can customize and persist each preset.
 
 ## Code and Graph Authoring
 
-Code, Graph, and Code + Graph are equivalent views of one authored model. They
-must not become separate systems that can silently disagree. The future shared
-intermediate representation must provide:
+Code, Graph, and Code + Graph are projections of one active document, not
+separate copies that can silently disagree. Kairo makes a deliberate distinction
+between documents where bidirectional editing is honest and native code where it
+is not:
+
+1. Structured Kairo documents use a typed intermediate representation. Logic,
+   materials, audio routing, animation state, and simulation documents can be
+   edited through nodes or a constrained textual projection with one command
+   stream, validation model, and undo history.
+2. Native C++ remains code-first. Kairo can provide dependency, call, data-flow,
+   reflection, and profiling graphs, but it will not advertise arbitrary C++ as
+   a lossless editable node round trip. Macros, templates, overload resolution,
+   control flow, and lifetime semantics make that promise technically false.
+
+The shared intermediate representation must provide:
 
 - stable node, pin, symbol, and source-location identities
 - typed ports and compile-time connection validation
@@ -51,6 +63,24 @@ node focuses its generated/source declaration; selecting code highlights the
 owning graph region. Users may author gameplay, materials, audio events, and
 simulation behavior through the same interaction principles while each domain
 retains a typed schema.
+
+### Node canvas contract
+
+Nodes have stable serialized IDs, typed pins, explicit execution/data semantics,
+and deterministic connection ordering. The graph surface provides cursor-centered
+zoom, pan, box selection, alignment, reroute points, comments/groups, minimap,
+connection search, copy/paste, duplicate, frame-selection, keyboard deletion,
+and undo/redo.
+
+Important values can be edited inline, as in the supplied workflow reference.
+Expanded node bodies are focused inspectors for their operation, not decorative
+cards nested inside cards. Collapsed nodes preserve title, type/state color,
+essential pins, warnings, breakpoints, and live-value state. Validation attaches
+to the exact node and pin and also enters the shared diagnostics stream.
+
+Large graphs require spatial indexing, clipped rendering, cached text/layout,
+stable zoom limits, and deterministic hit testing. Evaluation order, cycles,
+implicit conversions, and compile state must be inspectable rather than hidden.
 
 ## Large World Experience
 
@@ -70,17 +100,73 @@ after KairoRenderer and the asset layer own the underlying runtime behavior.
 - Empty, loading, compiling, disconnected, and failed states are designed.
 - Play mode clearly separates runtime mutations from authored scene data.
 - Layout, selection, and navigation are restored without hiding stale errors.
+- Empty panels expose only a real next action; decorative dummy controls do not
+  count as implemented functionality.
+- Numerical editing supports predictable drag sensitivity, typed entry, units,
+  reset-to-default, bounds, and mixed multi-selection values.
+
+## Visual System
+
+- Dark neutral surfaces use several contrast tiers instead of one black field.
+- Blue is the primary interaction accent. Type, warning, error, success,
+  simulation, and profiler colors retain separate semantic roles.
+- The viewport or active authoring canvas remains the largest surface.
+- Compact tool headings, stable control dimensions, and quiet separators keep
+  dense panels scannable at laptop and desktop resolutions.
+- Icons are used for familiar global actions and always have tooltips. Named
+  workspaces and ambiguous commands retain text labels.
+- Focus, hover, active, disabled, warning, and error states remain distinguishable
+  without depending on color alone.
+
+## Current Implementation Boundary
+
+Implemented and verified:
+
+- Vulkan renderer-owned UI frame hooks and a native Dear ImGui docking host;
+- real scene hierarchy, selection, transform inspection, play-state controls,
+  and renderer scene extraction;
+- persistent typed asset IDs resolved through `KairoAssets` rather than paths;
+- deterministic EngineCore scene persistence with stable entity IDs.
+
+Not yet represented as complete product surfaces:
+
+- project open/save/save-as flow, dirty state, recent documents, and layout files;
+- content browsing backed by registry metadata and importer state;
+- shared diagnostics, command routing, undo/redo, and property reflection;
+- the typed document kernel and production graph/code editors;
+- timelines, curves, sequencer, audio tools, profilers, and large-world controls.
+
+Until those systems land, their dockable panels are shell boundaries, not
+finished features.
 
 ## Delivery Order
 
-1. Renderer-owned Vulkan UI frame hooks and viewport texture ownership.
-2. Styled Dear ImGui docking shell with workspace switching.
-3. Hierarchy, inspector, content browser, console, and statistics panels.
-4. Scene viewport selection, gizmos, play controls, and physics debug overlays.
-5. Command, undo/redo, asset registry, and property reflection systems.
-6. Shared typed graph/code document model, then domain graph editors.
-7. Timeline, curves, sequencer, profiling, and large-world tooling.
+1. Project session: scene open/save/save-as, dirty state, registry-backed content
+   browser, shared diagnostics, commands, undo/redo, and persisted layouts.
+2. Scene viewport selection, transform gizmos, runtime scene cloning, and physics
+   debug overlays.
+3. Typed document kernel: stable document/node/pin IDs, values, commands,
+   validation, serialization, compiler boundary, and backend-neutral tests.
+4. Production graph canvas backed by the document kernel.
+5. Structured text projection and synchronized Split mode.
+6. Native C++ editor backed by `clangd`, build diagnostics, and analytical graphs.
+7. Material, animation-state, audio-routing, and simulation document schemas.
+8. Timeline, curves, sequencer, profiling, and large-world tooling.
 
 This ordering prevents beautiful panels from presenting controls for systems
 that do not yet exist, while preserving the full product direction in code and
 documentation.
+
+## Acceptance Rules
+
+- The editor opens a project, restores its layouts, and resolves assets by stable
+  identity after path changes.
+- Scene edits save and reload without changing entity or asset identities.
+- Structured documents execute identically after supported graph or text edits.
+- Undo/redo crosses hierarchy, Inspector, graph, code, and timeline commands in
+  causal order.
+- Invalid documents cannot build or enter play without located diagnostics.
+- Native C++ and structured documents expose their different round-trip
+  guarantees through available actions, not only explanatory text.
+- Every released workspace has at least one complete
+  create-edit-validate-save-run workflow.
