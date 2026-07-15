@@ -34,6 +34,7 @@ export namespace kairo::editor
         {
             m_State.ValidateSelection();
             DrawMainBar();
+            DrawStatusBar();
             const ImGuiID dockspace = ImGui::GetID("KairoEditorDockspace");
             BuildDefaultLayout(dockspace);
             ImGui::DockSpaceOverViewport(dockspace, nullptr, ImGuiDockNodeFlags_PassthruCentralNode);
@@ -130,6 +131,36 @@ export namespace kairo::editor
                 if (m_State.Mode() == EditorMode::Play && ImGui::Button("Pause")) m_State.Pause();
                 else if (m_State.Mode() == EditorMode::Pause && ImGui::Button("Resume")) m_State.Resume();
             }
+        }
+
+        void DrawStatusBar()
+        {
+            constexpr ImGuiWindowFlags flags = ImGuiWindowFlags_NoScrollbar |
+                ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_MenuBar;
+            if (!ImGui::BeginViewportSideBar("##KairoStatusBar", nullptr, ImGuiDir_Down,
+                ImGui::GetFrameHeight(), flags))
+            {
+                ImGui::End();
+                return;
+            }
+            if (ImGui::BeginMenuBar())
+            {
+                ImGui::TextUnformatted(m_Project.ActiveScenePath().generic_string().c_str());
+                ImGui::Separator();
+                ImGui::TextDisabled("%zu entities", m_Project.Scene().Size());
+                ImGui::Separator();
+                ImGui::TextDisabled("%zu assets", m_Project.Assets().Size());
+                if (const auto selected = m_State.SelectedEntity(); selected.has_value())
+                {
+                    ImGui::Separator();
+                    ImGui::Text("Selected: %s", m_Project.Scene().Name(*selected).Value.c_str());
+                }
+                ImGui::Separator();
+                ImGui::TextDisabled("%s", m_State.Mode() == EditorMode::Edit ? "Edit" :
+                    (m_State.Mode() == EditorMode::Play ? "Playing" : "Paused"));
+                ImGui::EndMenuBar();
+            }
+            ImGui::End();
         }
 
         void BuildDefaultLayout(ImGuiID dockspace)

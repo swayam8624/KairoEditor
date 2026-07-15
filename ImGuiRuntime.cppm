@@ -7,7 +7,10 @@ module;
 
 #include <algorithm>
 #include <cstdint>
+#include <filesystem>
 #include <stdexcept>
+#include <string>
+#include <system_error>
 
 export module Kairo.Editor.ImGuiRuntime;
 
@@ -21,14 +24,27 @@ export namespace kairo::editor
     class ImGuiRuntime final
     {
     public:
-        explicit ImGuiRuntime(kairo::renderer::RendererRuntime& renderer) : m_Renderer(renderer)
+        /// Input: a live renderer and optional project-scoped layout file.
+        /// Output: one initialized Dear ImGui context using the renderer's
+        /// existing Vulkan contract. An empty layout path disables persistence,
+        /// which is useful for deterministic smoke tests and read-only hosts.
+        explicit ImGuiRuntime(kairo::renderer::RendererRuntime& renderer,
+            const std::filesystem::path& layoutFile = {}) : m_Renderer(renderer)
         {
             try
             {
+                if (!layoutFile.empty())
+                {
+                    std::error_code error;
+                    std::filesystem::create_directories(layoutFile.parent_path(), error);
+                    if (error) throw std::runtime_error("Cannot create editor layout directory: " + error.message());
+                    m_IniFilename = layoutFile.string();
+                }
                 IMGUI_CHECKVERSION();
                 ImGui::CreateContext();
                 m_ContextCreated = true;
                 ImGuiIO& io = ImGui::GetIO();
+                io.IniFilename = m_IniFilename.empty() ? nullptr : m_IniFilename.c_str();
                 io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard | ImGuiConfigFlags_DockingEnable;
                 io.ConfigWindowsMoveFromTitleBarOnly = true;
 #if defined(__APPLE__)
@@ -92,6 +108,7 @@ export namespace kairo::editor
 
     private:
         kairo::renderer::RendererRuntime& m_Renderer;
+        std::string m_IniFilename;
         VkRenderPass m_RenderPass = VK_NULL_HANDLE;
         std::uint32_t m_ImageCount = 0u;
         bool m_ContextCreated = false;
@@ -120,6 +137,7 @@ export namespace kairo::editor
             }
             if (m_ContextCreated)
             {
+                if (!m_IniFilename.empty()) ImGui::SaveIniSettingsToDisk(m_IniFilename.c_str());
                 ImGui::DestroyContext();
                 m_ContextCreated = false;
             }

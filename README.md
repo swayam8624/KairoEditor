@@ -65,6 +65,12 @@ discard policy. New projects are built in a unique sibling staging directory
 and published by directory rename; descriptors, manifests, and scenes each use
 atomic same-directory replacement.
 
+Dear ImGui docking state is stored per project at
+`.kairo/editor-layout.ini`. This keeps customized task layouts with their
+project instead of leaking one global layout across unrelated work. The
+user-specific `.kairo/` directory is ignored by this repository. Pass
+`--no-layout-persistence` for read-only or deterministic bounded runs.
+
 The native File menu saves the active scene or all dirty project data, and
 `Cmd+S`/`Ctrl+S` saves the scene. This milestone accepts project paths through
 `--project`; native create/open dialogs will call the same session API rather

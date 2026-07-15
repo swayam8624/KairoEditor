@@ -129,11 +129,12 @@ Implemented and verified:
 - deterministic EngineCore scene persistence with stable entity IDs;
 - validated project descriptors, dirty/save lifecycle, and registry-backed
   Content Browser metadata;
-- bounded command history with reversible hierarchy and Inspector edits.
+- bounded command history with reversible hierarchy and Inspector edits;
+- project-scoped dock layout persistence and a live scene/status summary.
 
 Not yet represented as complete product surfaces:
 
-- native project create/open/save-as dialogs, recent documents, and layout files;
+- native project create/open/save-as dialogs and recent documents;
 - asset importing, thumbnails, dependency inspection, and source reimport state;
 - shared diagnostics and reflected property transactions beyond current scene commands;
 - the typed document kernel and production graph/code editors;
@@ -145,7 +146,7 @@ finished features.
 ## Delivery Order
 
 1. Finish project tooling: native create/open/save-as dialogs, recent projects,
-   shared diagnostics, reflected property commands, and persisted layouts.
+   shared diagnostics, and reflected property commands.
 2. Scene viewport selection, transform gizmos, runtime scene cloning, and physics
    debug overlays.
 3. Typed document kernel: stable document/node/pin IDs, values, commands,

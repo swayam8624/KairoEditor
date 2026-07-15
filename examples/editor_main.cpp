@@ -22,6 +22,7 @@ namespace
     {
         std::filesystem::path Project;
         std::optional<std::uint64_t> FrameLimit;
+        bool PersistLayout = true;
     };
 
     [[nodiscard]] AppOptions ParseOptions(int argc, char** argv)
@@ -30,6 +31,11 @@ namespace
         for (int index = 1; index < argc; ++index)
         {
             const std::string_view argument(argv[index]);
+            if (argument == "--no-layout-persistence")
+            {
+                options.PersistLayout = false;
+                continue;
+            }
             if (argument == "--project")
             {
                 if (++index == argc) throw std::invalid_argument("--project requires a .kproject path.");
@@ -48,7 +54,8 @@ namespace
             options.FrameLimit = value;
         }
         if (options.Project.empty())
-            throw std::invalid_argument("Usage: KairoEditorApp --project <file.kproject> [--frames positive-count]");
+            throw std::invalid_argument("Usage: KairoEditorApp --project <file.kproject> "
+                "[--frames positive-count] [--no-layout-persistence]");
         return options;
     }
 }
@@ -71,7 +78,9 @@ int main(int argc, char** argv)
                 throw std::runtime_error("KairoEditor has no runtime mesh importer for asset: " + asset.Path.generic_string());
             renderAssets.BindMesh({ asset.ID }, renderer.CreateMesh(kairo::renderer::Mesh::MakeCube()));
         }
-        kairo::editor::ImGuiRuntime imgui(renderer);
+        const std::filesystem::path layoutFile = options.PersistLayout
+            ? project.ProjectRoot() / ".kairo" / "editor-layout.ini" : std::filesystem::path{};
+        kairo::editor::ImGuiRuntime imgui(renderer, layoutFile);
         kairo::editor::ApplyKairoEditorTheme();
         kairo::editor::EditorShell shell(state, project);
 

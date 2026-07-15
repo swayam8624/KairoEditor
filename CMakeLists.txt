@@ -106,7 +106,8 @@ if(KAIRO_EDITOR_BUILD_TESTS)
         target_link_libraries(KairoEditorRenderBridgeTests PRIVATE KairoEditorRendererBridge Catch2::Catch2WithMain)
         add_test(NAME KairoEditorRenderBridgeTests COMMAND KairoEditorRenderBridgeTests)
         add_test(NAME KairoEditorNativeSmoke COMMAND KairoEditorApp
-            --project ${CMAKE_CURRENT_SOURCE_DIR}/examples/StarterProject/Project.kproject --frames 3)
+            --project ${CMAKE_CURRENT_SOURCE_DIR}/examples/StarterProject/Project.kproject
+            --frames 3 --no-layout-persistence)
         set_tests_properties(KairoEditorNativeSmoke PROPERTIES TIMEOUT 20)
         add_test(NAME KairoEditorRequiresProject COMMAND KairoEditorApp --frames 1)
         set_tests_properties(KairoEditorRequiresProject PROPERTIES WILL_FAIL TRUE TIMEOUT 20)
