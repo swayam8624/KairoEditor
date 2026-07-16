@@ -10,6 +10,8 @@ import Kairo.Foundation.Math;
 
 export namespace kairo::editor
 {
+    enum class ViewportAxis : std::uint8_t { Front, Back, Right, Left, Top, Bottom };
+
     /// Backend-neutral camera pose consumed by a renderer adapter. Coordinates
     /// are right-handed, Y-up, and expressed in authoring world units.
     struct ViewportCameraPose final
@@ -57,6 +59,22 @@ export namespace kairo::editor
         }
 
         [[nodiscard]] float Distance() const noexcept { return m_Distance; }
+
+        /// Input: one canonical world axis view.
+        /// Task: snap orientation while preserving focus target and distance.
+        void SnapToAxis(ViewportAxis axis) noexcept
+        {
+            constexpr float Pi = 3.14159265358979323846f;
+            switch (axis)
+            {
+                case ViewportAxis::Front: m_Yaw = 0.0f; m_Pitch = 0.0f; break;
+                case ViewportAxis::Back: m_Yaw = Pi; m_Pitch = 0.0f; break;
+                case ViewportAxis::Right: m_Yaw = Pi * 0.5f; m_Pitch = 0.0f; break;
+                case ViewportAxis::Left: m_Yaw = -Pi * 0.5f; m_Pitch = 0.0f; break;
+                case ViewportAxis::Top: m_Yaw = 0.0f; m_Pitch = Pi * 0.5f; break;
+                case ViewportAxis::Bottom: m_Yaw = 0.0f; m_Pitch = -Pi * 0.5f; break;
+            }
+        }
 
         void Reset() noexcept
         {

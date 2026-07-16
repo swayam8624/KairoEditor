@@ -65,6 +65,10 @@ TEST_CASE("Editor actions and viewport navigation provide deterministic authorin
     CHECK(viewport.Distance() < 5.0f);
     viewport.Focus({ 2.0f, 1.0f, -3.0f }, 7.0f);
     CHECK(viewport.Pose().Target == kairo::foundation::math::Vec3f{ 2.0f, 1.0f, -3.0f });
+    viewport.SnapToAxis(ViewportAxis::Right);
+    CHECK(viewport.Pose().Position.x > viewport.Pose().Target.x);
+    viewport.SnapToAxis(ViewportAxis::Top);
+    CHECK(viewport.Pose().Position.y > viewport.Pose().Target.y);
     REQUIRE_THROWS_AS(viewport.Focus({ 0.0f, 0.0f, 0.0f }, 0.0f), std::invalid_argument);
 }
 
@@ -1063,6 +1067,20 @@ TEST_CASE("Scene commands restore stable entities and merge Inspector edits", "[
     history.Undo();
     CHECK(project.Scene().Transform(entity).Local.Translation == kairo::foundation::math::Vec3f{});
     history.Redo();
+
+    CommandHistory gizmoHistory;
+    const auto beforeGizmo = project.Scene().Transform(entity).Local;
+    auto afterGizmo = beforeGizmo;
+    afterGizmo.Translation = { -4.0f, 1.5f, 2.0f };
+    project.EditScene().Transform(entity).Local = afterGizmo;
+    gizmoHistory.Execute(std::make_unique<SetEntityTransformCommand>(
+        project, entity, beforeGizmo, afterGizmo));
+    CHECK(gizmoHistory.RetainedCount() == 1u);
+    gizmoHistory.Undo();
+    CHECK(project.Scene().Transform(entity).Local == beforeGizmo);
+    gizmoHistory.Redo();
+    CHECK(project.Scene().Transform(entity).Local == afterGizmo);
+    project.EditScene().Transform(entity).Local = finalTransform;
 
     const auto mesh = kairo::assets::AssetID::Parse("00000000-0000-4000-8000-000000000401");
     const auto material = kairo::assets::AssetID::Parse("00000000-0000-4000-8000-000000000402");

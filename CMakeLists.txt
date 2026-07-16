@@ -12,7 +12,7 @@ set(KAIRO_EDITOR_MONO_FONT_PATH "" CACHE FILEPATH "Optional monospace TTF font f
 # Immutable standalone fallback revisions. Local source directories and sibling
 # checkouts still take precedence for active workspace development.
 set(KAIRO_EDITOR_CORE_REVISION d098d4d87fd6105eefde858d57eb1b376edb230e)
-set(KAIRO_EDITOR_RENDERER_REVISION 163dd4eef63a34c2050ccb63de9bce6e1e073f3d)
+set(KAIRO_EDITOR_RENDERER_REVISION 9a42e98e0e5315d76332e90bd2af258f835556e0)
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
     add_compile_options(-Wall -Wextra -Wpedantic -Wno-unused-parameter)
@@ -69,8 +69,7 @@ if(KAIRO_EDITOR_BUILD_APP)
     include(FetchContent)
     FetchContent_Declare(DearImGui
         GIT_REPOSITORY https://github.com/ocornut/imgui.git
-        GIT_TAG v1.92.8-docking
-        GIT_SHALLOW TRUE)
+        GIT_TAG 572f249ce1975f98ad9f8aabce512ffa12a52d6c)
     FetchContent_MakeAvailable(DearImGui)
 
     find_package(glfw3 CONFIG REQUIRED)
@@ -90,11 +89,21 @@ if(KAIRO_EDITOR_BUILD_APP)
         ${dearimgui_SOURCE_DIR}/backends)
     target_link_libraries(KairoDearImGui PUBLIC glfw Vulkan::Vulkan)
 
+    FetchContent_Declare(ImGuizmo
+        GIT_REPOSITORY https://github.com/CedricGuillemet/ImGuizmo.git
+        GIT_TAG fd138a7ce089cfcbfee16da8e8692f37a0e9481e
+        SOURCE_SUBDIR KairoNoCMakeProject)
+    FetchContent_MakeAvailable(ImGuizmo)
+    add_library(KairoImGuizmo STATIC ${imguizmo_SOURCE_DIR}/src/ImGuizmo.cpp)
+    add_library(Kairo::ImGuizmo ALIAS KairoImGuizmo)
+    target_include_directories(KairoImGuizmo PUBLIC ${imguizmo_SOURCE_DIR}/src)
+    target_link_libraries(KairoImGuizmo PUBLIC KairoDearImGui)
+
     add_library(KairoEditorImGui)
     target_sources(KairoEditorImGui PUBLIC FILE_SET CXX_MODULES BASE_DIRS ${CMAKE_CURRENT_SOURCE_DIR} FILES
-        KairoUI.cppm EditorTheme.cppm ImGuiRuntime.cppm ImGuiGraphCanvas.cppm
+        KairoUI.cppm EditorTheme.cppm ImGuiRuntime.cppm ImGuiGraphCanvas.cppm TransformGizmo.cppm
         ImGuiReflectionInspector.cppm EditorShell.cppm)
-    target_link_libraries(KairoEditorImGui PUBLIC KairoEditor KairoRenderer KairoDearImGui)
+    target_link_libraries(KairoEditorImGui PUBLIC KairoEditor KairoRenderer KairoDearImGui Kairo::ImGuizmo)
 
     add_library(KairoEditorRendererBridge)
     target_sources(KairoEditorRendererBridge PUBLIC FILE_SET CXX_MODULES BASE_DIRS ${CMAKE_CURRENT_SOURCE_DIR} FILES

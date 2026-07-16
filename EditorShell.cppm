@@ -23,13 +23,14 @@ export module Kairo.Editor.ImGuiShell;
 
 import Kairo.Editor;
 import Kairo.Editor.ImGuiGraphCanvas;
+import Kairo.Editor.TransformGizmo;
 import Kairo.Editor.ImGuiReflectionInspector;
 import Kairo.Editor.UI;
 import Kairo.Editor.PhysicsPreview;
 import Kairo.EngineCore;
 import Kairo.EngineCore.Reflection;
 import Kairo.Reflection;
-import Kairo.Foundation.Math.Quaternion;
+import Kairo.Foundation.Math;
 import Kairo.Renderer.DebugDraw;
 
 export namespace kairo::editor
@@ -121,6 +122,10 @@ export namespace kairo::editor
         DocumentSchemaRegistry m_Schemas = CreateCoreDocumentSchemaRegistry();
         ImGuiGraphCanvas m_GraphCanvas;
         EditorInputRouter m_InputRouter;
+        TransformGizmo m_TransformGizmo;
+        TransformGizmoSpace m_GizmoSpace = TransformGizmoSpace::World;
+        std::optional<kairo::foundation::math::Transformf> m_GizmoBefore;
+        std::optional<kairo::engine::Entity> m_GizmoEntity;
         ViewportController m_ViewportController;
         PhysicsPreview m_PhysicsPreview;
         std::optional<kairo::engine::Scene> m_RuntimeScene;
@@ -398,6 +403,11 @@ export namespace kairo::editor
                 ImGui::SameLine();
                 DrawViewportToolButton(EditorAction::ScaleTool, "R");
                 ImGui::SameLine();
+                if (ToolbarButton(m_GizmoSpace == TransformGizmoSpace::World ? "World" : "Local", false))
+                    m_GizmoSpace = m_GizmoSpace == TransformGizmoSpace::World
+                        ? TransformGizmoSpace::Local : TransformGizmoSpace::World;
+                if (ImGui::IsItemHovered()) ImGui::SetTooltip("Transform orientation");
+                ImGui::SameLine();
                 if (ActionButton("+", UIButtonTone::Primary, true, 25.0f)) OpenAddPrimitivePopup();
                 if (ImGui::IsItemHovered()) ImGui::SetTooltip("Add primitive (Shift+A)");
                 DrawPrimitivePopup();
@@ -434,7 +444,9 @@ export namespace kairo::editor
                         m_ViewportPickRequest = std::pair{ x, y };
                     }
                 }
-                HandleViewportNavigation(hovered);
+                const bool gizmoOwnsPointer = DrawTransformGizmo(viewportMin, viewportSize);
+                DrawOrientationGizmo(viewportMin, viewportSize);
+                HandleViewportNavigation(hovered && !gizmoOwnsPointer);
 
                 const ImVec2 overlay = { viewportMin.x + 12.0f, viewportMin.y + 12.0f };
                 ImGui::GetWindowDrawList()->AddText(overlay, IM_COL32(210, 225, 238, 210),
@@ -628,30 +640,75 @@ export namespace kairo::editor
             }
             m_ViewportController.Update(input);
 
+        }
+
+        [[nodiscard]] bool DrawTransformGizmo(ImVec2 viewportMin, ImVec2 viewportSize)
+        {
             const auto selected = m_State.SelectedEntity();
-            if (!selected.has_value() || !ImGui::IsMouseDragging(ImGuiMouseButton_Left, 0.0f)) return;
-            if (m_ActiveTool == EditorAction::SelectTool) return;
-            auto transform = m_Project.Scene().Transform(*selected).Local;
-            if (m_ActiveTool == EditorAction::TranslateTool)
+            if (!selected.has_value() || m_ActiveTool == EditorAction::SelectTool ||
+                m_State.Mode() != EditorMode::Edit) return false;
+            using namespace kairo::foundation::math;
+            const auto camera = m_ViewportController.Pose();
+            const Mat4f view = LookAt(camera.Position, camera.Target, camera.Up);
+            Mat4f projection = Perspective(1.0471975512f,
+                viewportSize.x / std::max(viewportSize.y, 1.0f), 0.1f, 100.0f);
+            projection(1u, 1u) *= -1.0f;
+            const TransformGizmoOperation operation = m_ActiveTool == EditorAction::TranslateTool
+                ? TransformGizmoOperation::Translate : m_ActiveTool == EditorAction::RotateTool
+                ? TransformGizmoOperation::Rotate : TransformGizmoOperation::Scale;
+            const float snap = ImGui::GetIO().KeyCtrl || ImGui::GetIO().KeySuper
+                ? (operation == TransformGizmoOperation::Rotate ? 15.0f : 0.5f) : 0.0f;
+            const auto result = m_TransformGizmo.Draw({ view, projection,
+                m_Project.Scene().Transform(*selected).Local, viewportMin.x, viewportMin.y,
+                viewportSize.x, viewportSize.y, snap, operation, m_GizmoSpace });
+
+            if (result.Active && !m_GizmoBefore.has_value())
             {
-                const float sensitivity = std::max(0.0025f, m_ViewportController.Distance() * 0.0035f);
-                transform.Translation.x += io.MouseDelta.x * sensitivity;
-                transform.Translation.y -= io.MouseDelta.y * sensitivity;
+                m_GizmoBefore = m_Project.Scene().Transform(*selected).Local;
+                m_GizmoEntity = *selected;
             }
-            else if (m_ActiveTool == EditorAction::RotateTool)
+            if (result.Changed)
             {
-                transform.Rotation = (kairo::foundation::math::RotationAroundY(io.MouseDelta.x * 0.0125f) *
-                    kairo::foundation::math::RotationAroundX(io.MouseDelta.y * 0.0125f) * transform.Rotation).Normalized();
+                const auto target = m_GizmoEntity.value_or(*selected);
+                if (m_Project.Scene().Contains(target)) m_Project.EditScene().Transform(target).Local = result.Transform;
             }
-            else if (m_ActiveTool == EditorAction::ScaleTool)
+            if (m_GizmoBefore.has_value() && ImGui::IsKeyPressed(ImGuiKey_Escape, false))
             {
-                const float factor = std::clamp(std::exp(io.MouseDelta.x * 0.0125f), 0.1f, 10.0f);
-                transform.Scale *= factor;
+                m_Project.EditScene().Transform(*m_GizmoEntity).Local = *m_GizmoBefore;
+                m_GizmoBefore.reset();
+                m_GizmoEntity.reset();
             }
-            RunCommand([this, entity = *selected, transform]
+            else if (!result.Active && m_GizmoBefore.has_value())
             {
-                m_History.Execute(std::make_unique<SetEntityTransformCommand>(m_Project, entity, transform));
-            });
+                const auto entity = *m_GizmoEntity;
+                const auto before = *m_GizmoBefore;
+                const auto after = m_Project.Scene().Transform(entity).Local;
+                m_GizmoBefore.reset();
+                m_GizmoEntity.reset();
+                if (before != after) RunCommand([this, entity, before, after]
+                {
+                    m_History.Execute(std::make_unique<SetEntityTransformCommand>(
+                        m_Project, entity, before, after));
+                });
+            }
+            return result.Active || result.Hovered;
+        }
+
+        void DrawOrientationGizmo(ImVec2 viewportMin, ImVec2 viewportSize)
+        {
+            constexpr float button = 26.0f;
+            ImGui::SetCursorScreenPos({ viewportMin.x + viewportSize.x - button * 3.0f - 16.0f,
+                viewportMin.y + 12.0f });
+            ImGui::PushID("ViewportOrientation");
+            if (ImGui::Button("X", { button, button })) m_ViewportController.SnapToAxis(ViewportAxis::Right);
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip("Right view");
+            ImGui::SameLine(0.0f, 2.0f);
+            if (ImGui::Button("Y", { button, button })) m_ViewportController.SnapToAxis(ViewportAxis::Top);
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip("Top view");
+            ImGui::SameLine(0.0f, 2.0f);
+            if (ImGui::Button("Z", { button, button })) m_ViewportController.SnapToAxis(ViewportAxis::Front);
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip("Front view");
+            ImGui::PopID();
         }
 
         void DrawToolPanel(Panel panel)

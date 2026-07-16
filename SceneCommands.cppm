@@ -303,6 +303,12 @@ export namespace kairo::editor
             : m_Project(&project), m_Entity(entity), m_Before(project.Scene().Transform(entity).Local),
               m_After(std::move(value)) {}
 
+        SetEntityTransformCommand(ProjectSession& project, kairo::engine::Entity entity,
+            kairo::foundation::math::Transformf before,
+            kairo::foundation::math::Transformf after)
+            : m_Project(&project), m_Entity(entity), m_Before(std::move(before)),
+              m_After(std::move(after)) {}
+
         [[nodiscard]] std::string_view Name() const noexcept override { return "Edit Transform"; }
         void Execute() override { m_Project->EditScene().Transform(m_Entity).Local = m_After; }
         void Undo() override { m_Project->EditScene().Transform(m_Entity).Local = m_Before; }
