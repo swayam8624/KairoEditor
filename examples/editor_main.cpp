@@ -2,6 +2,7 @@
 #include <cstdint>
 #include <exception>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <optional>
 #include <stdexcept>
@@ -24,6 +25,7 @@ namespace
         std::optional<std::filesystem::path> Document;
         std::optional<kairo::editor::AuthoringSurface> AuthoringSurface;
         std::optional<std::uint64_t> FrameLimit;
+        std::optional<std::filesystem::path> Screenshot;
         bool PersistLayout = true;
     };
 
@@ -60,6 +62,12 @@ namespace
                 else throw std::invalid_argument("--authoring requires code, graph, or split.");
                 continue;
             }
+            if (argument == "--screenshot")
+            {
+                if (++index == argc) throw std::invalid_argument("--screenshot requires an output .ppm path.");
+                options.Screenshot = std::filesystem::path(argv[index]);
+                continue;
+            }
             if (argument != "--frames")
                 throw std::invalid_argument("Unknown option: " + std::string(argument));
             if (++index == argc) throw std::invalid_argument("--frames requires a positive integer.");
@@ -74,8 +82,22 @@ namespace
         if (options.Project.empty())
             throw std::invalid_argument("Usage: KairoEditorApp --project <file.kproject> "
                 "[--document project-relative.kdoc] [--authoring code|graph|split] "
-                "[--frames positive-count] [--no-layout-persistence]");
+                "[--frames positive-count] [--screenshot output.ppm] [--no-layout-persistence]");
         return options;
+    }
+
+    void WriteCapture(const std::filesystem::path& path,
+        const kairo::renderer::ViewportCapture& capture)
+    {
+        if (!capture.IsVisuallyNonUniform())
+            throw std::runtime_error("Viewport screenshot rejected a blank or uniform render target.");
+        if (!path.parent_path().empty()) std::filesystem::create_directories(path.parent_path());
+        std::ofstream output(path, std::ios::binary | std::ios::trunc);
+        if (!output) throw std::runtime_error("Cannot create viewport screenshot: " + path.string());
+        output << "P6\n" << capture.Width << ' ' << capture.Height << "\n255\n";
+        for (std::size_t index = 0u; index < capture.RGBA.size(); index += 4u)
+            output.write(reinterpret_cast<const char*>(capture.RGBA.data() + index), 3);
+        if (!output) throw std::runtime_error("Failed while writing viewport screenshot: " + path.string());
     }
 }
 
@@ -116,9 +138,12 @@ int main(int argc, char** argv)
         if (options.AuthoringSurface.has_value()) state.SetAuthoringSurface(*options.AuthoringSurface);
 
         std::uint64_t renderedFrames = 0u;
+        std::optional<kairo::renderer::ViewportCapture> screenshot;
         while (!renderer.NativeWindow().ShouldClose() && (!options.FrameLimit.has_value() || renderedFrames < *options.FrameLimit))
         {
             renderer.NativeWindow().PollEvents();
+            if (auto capture = renderer.TakeViewportCapture(); capture.has_value())
+                screenshot = std::move(capture);
             if (const auto picked = renderer.TakeViewportPickResult(); picked.has_value())
                 shell.ApplyViewportPick(*picked);
             imgui.BeginFrame();
@@ -129,12 +154,22 @@ int main(int argc, char** argv)
             renderer.SetCameraPose({ camera.Position, camera.Target, camera.Up });
             renderer.SubmitRenderScene(kairo::editor::BuildRenderScene(shell.RenderScene(), renderAssets));
             renderer.SubmitDebugDraw(shell.PhysicsDebugDraw());
+            if (options.Screenshot.has_value() && renderedFrames == 1u)
+                renderer.RequestViewportCapture();
             if (const auto pick = shell.TakeViewportPickRequest(); pick.has_value())
                 renderer.RequestViewportPick(pick->first, pick->second);
             renderer.DrawFrame();
+            if (auto capture = renderer.TakeViewportCapture(); capture.has_value())
+                screenshot = std::move(capture);
             const auto [viewportWidth, viewportHeight] = shell.RequestedViewportExtent();
             renderer.ResizeViewport(viewportWidth, viewportHeight);
             ++renderedFrames;
+        }
+        if (options.Screenshot.has_value())
+        {
+            if (!screenshot.has_value())
+                throw std::runtime_error("Viewport screenshot requires at least three rendered frames.");
+            WriteCapture(*options.Screenshot, *screenshot);
         }
         return 0;
     }

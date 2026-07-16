@@ -12,7 +12,7 @@ set(KAIRO_EDITOR_MONO_FONT_PATH "" CACHE FILEPATH "Optional monospace TTF font f
 # Immutable standalone fallback revisions. Local source directories and sibling
 # checkouts still take precedence for active workspace development.
 set(KAIRO_EDITOR_CORE_REVISION d098d4d87fd6105eefde858d57eb1b376edb230e)
-set(KAIRO_EDITOR_RENDERER_REVISION 9a42e98e0e5315d76332e90bd2af258f835556e0)
+set(KAIRO_EDITOR_RENDERER_REVISION dc6a2577d3804492dfa524b40c075f2459e6f188)
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
     add_compile_options(-Wall -Wextra -Wpedantic -Wno-unused-parameter)
@@ -167,6 +167,11 @@ if(KAIRO_EDITOR_BUILD_TESTS)
             --frames 3 --no-layout-persistence)
         set_tests_properties(KairoEditorNativeSmoke PROPERTIES TIMEOUT 20)
         set_tests_properties(KairoEditorNativeSmoke PROPERTIES SKIP_RETURN_CODE 77)
+        add_test(NAME KairoEditorViewportScreenshot COMMAND KairoEditorApp
+            --project ${CMAKE_CURRENT_SOURCE_DIR}/examples/StarterProject/Project.kproject
+            --frames 3 --no-layout-persistence
+            --screenshot ${CMAKE_CURRENT_BINARY_DIR}/artifacts/editor-native.ppm)
+        set_tests_properties(KairoEditorViewportScreenshot PROPERTIES TIMEOUT 20 SKIP_RETURN_CODE 77)
         add_test(NAME KairoEditorCodeSurfaceSmoke COMMAND KairoEditorApp
             --project ${CMAKE_CURRENT_SOURCE_DIR}/examples/StarterProject/Project.kproject
             --document Logic/Player.kdoc --authoring code
@@ -181,7 +186,7 @@ if(KAIRO_EDITOR_BUILD_TESTS)
             # runner's global PATH to discover their runtime dependencies.
             set(_kairo_editor_runtime_path
                 "$<TARGET_FILE_DIR:glfw>;$<TARGET_FILE_DIR:Vulkan::Vulkan>;$ENV{PATH}")
-            set_tests_properties(KairoEditorNativeSmoke KairoEditorCodeSurfaceSmoke
+            set_tests_properties(KairoEditorNativeSmoke KairoEditorViewportScreenshot KairoEditorCodeSurfaceSmoke
                 KairoEditorRequiresProject PROPERTIES
                 ENVIRONMENT "PATH=${_kairo_editor_runtime_path}")
         endif()
