@@ -43,9 +43,12 @@ export namespace kairo::editor
     class EditorShell final
     {
     public:
-        EditorShell(EditorState& state, ProjectSession& project, bool rebuildLayout = true)
+        EditorShell(EditorState& state, ProjectSession& project, bool rebuildLayout = true,
+            KeymapProfile keymapProfile = KeymapProfile::Kairo,
+            std::filesystem::path keymapSettingsPath = {})
             : m_State(state), m_Project(project), m_GraphCanvas(m_Schemas),
-              m_RebuildLayout(rebuildLayout)
+              m_InputRouter(keymapProfile), m_RebuildLayout(rebuildLayout),
+              m_KeymapSettingsPath(std::move(keymapSettingsPath))
         {
             kairo::engine::RegisterEngineCoreReflection(m_Reflection);
             m_NextAutosave = std::chrono::steady_clock::now() + AutosaveInterval;
@@ -184,6 +187,13 @@ export namespace kairo::editor
         static constexpr std::chrono::seconds AutosaveInterval{ 30 };
         std::chrono::steady_clock::time_point m_NextAutosave{};
         std::string m_RecoveryStatus;
+        std::filesystem::path m_KeymapSettingsPath;
+
+        void SetKeymapProfile(KeymapProfile profile)
+        {
+            m_InputRouter.SetProfile(profile);
+            if (!m_KeymapSettingsPath.empty()) SaveKeymapSettings(m_KeymapSettingsPath, profile);
+        }
 
         void DrawMainBar()
         {
@@ -219,6 +229,19 @@ export namespace kairo::editor
                     RunCommand([&history] { history.Undo(); });
                 if (ImGui::MenuItem(redo.c_str(), "Cmd+Shift+Z", false, history.CanRedo()))
                     RunCommand([&history] { history.Redo(); });
+                ImGui::Separator();
+                if (ImGui::BeginMenu("Keymap Profile"))
+                {
+                    for (const auto profile : { KeymapProfile::Kairo, KeymapProfile::Blender,
+                        KeymapProfile::Unreal, KeymapProfile::Unity })
+                    {
+                        const bool selected = m_InputRouter.Profile() == profile;
+                        const std::string label(Name(profile));
+                        if (ImGui::MenuItem(label.c_str(), nullptr, selected))
+                            RunCommand([this, profile] { SetKeymapProfile(profile); });
+                    }
+                    ImGui::EndMenu();
+                }
                 ImGui::EndMenu();
             }
             if (ImGui::BeginMenu("View"))

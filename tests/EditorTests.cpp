@@ -80,6 +80,27 @@ TEST_CASE("Builtin primitive identities are stable persistent asset references",
     CHECK(DefaultPrimitiveMaterial().IsValid());
 }
 
+TEST_CASE("Keymap profiles persist outside projects with strict versioned parsing",
+    "[KairoEditor][Input][Settings]")
+{
+    CHECK(ParseKeymapProfile("blender") == KeymapProfile::Blender);
+    CHECK(ParseKeymapSettings(SerializeKeymapSettings(KeymapProfile::Unreal)) ==
+        KeymapProfile::Unreal);
+    REQUIRE_THROWS_AS(ParseKeymapProfile("unknown"), std::invalid_argument);
+    REQUIRE_THROWS_AS(ParseKeymapSettings("profile unity\n"), std::invalid_argument);
+    REQUIRE_THROWS_AS(ParseKeymapSettings(
+        "kairo-keymap 1\nprofile unity\nextra value\n"), std::invalid_argument);
+
+    const auto root = std::filesystem::temp_directory_path() /
+        ("kairo-keymap-" + kairo::assets::GenerateAssetID().ToString());
+    const auto path = root / "settings" / "keymap.settings";
+    CHECK(LoadKeymapSettings(path) == KeymapProfile::Kairo);
+    SaveKeymapSettings(path, KeymapProfile::Unity);
+    CHECK(LoadKeymapSettings(path) == KeymapProfile::Unity);
+    CHECK_FALSE(std::filesystem::exists(path.string() + ".tmp"));
+    std::filesystem::remove_all(root);
+}
+
 TEST_CASE("Document text and values enforce persistent data boundaries", "[KairoEditor][Document][Types]")
 {
     CHECK(IsValidUtf8("Kairo \xE2\x9C\x93"));
