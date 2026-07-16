@@ -119,6 +119,8 @@ int main(int argc, char** argv)
         while (!renderer.NativeWindow().ShouldClose() && (!options.FrameLimit.has_value() || renderedFrames < *options.FrameLimit))
         {
             renderer.NativeWindow().PollEvents();
+            if (const auto picked = renderer.TakeViewportPickResult(); picked.has_value())
+                shell.ApplyViewportPick(*picked);
             imgui.BeginFrame();
             shell.SetViewportTexture(imgui.ViewportTexture());
             shell.Draw();
@@ -127,6 +129,8 @@ int main(int argc, char** argv)
             renderer.SetCameraPose({ camera.Position, camera.Target, camera.Up });
             renderer.SubmitRenderScene(kairo::editor::BuildRenderScene(shell.RenderScene(), renderAssets));
             renderer.SubmitDebugDraw(shell.PhysicsDebugDraw());
+            if (const auto pick = shell.TakeViewportPickRequest(); pick.has_value())
+                renderer.RequestViewportPick(pick->first, pick->second);
             renderer.DrawFrame();
             const auto [viewportWidth, viewportHeight] = shell.RequestedViewportExtent();
             renderer.ResizeViewport(viewportWidth, viewportHeight);

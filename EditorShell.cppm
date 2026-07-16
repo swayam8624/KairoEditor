@@ -96,6 +96,22 @@ export namespace kairo::editor
             return { m_RequestedViewportWidth, m_RequestedViewportHeight };
         }
 
+        /// Output: newest physical-pixel click in the rendered scene panel.
+        [[nodiscard]] std::optional<std::pair<std::uint32_t, std::uint32_t>> TakeViewportPickRequest() noexcept
+        {
+            return std::exchange(m_ViewportPickRequest, std::nullopt);
+        }
+
+        /// Input: stable renderer object ID, where zero denotes background.
+        /// Task: apply GPU picking only when the ID still belongs to this scene.
+        void ApplyViewportPick(std::uint32_t objectID)
+        {
+            if (objectID == 0u) { m_State.ClearSelection(); return; }
+            const kairo::engine::Entity entity{ objectID };
+            if (m_Project.Scene().Contains(entity)) m_State.Select(entity);
+            else m_State.ClearSelection();
+        }
+
     private:
         EditorState& m_State;
         ProjectSession& m_Project;
@@ -124,6 +140,7 @@ export namespace kairo::editor
         ImTextureID m_ViewportTexture = ImTextureID_Invalid;
         std::uint32_t m_RequestedViewportWidth = 1u;
         std::uint32_t m_RequestedViewportHeight = 1u;
+        std::optional<std::pair<std::uint32_t, std::uint32_t>> m_ViewportPickRequest;
 
         void DrawMainBar()
         {
@@ -427,7 +444,21 @@ export namespace kairo::editor
                         IM_COL32(230, 125, 125, 255), "Viewport texture unavailable");
                 }
                 const bool hovered = ImGui::IsItemHovered();
-                if (hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) ImGui::SetWindowFocus();
+                if (hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+                {
+                    ImGui::SetWindowFocus();
+                    if (m_ActiveTool == EditorAction::SelectTool && m_ViewportTexture != ImTextureID_Invalid)
+                    {
+                        const ImVec2 mouse = ImGui::GetMousePos();
+                        const auto x = static_cast<std::uint32_t>(std::clamp(
+                            std::floor((mouse.x - viewportMin.x) * framebufferScale.x), 0.0f,
+                            static_cast<float>(m_RequestedViewportWidth - 1u)));
+                        const auto y = static_cast<std::uint32_t>(std::clamp(
+                            std::floor((mouse.y - viewportMin.y) * framebufferScale.y), 0.0f,
+                            static_cast<float>(m_RequestedViewportHeight - 1u)));
+                        m_ViewportPickRequest = std::pair{ x, y };
+                    }
+                }
                 HandleViewportNavigation(hovered);
 
                 const ImVec2 overlay = { viewportMin.x + 12.0f, viewportMin.y + 12.0f };
