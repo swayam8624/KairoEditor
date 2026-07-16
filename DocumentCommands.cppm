@@ -96,6 +96,63 @@ export namespace kairo::editor
         std::vector<DocumentConnection> m_Connections;
     };
 
+    /// Removes one graph selection as a single reversible transaction.
+    /// Connections shared by two selected nodes are captured once, allowing
+    /// Undo to restore exact topology without exposing partial deletion steps.
+    class RemoveDocumentNodesCommand final : public EditorCommand
+    {
+    public:
+        RemoveDocumentNodesCommand(AuthoringDocument& document, std::vector<NodeID> nodes)
+            : m_Document(&document)
+        {
+            std::ranges::sort(nodes);
+            nodes.erase(std::unique(nodes.begin(), nodes.end()), nodes.end());
+            if (nodes.empty()) throw std::invalid_argument("Remove Nodes requires a non-empty selection.");
+            m_Nodes.reserve(nodes.size());
+            for (const NodeID id : nodes)
+            {
+                m_Nodes.push_back(document.Node(id));
+                for (const auto& connection : document.ConnectionsForNode(id))
+                    if (std::ranges::find(m_Connections, connection) == m_Connections.end())
+                        m_Connections.push_back(connection);
+            }
+        }
+
+        [[nodiscard]] std::string_view Name() const noexcept override { return "Remove Nodes"; }
+
+        void Execute() override
+        {
+            for (const DocumentNode& node : m_Nodes)
+                if (m_Document->Contains(node.ID)) m_Document->RemoveNode(node.ID);
+        }
+
+        void Undo() override
+        {
+            std::vector<NodeID> restored;
+            try
+            {
+                for (const DocumentNode& node : m_Nodes)
+                {
+                    m_Document->RestoreNode(node);
+                    restored.push_back(node.ID);
+                }
+                for (const auto& connection : m_Connections)
+                    m_Document->Connect(connection.Output, connection.Input);
+            }
+            catch (...)
+            {
+                for (const NodeID id : restored)
+                    if (m_Document->Contains(id)) m_Document->RemoveNode(id);
+                throw;
+            }
+        }
+
+    private:
+        AuthoringDocument* m_Document;
+        std::vector<DocumentNode> m_Nodes;
+        std::vector<DocumentConnection> m_Connections;
+    };
+
     /// Adds one validated directed edge. All type and cardinality rules remain
     /// centralized in AuthoringDocument rather than duplicated by the command.
     class ConnectDocumentPinsCommand final : public EditorCommand

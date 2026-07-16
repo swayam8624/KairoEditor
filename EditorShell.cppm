@@ -56,14 +56,14 @@ export namespace kairo::editor
         void Draw()
         {
             m_State.ValidateSelection();
+            m_GraphCanvas.BeginFrame();
             DrawMainBar();
             DrawStatusBar();
             const ImGuiID dockspace = ImGui::GetID("KairoEditorDockspace");
             BuildDefaultLayout(dockspace);
             ImGui::DockSpaceOverViewport(dockspace, nullptr, ImGuiDockNodeFlags_PassthruCentralNode);
             DrawVisiblePanels();
-            if (m_Project.HasProject() && m_ViewportFocused && !ImGui::GetIO().WantTextInput)
-                HandleViewportShortcuts();
+            RouteAndDispatchInput();
             if (m_State.Mode() == EditorMode::Play && m_RuntimeScene.has_value())
                 RunCommand([this] { m_PhysicsPreview.Step(*m_RuntimeScene, ImGui::GetIO().DeltaTime); });
             DrawDocumentLifecyclePopups();
@@ -120,6 +120,7 @@ export namespace kairo::editor
         AuthoringWorkspaceState m_AuthoringWorkspace;
         DocumentSchemaRegistry m_Schemas = CreateCoreDocumentSchemaRegistry();
         ImGuiGraphCanvas m_GraphCanvas;
+        EditorInputRouter m_InputRouter;
         ViewportController m_ViewportController;
         PhysicsPreview m_PhysicsPreview;
         std::optional<kairo::engine::Scene> m_RuntimeScene;
@@ -205,32 +206,6 @@ export namespace kairo::editor
                     (m_Project.HasUnsavedChanges() || m_AuthoringWorkspace.HasDirtyTextDrafts()) ? " *" : "");
             }
             ImGui::EndMainMenuBar();
-
-            if (m_Project.HasProject() && ImGui::Shortcut(ImGuiMod_Shortcut | ImGuiKey_N))
-                RequestNewDocument();
-            if (m_Project.HasProject() && ImGui::Shortcut(ImGuiMod_Shortcut | ImGuiKey_S))
-            {
-                const auto active = m_Project.Documents().ActiveID();
-                if (m_DocumentPanelFocused && active.has_value())
-                    RunCommand([this, id = *active] { SaveDocumentWithDraft(id); });
-                else RunCommand([this] { m_Project.SaveScene(); });
-            }
-            if (m_Project.HasProject() && ImGui::Shortcut(ImGuiMod_Shortcut | ImGuiKey_W))
-            {
-                const auto active = m_Project.Documents().ActiveID();
-                if (m_DocumentPanelFocused && active.has_value()) RequestCloseDocument(*active);
-            }
-            if (m_Project.HasProject() &&
-                ImGui::Shortcut(ImGuiMod_Shortcut | ImGuiMod_Alt | ImGuiKey_S))
-            {
-                RunCommand([this] { SaveAllWithDrafts(); });
-            }
-            CommandHistory& history = ActiveHistory();
-            if (history.CanRedo() &&
-                ImGui::Shortcut(ImGuiMod_Shortcut | ImGuiMod_Shift | ImGuiKey_Z))
-                RunCommand([&history] { history.Redo(); });
-            else if (history.CanUndo() && ImGui::Shortcut(ImGuiMod_Shortcut | ImGuiKey_Z))
-                RunCommand([&history] { history.Undo(); });
 
         }
 
@@ -516,23 +491,16 @@ export namespace kairo::editor
             }
         }
 
-        void HandleViewportShortcuts()
+        void DispatchSceneActions()
         {
-            if (ImGui::Shortcut(ImGuiMod_Shift | ImGuiKey_A)) OpenAddPrimitivePopup();
-            if (ImGui::Shortcut(ImGuiKey_Q)) m_ActiveTool = EditorAction::SelectTool;
-            if (ImGui::Shortcut(ImGuiKey_W)) m_ActiveTool = EditorAction::TranslateTool;
-            if (ImGui::Shortcut(ImGuiKey_E)) m_ActiveTool = EditorAction::RotateTool;
-            if (ImGui::Shortcut(ImGuiKey_R)) m_ActiveTool = EditorAction::ScaleTool;
-            if (ImGui::Shortcut(ImGuiKey_G)) m_ActiveTool = EditorAction::TranslateTool;
-            if (ImGui::Shortcut(ImGuiKey_S)) m_ActiveTool = EditorAction::ScaleTool;
-            if (ImGui::Shortcut(ImGuiKey_F)) FocusSelection();
-            if (ImGui::Shortcut(ImGuiKey_F5))
-            {
-                if (m_State.Mode() == EditorMode::Edit) StartPlay();
-                else StopPlay();
-            }
+            if (m_InputRouter.Consume(EditorAction::AddPrimitive)) OpenAddPrimitivePopup();
+            if (m_InputRouter.Consume(EditorAction::SelectTool)) m_ActiveTool = EditorAction::SelectTool;
+            if (m_InputRouter.Consume(EditorAction::TranslateTool)) m_ActiveTool = EditorAction::TranslateTool;
+            if (m_InputRouter.Consume(EditorAction::RotateTool)) m_ActiveTool = EditorAction::RotateTool;
+            if (m_InputRouter.Consume(EditorAction::ScaleTool)) m_ActiveTool = EditorAction::ScaleTool;
+            if (m_InputRouter.Consume(EditorAction::FocusSelection)) FocusSelection();
             const auto selected = m_State.SelectedEntity();
-            if (selected.has_value() && (ImGui::Shortcut(ImGuiKey_Delete) || ImGui::Shortcut(ImGuiKey_X)))
+            if (selected.has_value() && m_InputRouter.Consume(EditorAction::DeleteSelection))
             {
                 RunCommand([this, entity = *selected]
                 {
@@ -540,7 +508,7 @@ export namespace kairo::editor
                     m_State.ClearSelection();
                 });
             }
-            if (selected.has_value() && ImGui::Shortcut(ImGuiMod_Shortcut | ImGuiKey_D))
+            if (selected.has_value() && m_InputRouter.Consume(EditorAction::Duplicate))
             {
                 const auto& source = m_Project.Scene();
                 auto command = std::make_unique<CreateEntityCommand>(m_Project,
@@ -559,6 +527,60 @@ export namespace kairo::editor
                     m_State.Select(created);
                 });
             }
+        }
+
+        void RouteAndDispatchInput()
+        {
+            const ImGuiIO& io = ImGui::GetIO();
+            const InputContext context = io.WantTextInput ? InputContext::Text :
+                m_GraphCanvas.Focused() ? InputContext::Graph :
+                m_ViewportFocused ? InputContext::Scene : InputContext::Global;
+            m_InputRouter.BeginFrame();
+            m_InputRouter.SetContext(context);
+            const KeyModifiers modifiers =
+                (io.KeyShift ? KeyModifiers::Shift : KeyModifiers::None) |
+                ((io.KeySuper || io.KeyCtrl) ? KeyModifiers::Shortcut : KeyModifiers::None) |
+                (io.KeyAlt ? KeyModifiers::Alt : KeyModifiers::None);
+            constexpr std::array keys{
+                std::pair{ EditorKey::A, ImGuiKey_A }, std::pair{ EditorKey::C, ImGuiKey_C },
+                std::pair{ EditorKey::D, ImGuiKey_D }, std::pair{ EditorKey::E, ImGuiKey_E },
+                std::pair{ EditorKey::F, ImGuiKey_F }, std::pair{ EditorKey::G, ImGuiKey_G },
+                std::pair{ EditorKey::N, ImGuiKey_N }, std::pair{ EditorKey::Q, ImGuiKey_Q },
+                std::pair{ EditorKey::R, ImGuiKey_R }, std::pair{ EditorKey::S, ImGuiKey_S },
+                std::pair{ EditorKey::V, ImGuiKey_V }, std::pair{ EditorKey::W, ImGuiKey_W },
+                std::pair{ EditorKey::X, ImGuiKey_X }, std::pair{ EditorKey::Z, ImGuiKey_Z },
+                std::pair{ EditorKey::Space, ImGuiKey_Space }, std::pair{ EditorKey::Home, ImGuiKey_Home },
+                std::pair{ EditorKey::Backspace, ImGuiKey_Backspace },
+                std::pair{ EditorKey::Delete, ImGuiKey_Delete }, std::pair{ EditorKey::F5, ImGuiKey_F5 }
+            };
+            for (const auto [key, native] : keys)
+                if (ImGui::IsKeyPressed(native, false)) (void)m_InputRouter.Route({ { key, modifiers } });
+
+            if (!m_Project.HasProject()) return;
+            if (m_InputRouter.Consume(EditorAction::NewDocument)) RequestNewDocument();
+            if (m_InputRouter.Consume(EditorAction::CloseDocument))
+                if (const auto active = m_Project.Documents().ActiveID(); active.has_value()) RequestCloseDocument(*active);
+            if (m_InputRouter.Consume(EditorAction::SaveAll)) RunCommand([this] { SaveAllWithDrafts(); });
+            if (m_InputRouter.Consume(EditorAction::Save))
+            {
+                const auto active = m_Project.Documents().ActiveID();
+                if (m_DocumentPanelFocused && active.has_value())
+                    RunCommand([this, id = *active] { SaveDocumentWithDraft(id); });
+                else RunCommand([this] { m_Project.SaveScene(); });
+            }
+            CommandHistory& history = ActiveHistory();
+            if (m_InputRouter.Consume(EditorAction::Redo) && history.CanRedo()) RunCommand([&history] { history.Redo(); });
+            else if (m_InputRouter.Consume(EditorAction::Undo) && history.CanUndo()) RunCommand([&history] { history.Undo(); });
+            if (m_InputRouter.Consume(EditorAction::TogglePlay))
+            {
+                if (m_State.Mode() == EditorMode::Edit) StartPlay(); else StopPlay();
+            }
+            if (context == InputContext::Scene) DispatchSceneActions();
+            if (context == InputContext::Graph)
+                for (const EditorAction action : { EditorAction::GraphAddNode, EditorAction::GraphDelete,
+                    EditorAction::GraphDuplicate, EditorAction::GraphCopy, EditorAction::GraphPaste,
+                    EditorAction::GraphFrameSelection, EditorAction::GraphFrameAll })
+                    if (m_InputRouter.Consume(action)) m_GraphCanvas.QueueAction(action);
         }
 
         void FocusSelection()

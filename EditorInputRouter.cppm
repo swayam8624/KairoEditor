@@ -71,6 +71,9 @@ export namespace kairo::editor
         using enum KeyModifiers;
         std::vector<ContextBinding> result{
             { Save, Global, { S, Shortcut } },
+            { SaveAll, Global, { S, Shortcut | Alt } },
+            { NewDocument, Global, { N, Shortcut } },
+            { CloseDocument, Global, { W, Shortcut } },
             { Undo, Global, { Z, Shortcut } },
             { Redo, Global, { Z, Shortcut | Shift } },
             { TogglePlay, Global, { F5 } },
@@ -86,6 +89,7 @@ export namespace kairo::editor
             { AddPrimitive, Scene, { A, Shift } },
             { DeleteSelection, Scene, { Delete } },
             { DeleteSelection, Scene, { Backspace } },
+            { DeleteSelection, Scene, { X } },
             { Duplicate, Scene, { D, Shortcut } },
             { FocusSelection, Scene, { F } }
         };

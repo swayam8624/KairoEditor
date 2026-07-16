@@ -501,6 +501,20 @@ TEST_CASE("Document commands preserve identity topology and merged edit intent",
     structural.Undo();
     CHECK_FALSE(document.IsConnected(secondInput));
 
+    document.Connect(firstPins[2], secondInput);
+    structural.Execute(std::make_unique<RemoveDocumentNodesCommand>(document,
+        std::vector<NodeID>{ second, first, second }));
+    CHECK_FALSE(document.Contains(first));
+    CHECK_FALSE(document.Contains(second));
+    structural.Undo();
+    CHECK(document.Contains(first));
+    CHECK(document.Contains(second));
+    CHECK(document.IsConnected(secondInput));
+    structural.Redo();
+    CHECK_FALSE(document.Contains(first));
+    CHECK_FALSE(document.Contains(second));
+    structural.Undo();
+
     CommandHistory values;
     values.Execute(std::make_unique<SetDocumentNodePositionCommand>(document, second,
         CanvasPosition{ 320.0, 30.0 }));

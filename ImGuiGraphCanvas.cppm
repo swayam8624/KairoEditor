@@ -32,6 +32,14 @@ export namespace kairo::editor
     public:
         explicit ImGuiGraphCanvas(const DocumentSchemaRegistry& schemas) noexcept : m_Schemas(&schemas) {}
 
+        void BeginFrame() noexcept { m_Focused = false; }
+        [[nodiscard]] bool Focused() const noexcept { return m_Focused; }
+
+        void QueueAction(EditorAction action)
+        {
+            m_PendingActions.push_back(action);
+        }
+
         void Draw(ProjectSession& project, DocumentViewState& view,
             kairo::assets::AssetID documentID)
         {
@@ -57,6 +65,7 @@ export namespace kairo::editor
                 ImGuiButtonFlags_MouseButtonRight);
             const bool hovered = ImGui::IsItemHovered();
             const bool focused = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);
+            m_Focused = focused;
             const ImVec2 mouse = ImGui::GetIO().MousePos;
             ImDrawList* draw = ImGui::GetWindowDrawList();
             draw->PushClipRect(origin, { origin.x + size.x, origin.y + size.y }, true);
@@ -67,8 +76,7 @@ export namespace kairo::editor
             GraphSpatialIndex index;
             index.Rebuild(document, layouts);
             HandleNavigation(view.Viewport(), layouts, hovered, focused, origin, size, mouse);
-            const bool addAtPointer = hovered && (ImGui::IsMouseClicked(ImGuiMouseButton_Right) ||
-                ImGui::IsKeyPressed(ImGuiKey_Space, false));
+            const bool addAtPointer = hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Right);
             if (addAtCenter || addAtPointer)
             {
                 const GraphPoint screen = addAtCenter
@@ -79,6 +87,7 @@ export namespace kairo::editor
             DrawGrid(*draw, view.Viewport(), origin, size);
             DrawConnections(*draw, document, index, view.Viewport(), origin);
             DrawNodes(*draw, document, index, view.Selection(), view.Viewport(), origin, size);
+            HandleQueuedActions(project, view, documentID, layouts, origin, size, mouse, hovered);
             HandleInteraction(project, view, documentID, index, hovered, origin, mouse);
             DrawGestureOverlay(*draw, project.Document(documentID), view, index, origin, mouse);
             DrawPalette(project, view, documentID);
@@ -128,6 +137,52 @@ export namespace kairo::editor
         std::optional<MarqueeState> m_Marquee;
         std::optional<NodePaletteState> m_Palette;
         std::optional<std::string> m_Error;
+        std::vector<EditorAction> m_PendingActions;
+        bool m_Focused = false;
+
+        void HandleQueuedActions(ProjectSession& project, DocumentViewState& view,
+            kairo::assets::AssetID documentID, const std::vector<GraphNodeLayout>& layouts,
+            ImVec2 origin, ImVec2 size, ImVec2 mouse, bool hovered)
+        {
+            for (const EditorAction action : std::exchange(m_PendingActions, {}))
+            {
+                if (action == EditorAction::GraphAddNode)
+                {
+                    const GraphPoint screen = hovered ? GraphPoint{ mouse.x, mouse.y }
+                        : GraphPoint{ origin.x + size.x * 0.5, origin.y + size.y * 0.5 };
+                    OpenPalette(documentID, view.Viewport().ToDocument(screen, { origin.x, origin.y }));
+                }
+                else if (action == EditorAction::GraphDelete && view.Selection().Size() != 0u)
+                {
+                    RunOperation([&]
+                    {
+                        auto& document = project.EditDocument(documentID);
+                        project.DocumentHistory().Execute(std::make_unique<RemoveDocumentNodesCommand>(
+                            document, view.Selection().Snapshot()));
+                        view.Selection().Clear();
+                        view.Synchronize(document);
+                    });
+                }
+                else if ((action == EditorAction::GraphFrameAll ||
+                    action == EditorAction::GraphFrameSelection) && !layouts.empty())
+                {
+                    std::vector<GraphNodeLayout> framed;
+                    for (const auto& layout : layouts)
+                        if (action == EditorAction::GraphFrameAll || view.Selection().Contains(layout.ID))
+                            framed.push_back(layout);
+                    if (framed.empty()) continue;
+                    GraphRect bounds = framed.front().Bounds;
+                    for (const auto& layout : framed)
+                    {
+                        bounds.Minimum.x = std::min(bounds.Minimum.x, layout.Bounds.Minimum.x);
+                        bounds.Minimum.y = std::min(bounds.Minimum.y, layout.Bounds.Minimum.y);
+                        bounds.Maximum.x = std::max(bounds.Maximum.x, layout.Bounds.Maximum.x);
+                        bounds.Maximum.y = std::max(bounds.Maximum.y, layout.Bounds.Maximum.y);
+                    }
+                    view.Viewport().Frame(bounds, { size.x, size.y }, 56.0);
+                }
+            }
+        }
 
         void OpenPalette(kairo::assets::AssetID document, GraphPoint position)
         {
@@ -238,18 +293,7 @@ export namespace kairo::editor
                 viewport.ZoomBy(std::pow(1.15, static_cast<double>(ImGui::GetIO().MouseWheel)),
                     point(mouse), point(origin));
 
-            if (focused && ImGui::IsKeyPressed(ImGuiKey_F) && !layouts.empty())
-            {
-                GraphRect bounds = layouts.front().Bounds;
-                for (const auto& layout : layouts)
-                {
-                    bounds.Minimum.x = std::min(bounds.Minimum.x, layout.Bounds.Minimum.x);
-                    bounds.Minimum.y = std::min(bounds.Minimum.y, layout.Bounds.Minimum.y);
-                    bounds.Maximum.x = std::max(bounds.Maximum.x, layout.Bounds.Maximum.x);
-                    bounds.Maximum.y = std::max(bounds.Maximum.y, layout.Bounds.Maximum.y);
-                }
-                viewport.Frame(bounds, { size.x, size.y }, 56.0);
-            }
+            (void)focused;
         }
 
         static void DrawGrid(ImDrawList& draw, const GraphViewport& viewport,

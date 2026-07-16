@@ -15,6 +15,9 @@ export namespace kairo::editor
     enum class EditorAction : std::uint8_t
     {
         Save,
+        SaveAll,
+        NewDocument,
+        CloseDocument,
         Undo,
         Redo,
         Duplicate,
@@ -51,6 +54,9 @@ export namespace kairo::editor
     {
         return {{
             { EditorAction::Save, "Save", "Cmd+S" },
+            { EditorAction::SaveAll, "Save All", "Cmd+Alt+S" },
+            { EditorAction::NewDocument, "New Document", "Cmd+N" },
+            { EditorAction::CloseDocument, "Close Document", "Cmd+W" },
             { EditorAction::Undo, "Undo", "Cmd+Z" },
             { EditorAction::Redo, "Redo", "Cmd+Shift+Z" },
             { EditorAction::Duplicate, "Duplicate", "Cmd+D" },
