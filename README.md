@@ -89,11 +89,21 @@ hardcoded startup scene. A descriptor points to one validated KairoAssets
 manifest and startup `.kscene` using project-root-relative portable paths:
 
 ```text
-kairo-project 1
+kairo-project 2
 name "Kairo Starter Project"
+engine-version "0.1.0"
 assets "Assets.kassets"
 startup-scene "Scenes/Main.kscene"
+input-map "Config/Input.kinput"
+rendering-profile "desktop"
+build-profile "Development" development "Build/Development"
+build-profile "Release" release "Build/Release"
 ```
+
+Format 2 additionally accepts repeatable `plugin` statements. Format 1 remains
+readable and receives deterministic engine, input, rendering, and build-profile
+defaults in memory; the migration reaches disk only through an explicit project
+save.
 
 `ProjectSession` owns the address-stable scene and asset registry used by editor
 state, persistence, the Content Browser, and renderer extraction. Project and

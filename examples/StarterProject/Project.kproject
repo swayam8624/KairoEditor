@@ -1,4 +1,9 @@
-kairo-project 1
+kairo-project 2
 name "Kairo Starter Project"
+engine-version "0.1.0"
 assets "Assets.kassets"
 startup-scene "Scenes/Main.kscene"
+input-map "Config/Input.kinput"
+rendering-profile "desktop"
+build-profile "Development" development "Build/Development"
+build-profile "Release" release "Build/Release"

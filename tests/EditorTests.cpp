@@ -845,11 +845,28 @@ TEST_CASE("Project descriptors round trip portable bootstrap state", "[KairoEdit
     const ProjectDescriptor original{ "Kairo City", "Project/Assets.kassets", "Scenes/City.kscene" };
     const std::string encoded = SerializeProjectDescriptor(original);
     CHECK(encoded ==
-        "kairo-project 1\n"
+        "kairo-project 2\n"
         "name \"Kairo City\"\n"
+        "engine-version \"0.1.0\"\n"
         "assets \"Project/Assets.kassets\"\n"
-        "startup-scene \"Scenes/City.kscene\"\n");
+        "startup-scene \"Scenes/City.kscene\"\n"
+        "input-map \"Config/Input.kinput\"\n"
+        "rendering-profile \"desktop\"\n"
+        "build-profile \"Development\" development \"Build/Development\"\n"
+        "build-profile \"Release\" release \"Build/Release\"\n");
     CHECK(ParseProjectDescriptor(encoded) == original);
+    const auto migrated = ParseProjectDescriptor(
+        "kairo-project 1\nname \"Legacy\"\nassets \"Assets.kassets\"\nstartup-scene \"Main.kscene\"\n");
+    CHECK(migrated.EngineVersion == "0.1.0");
+    CHECK(migrated.BuildProfiles.size() == 2u);
+    REQUIRE_THROWS_AS(ParseProjectDescriptor(
+        "kairo-project 2\nname \"Incomplete\"\nassets \"Assets.kassets\"\n"
+        "startup-scene \"Main.kscene\"\n"), ProjectFormatError);
+
+    ProjectDescriptor configured{ "Configured", "Assets.kassets", "Scenes/Main.kscene" };
+    configured.EnabledPlugins = { "kairo.physics", "kairo.ai" };
+    configured.BuildProfiles = { { "Shipping", ProjectBuildKind::Release, "Artifacts/Shipping" } };
+    CHECK(ParseProjectDescriptor(SerializeProjectDescriptor(configured)) == configured);
 }
 
 TEST_CASE("Project descriptors reject malformed and unsafe input with locations", "[KairoEditor][Project]")
