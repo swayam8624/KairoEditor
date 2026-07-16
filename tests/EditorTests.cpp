@@ -987,6 +987,90 @@ TEST_CASE("Project sessions include document dirtiness in destructive lifecycle 
     std::filesystem::remove_all(root);
 }
 
+TEST_CASE("Recovery snapshots preserve dirty state and restore a complete editor session",
+    "[KairoEditor][Project][Recovery]")
+{
+    const auto root = std::filesystem::temp_directory_path() /
+        ("kairo-recovery-roundtrip-" + kairo::assets::GenerateAssetID().ToString());
+    ProjectSession session;
+    session.CreateProject(root, "Recovery Roundtrip");
+    const auto document = session.CreateDocument(DocumentKind::Logic,
+        "Recovered Logic", "Logic/Recovered.kdoc");
+    const auto entity = session.EditScene().CreateEntity("Recovered Entity");
+    session.EditDocument(document).Rename("Recovered Unsaved Logic");
+    REQUIRE(session.IsSceneDirty());
+    REQUIRE(session.AreAssetsDirty());
+    REQUIRE(session.Documents().IsDirty(document));
+
+    const std::string invalidDraft = "kairo-document 1\nthis draft is intentionally incomplete";
+    const RecoverySnapshot snapshot = session.CreateRecoveryPoint({ {
+        document, "Logic/Recovered.kdoc", invalidDraft, true } }, 4u);
+    CHECK(std::filesystem::is_regular_file(snapshot.Directory / "manifest.krecover"));
+    CHECK(session.IsSceneDirty());
+    CHECK(session.AreAssetsDirty());
+    CHECK(session.Documents().IsDirty(document));
+    REQUIRE(std::ranges::count(snapshot.Files, RecoveryFileRole::ProjectDescriptor,
+        &RecoveryFile::Role) == 1);
+    REQUIRE(std::ranges::count(snapshot.Files, RecoveryFileRole::AuthoringDocument,
+        &RecoveryFile::Role) == 1);
+    const auto draftFile = std::ranges::find(snapshot.Files,
+        RecoveryFileRole::TextDraft, &RecoveryFile::Role);
+    REQUIRE(draftFile != snapshot.Files.end());
+    CHECK(LoadRecoveryPayload(snapshot, *draftFile) == invalidDraft);
+
+    session.EditScene().Name(entity).Value = "Later Authored Entity";
+    session.EditDocument(document).Rename("Later Authored Logic");
+    session.SaveAll();
+    REQUIRE_FALSE(session.HasUnsavedChanges());
+    session.RestoreRecoveryPoint(snapshot.Directory);
+    REQUIRE(session.Scene().Contains(entity));
+    CHECK(session.Scene().Name(entity).Value == "Recovered Entity");
+    REQUIRE(session.Documents().Contains(document));
+    CHECK(session.Document(document).Name() == "Recovered Unsaved Logic");
+    CHECK(session.Documents().ActiveID() == document);
+    CHECK_FALSE(session.HasUnsavedChanges());
+    CHECK(std::filesystem::exists(root / ".kairo" / "recovery-backups"));
+    session.Close();
+    std::filesystem::remove_all(root);
+}
+
+TEST_CASE("Recovery journals detect corruption and rotate only valid snapshots",
+    "[KairoEditor][Project][Recovery]")
+{
+    const auto root = std::filesystem::temp_directory_path() /
+        ("kairo-recovery-validation-" + kairo::assets::GenerateAssetID().ToString());
+    ProjectSession session;
+    session.CreateProject(root, "Recovery Validation");
+    (void)session.EditScene().CreateEntity("Snapshot Content");
+    const auto first = session.CreateRecoveryPoint(2u);
+    const auto second = session.CreateRecoveryPoint(2u);
+    const auto third = session.CreateRecoveryPoint(2u);
+    CHECK(std::filesystem::is_directory(third.Directory));
+
+    std::size_t published = 0u;
+    for (const auto& entry : std::filesystem::directory_iterator(root / ".kairo" / "recovery"))
+        if (entry.is_directory() && entry.path().filename().string().starts_with("snapshot-")) ++published;
+    CHECK(published == 2u);
+    CHECK_FALSE(std::filesystem::exists(first.Directory));
+    CHECK(std::filesystem::exists(second.Directory));
+
+    const auto loaded = LoadRecoverySnapshot(third.Directory);
+    const auto sceneFile = std::ranges::find(loaded.Files,
+        RecoveryFileRole::Scene, &RecoveryFile::Role);
+    REQUIRE(sceneFile != loaded.Files.end());
+    {
+        std::ofstream corrupt(third.Directory / sceneFile->PayloadPath,
+            std::ios::binary | std::ios::app);
+        corrupt << "corruption";
+    }
+    REQUIRE_THROWS(LoadRecoverySnapshot(third.Directory));
+    REQUIRE_THROWS_AS(session.CreateRecoveryPoint(0u), std::invalid_argument);
+    REQUIRE_THROWS_AS(session.CreateRecoveryPoint(MaximumRecoverySnapshotLimit + 1u),
+        std::invalid_argument);
+    session.Close(UnsavedChangesPolicy::Discard);
+    std::filesystem::remove_all(root);
+}
+
 TEST_CASE("Project sessions activate only open authoring documents",
     "[KairoEditor][Project][Session][Document]")
 {

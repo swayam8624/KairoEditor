@@ -16,6 +16,7 @@ export import Kairo.Editor.GraphCanvas;
 export import Kairo.Editor.DocumentProjection;
 export import Kairo.Editor.AuthoringWorkspaceState;
 export import Kairo.Editor.ProjectDescriptor;
+export import Kairo.Editor.ProjectRecovery;
 export import Kairo.Editor.ProjectSession;
 export import Kairo.Editor.CommandHistory;
 export import Kairo.Editor.Actions;

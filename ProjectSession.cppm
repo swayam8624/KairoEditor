@@ -4,12 +4,14 @@ module;
 #include <cstdint>
 #include <filesystem>
 #include <limits>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
 #include <system_error>
 #include <type_traits>
 #include <utility>
+#include <vector>
 
 export module Kairo.Editor.ProjectSession;
 
@@ -21,6 +23,7 @@ import Kairo.Editor.Types;
 import Kairo.Editor.ProjectDescriptor;
 import Kairo.Editor.ProjectDocuments;
 import Kairo.Editor.ProjectPaths;
+import Kairo.Editor.ProjectRecovery;
 import Kairo.EngineCore;
 
 export namespace kairo::editor
@@ -335,6 +338,49 @@ export namespace kairo::editor
             m_Documents.SaveAll();
             SaveAssets();
             SaveScene();
+        }
+
+        /// Task: journal the current in-memory project without changing dirty
+        /// flags, command history, or authored files. The returned directory is
+        /// a fully published, checksummed recovery point suitable for Hub and
+        /// crash-recovery discovery.
+        [[nodiscard]] RecoverySnapshot CreateRecoveryPoint(
+            std::size_t retentionLimit = DefaultRecoverySnapshotLimit) const
+        {
+            return CreateRecoveryPoint({}, retentionLimit);
+        }
+
+        [[nodiscard]] RecoverySnapshot CreateRecoveryPoint(
+            const std::vector<RecoveryDocumentDraft>& drafts,
+            std::size_t retentionLimit = DefaultRecoverySnapshotLimit) const
+        {
+            RequireProject();
+            return CreateRecoverySnapshot(m_ProjectRoot, m_ProjectFile, m_Descriptor,
+                m_ActiveScenePath, m_Assets, m_Scene, m_Documents, drafts,
+                m_SceneDirty, m_AssetsDirty, retentionLimit);
+        }
+
+        /// Task: apply an explicitly selected recovery point, then reconstruct
+        /// the editor session's active scene and open document tabs. Recovery
+        /// data is validated and current files are backed up before replacement.
+        void RestoreRecoveryPoint(const std::filesystem::path& snapshotDirectory,
+            UnsavedChangesPolicy policy = UnsavedChangesPolicy::Reject)
+        {
+            RejectUnsavedReplacement(policy, "restore a recovery snapshot");
+            const RecoverySnapshot snapshot = LoadRecoverySnapshot(snapshotDirectory);
+            const auto projectFile = RestoreRecoverySnapshot(snapshotDirectory);
+            OpenProject(projectFile, UnsavedChangesPolicy::Discard);
+            if (kairo::assets::PortableAssetPathKey(snapshot.ActiveScene) !=
+                kairo::assets::PortableAssetPathKey(m_ActiveScenePath))
+                OpenScene(snapshot.ActiveScene, UnsavedChangesPolicy::Discard);
+            std::optional<kairo::assets::AssetID> active;
+            for (const RecoveryFile& file : snapshot.Files)
+            {
+                if (file.Role != RecoveryFileRole::AuthoringDocument) continue;
+                const auto id = OpenDocument(file.TargetPath);
+                if (file.WasActive) active = id;
+            }
+            if (active.has_value()) ActivateDocument(*active);
         }
 
         void Close(UnsavedChangesPolicy policy = UnsavedChangesPolicy::Reject)

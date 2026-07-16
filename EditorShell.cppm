@@ -7,6 +7,7 @@ module;
 #include <array>
 #include <cctype>
 #include <cmath>
+#include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -47,6 +48,7 @@ export namespace kairo::editor
               m_RebuildLayout(rebuildLayout)
         {
             kairo::engine::RegisterEngineCoreReflection(m_Reflection);
+            m_NextAutosave = std::chrono::steady_clock::now() + AutosaveInterval;
             if (const auto active = m_Project.Documents().ActiveID(); active.has_value())
             {
                 const auto& document = m_Project.Document(*active);
@@ -60,6 +62,7 @@ export namespace kairo::editor
         {
             m_State.ValidateSelection();
             m_GraphCanvas.BeginFrame();
+            RunAutosaveIfDue();
             DrawMainBar();
             DrawStatusBar();
             const ImGuiID dockspace = ImGui::GetID("KairoEditorDockspace");
@@ -157,6 +160,9 @@ export namespace kairo::editor
         std::uint32_t m_RequestedViewportWidth = 1u;
         std::uint32_t m_RequestedViewportHeight = 1u;
         std::optional<std::pair<std::uint32_t, std::uint32_t>> m_ViewportPickRequest;
+        static constexpr std::chrono::seconds AutosaveInterval{ 30 };
+        std::chrono::steady_clock::time_point m_NextAutosave{};
+        std::string m_RecoveryStatus;
 
         void DrawMainBar()
         {
@@ -177,6 +183,8 @@ export namespace kairo::editor
                     RunCommand([this] { m_Project.SaveScene(); });
                 if (ImGui::MenuItem("Save All", "Cmd+Option+S", false, m_Project.HasProject()))
                     RunCommand([this] { SaveAllWithDrafts(); });
+                if (ImGui::MenuItem("Create Recovery Point", nullptr, false, m_Project.HasProject()))
+                    RunCommand([this] { CreateRecoveryNow(); });
                 ImGui::EndMenu();
             }
             if (ImGui::BeginMenu("Edit"))
@@ -273,6 +281,11 @@ export namespace kairo::editor
                 ImGui::Separator();
                 ImGui::TextDisabled("%s", m_State.Mode() == EditorMode::Edit ? "Edit" :
                     (m_State.Mode() == EditorMode::Play ? "Playing" : "Paused"));
+                if (!m_RecoveryStatus.empty())
+                {
+                    ImGui::Separator();
+                    ImGui::TextDisabled("%s", m_RecoveryStatus.c_str());
+                }
                 ImGui::EndMenuBar();
             }
             ImGui::End();
@@ -1093,6 +1106,45 @@ export namespace kairo::editor
             for (const auto id : m_AuthoringWorkspace.DocumentIDs())
                 if (m_AuthoringWorkspace.At(id).IsTextDirty()) ApplyTextDraft(id);
             m_Project.SaveAll();
+        }
+
+        [[nodiscard]] std::vector<RecoveryDocumentDraft> RecoveryDrafts() const
+        {
+            std::vector<RecoveryDocumentDraft> drafts;
+            for (const auto id : m_AuthoringWorkspace.DocumentIDs())
+            {
+                const auto& view = m_AuthoringWorkspace.At(id);
+                if (!view.IsTextDirty()) continue;
+                drafts.push_back({ id, m_Project.Documents().RelativePath(id),
+                    view.TextDraft(), m_Project.Documents().ActiveID() == id });
+            }
+            return drafts;
+        }
+
+        void CreateRecoveryNow()
+        {
+            const RecoverySnapshot snapshot = m_Project.CreateRecoveryPoint(RecoveryDrafts());
+            m_RecoveryStatus = "Recovery current";
+            m_NextAutosave = std::chrono::steady_clock::now() + AutosaveInterval;
+            (void)snapshot;
+        }
+
+        void RunAutosaveIfDue() noexcept
+        {
+            const auto now = std::chrono::steady_clock::now();
+            if (now < m_NextAutosave) return;
+            m_NextAutosave = now + AutosaveInterval;
+            if (!m_Project.HasUnsavedChanges() && !m_AuthoringWorkspace.HasDirtyTextDrafts()) return;
+            try
+            {
+                (void)m_Project.CreateRecoveryPoint(RecoveryDrafts());
+                m_RecoveryStatus = "Autosave recovery current";
+            }
+            catch (const std::exception& error)
+            {
+                m_RecoveryStatus = "Autosave failed";
+                m_LastError = std::string("Autosave recovery failed: ") + error.what();
+            }
         }
 
         static int ResizeDocumentText(ImGuiInputTextCallbackData* data) noexcept

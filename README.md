@@ -128,6 +128,30 @@ command history. This milestone accepts project paths through
 `--project`; native create/open dialogs will call the same session API rather
 than introducing another persistence path.
 
+### Autosave and recovery
+
+The editor creates a recovery point every 30 seconds while authoritative
+project state or an editor text buffer is dirty. `File > Create Recovery Point`
+creates one immediately. Recovery is a journal, not an implicit save:
+
+- authored project files and editor dirty flags are left unchanged;
+- snapshots are staged and atomically published under
+  `.kairo/recovery/snapshot-*`;
+- project descriptor, asset registry, active scene, open documents, active tab,
+  and raw text drafts are captured;
+- every payload has a bounded byte count and checksum;
+- the newest 10 valid snapshots are retained; malformed or foreign directories
+  are preserved for inspection rather than deleted;
+- raw text drafts may be syntactically invalid and are never written over a
+  canonical `.kdoc` during project restoration;
+- explicit restoration validates the complete snapshot, backs up every target
+  under `.kairo/recovery-backups`, and rolls back touched files if replacement
+  fails.
+
+`ProjectSession::CreateRecoveryPoint` and `RestoreRecoveryPoint` provide the
+backend-neutral contract used by the editor and KairoHub. This makes recovery
+testable without Dear ImGui or a native window.
+
 ## Commands and undo
 
 `CommandHistory` is independent from Dear ImGui and owns a bounded linear
