@@ -112,6 +112,30 @@ after KairoRenderer and the asset layer own the underlying runtime behavior.
 - Numerical editing supports predictable drag sensitivity, typed entry, units,
   reset-to-default, bounds, and mixed multi-selection values.
 
+## Input And Viewport Baseline
+
+The current editor implements the beginning of a shared input/action layer:
+global save/undo/redo/play actions, protected text-input focus, viewport tool
+selection, creation, framing, transform commands, and orbit/fly navigation.
+The hybrid map uses `Q/W/E/R` for select/move/rotate/scale plus Blender `G`/`S`
+aliases; it deliberately chooses `E` for rotation because Blender and Unreal
+assign incompatible meanings to `R`. Per-user remapping and a command palette
+are input-system extensions, not reasons to hardcode actions into panels.
+
+The viewport is KairoRenderer content behind transparent tooling chrome. An
+editor-owned camera pose controls the renderer, so view navigation never makes
+the renderer import ImGui or GLFW input. Cube, plane, UV sphere, and cylinder
+are implemented blockout assets. Full edit-mode topology, modifiers, sculpting,
+terrain, and foliage remain asset-authoring work and have no placeholder UI.
+
+## Physics Preview Baseline
+
+Physics preview uses a cloned runtime scene. Persisted physics binding presence
+is authored and undoable; PhysicsWorld body/collider IDs and simulated poses
+exist only in the clone. Debug visualization uses the existing
+PhysicsEngine-to-Renderer bridge. This is the required boundary before joints,
+collision-channel authoring, cloth, water, particles, or physics cinematics.
+
 ## Visual System
 
 - Dark neutral surfaces use several contrast tiers instead of one black field.
@@ -158,6 +182,11 @@ Implemented and verified:
 - a canonical structured-text projection with stable source navigation,
   immutable identity/kind guards, parse-before-mutate replacement, and merged
   reversible edits over the same graph document.
+- action-based viewport navigation, primitive creation, transform tools, and
+  a renderer-owned camera contract;
+- cloned-scene physics preview with dynamic/static box mapping and collider
+  contact debug output;
+- 24 typed core graph contracts, including input/world and collision/query nodes.
 
 Not yet represented as complete product surfaces:
 
@@ -174,8 +203,8 @@ finished features.
 
 1. Finish project tooling: native create/open/save-as dialogs, recent projects,
    shared diagnostics, and reflected property commands.
-2. Scene viewport selection, transform gizmos, runtime scene cloning, and physics
-   debug overlays.
+2. Add viewport picking and axis-constrained gizmos, then persistent physics
+   component descriptors and collision-layer authoring on the runtime-clone/debug baseline.
 3. Typed document kernel: stable document/node/pin IDs, values, commands,
    validation, serialization, compiler boundary, and backend-neutral tests.
 4. Production graph canvas backed by the document kernel.

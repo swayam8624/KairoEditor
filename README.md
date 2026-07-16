@@ -25,6 +25,9 @@ The current foundation provides a tested, backend-neutral editor state model:
 - reversible entity creation, deletion, rename, and complete transform edits
 - reflection-driven scalar inspection for Name, Camera, mesh visibility, and
   physics bindings, with component invariants checked before a command commits
+- action-based keyboard routing that protects code and graph text input
+- renderer-backed orbit/fly navigation, transform tools, framing, and primitive creation
+- isolated Play-mode KairoPhysicsEngine preview with box colliders and debug draw
 
 The visual direction is viewport-first and production-dense: low-chrome dark
 panels, a strong central canvas, rich inspectable nodes, timeline/curve tools,
@@ -55,6 +58,14 @@ the Kairo neutral theme, curated docking, workspace controls, live hierarchy
 selection, transform inspection, play controls, and runtime UI statistics.
 The editor never creates a second Vulkan device or render pass; ImGui records
 through the renderer's validated tooling-overlay contract.
+
+The viewport is real KairoRenderer content behind transparent tooling chrome.
+`ViewportController` owns backend-neutral orbit/fly state; the native shell
+translates input and passes a camera pose to KairoRenderer before every frame.
+The starter project opens with a persisted cube and ground plane. `Shift+A`
+creates persistent asset-backed cube, plane, UV sphere, and cylinder entities.
+These are honest blockout primitives, not a claim of Blender-style arbitrary
+topology editing. See [docs/EDITOR_CONTROLS.md](docs/EDITOR_CONTROLS.md).
 
 The native host also contains a narrow `KairoEditorRendererBridge` boundary.
 It validates typed EngineCore asset handles against a live `KairoAssets`
@@ -157,7 +168,7 @@ parsing is bounded and line/column located, and saves replace the destination
 atomically. This makes missing schemas a validation diagnostic instead of a
 data-loss event.
 
-The shipped core catalog contributes 16 validated contracts across logic,
+The shipped core catalog contributes 24 validated contracts across logic,
 material, audio, animation-state, and simulation documents. Registry search is
 bounded, tokenized, ASCII case-insensitive, and deterministically relevance
 ordered. These contracts define authored data shape; each domain compiler still
@@ -209,6 +220,22 @@ control, right-click, or `Space` opens a searchable category-grouped node
 palette; the chosen schema is instantiated at the canvas center or pointer and
 selected through the same reversible command path.
 
+Logic now includes Begin Play, Tick, Input Action, Branch, Spawn Entity, Set
+Position, math, and diagnostic contracts. Simulation includes tick, forces,
+impulses, collision events, trigger state, and raycast contracts. These nodes
+are typed editor data; runtime behavior is claimed only once a matching domain
+compiler/runtime is registered.
+
+## Physics preview
+
+The Inspector can add or remove an entity's **Dynamic Box Physics** binding as
+an undoable scene command. On Play, `PhysicsPreview` clones the authored scene,
+turns marked entities into real KairoPhysicsEngine dynamic bodies with box
+colliders derived from local scale, and maps simulated poses to renderer scene
+extraction. Collider outlines, contacts, and optional broadphase AABBs come
+from `KairoRendererPhysicsDebug`. Stop drops the runtime copy, so simulation
+never changes saved authoring transforms or persists stale physics IDs.
+
 The constrained Code surface uses `DocumentTextProjection`, not a second data
 model. Canonical UTF-8 text carries byte-accurate spans back to node, pin,
 property, and connection identities. Edited text is fully parsed before one
@@ -246,6 +273,17 @@ ctest --test-dir build --output-on-failure
   --project examples/StarterProject/Project.kproject \
   --document Logic/Player.kdoc \
   --authoring split
+```
+
+From the game-engine superproject:
+
+```bash
+cd /Users/swayamsingal/Desktop/Programming/Kairo
+cmake --preset dev-clang
+cmake --build --preset dev-clang --parallel
+./build/dev-clang/KairoEditor/KairoEditorApp \
+  --project "$PWD/KairoEditor/examples/StarterProject/Project.kproject" \
+  --document Logic/Player.kdoc --authoring split
 ```
 
 Appending `--frames 3` runs a bounded native smoke session used by CTest to
