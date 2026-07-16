@@ -32,6 +32,7 @@ import Kairo.EngineCore.Reflection;
 import Kairo.Reflection;
 import Kairo.Foundation.Math;
 import Kairo.Renderer.DebugDraw;
+import Kairo.Renderer.Types;
 
 export namespace kairo::editor
 {
@@ -85,6 +86,12 @@ export namespace kairo::editor
             return m_RuntimeScene.has_value() ? *m_RuntimeScene : m_Project.Scene();
         }
 
+        void SetViewportShading(kairo::renderer::ViewportShadingMode mode) noexcept { m_ViewportShading = mode; }
+        [[nodiscard]] kairo::renderer::ViewportShadingMode ViewportShading() const noexcept
+        {
+            return m_ViewportShading;
+        }
+
         [[nodiscard]] kairo::renderer::DebugDrawList PhysicsDebugDraw() const
         {
             return m_PhysicsPreview.Active() ? m_PhysicsPreview.DebugDraw(m_ShowPhysicsBroadphase)
@@ -133,6 +140,7 @@ export namespace kairo::editor
         EditorAction m_ActiveTool = EditorAction::SelectTool;
         bool m_ViewportFocused = false;
         bool m_ShowPhysicsBroadphase = false;
+        kairo::renderer::ViewportShadingMode m_ViewportShading = kairo::renderer::ViewportShadingMode::Lit;
         bool m_LayoutBuilt = false;
         bool m_RebuildLayout = true;
         bool m_DocumentPanelFocused = false;
@@ -400,7 +408,24 @@ export namespace kairo::editor
             {
                 m_ViewportFocused = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);
                 const auto camera = m_ViewportController.Pose();
-                ImGui::TextDisabled("Perspective  |  Lit  |  %s", m_State.Mode() == EditorMode::Edit ? "Edit" : "Runtime");
+                ImGui::TextDisabled("Perspective");
+                ImGui::SameLine();
+                if (ImGui::BeginCombo("##ViewportShading", kairo::renderer::Name(m_ViewportShading).data(),
+                    ImGuiComboFlags_WidthFitPreview))
+                {
+                    for (const auto mode : { kairo::renderer::ViewportShadingMode::Lit,
+                        kairo::renderer::ViewportShadingMode::Unlit,
+                        kairo::renderer::ViewportShadingMode::Normals,
+                        kairo::renderer::ViewportShadingMode::Lighting })
+                    {
+                        const bool selected = m_ViewportShading == mode;
+                        if (ImGui::Selectable(kairo::renderer::Name(mode).data(), selected)) m_ViewportShading = mode;
+                        if (selected) ImGui::SetItemDefaultFocus();
+                    }
+                    ImGui::EndCombo();
+                }
+                ImGui::SameLine();
+                ImGui::TextDisabled("|  %s", m_State.Mode() == EditorMode::Edit ? "Edit" : "Runtime");
                 ImGui::SameLine();
                 DrawViewportToolButton(EditorAction::SelectTool, "Q");
                 ImGui::SameLine();

@@ -26,6 +26,7 @@ namespace
         std::optional<kairo::editor::AuthoringSurface> AuthoringSurface;
         std::optional<std::uint64_t> FrameLimit;
         std::optional<std::filesystem::path> Screenshot;
+        std::optional<kairo::renderer::ViewportShadingMode> ViewportShading;
         bool PersistLayout = true;
     };
 
@@ -68,6 +69,17 @@ namespace
                 options.Screenshot = std::filesystem::path(argv[index]);
                 continue;
             }
+            if (argument == "--viewport-mode")
+            {
+                if (++index == argc) throw std::invalid_argument("--viewport-mode requires lit, unlit, normals, or lighting.");
+                const std::string_view mode(argv[index]);
+                if (mode == "lit") options.ViewportShading = kairo::renderer::ViewportShadingMode::Lit;
+                else if (mode == "unlit") options.ViewportShading = kairo::renderer::ViewportShadingMode::Unlit;
+                else if (mode == "normals") options.ViewportShading = kairo::renderer::ViewportShadingMode::Normals;
+                else if (mode == "lighting") options.ViewportShading = kairo::renderer::ViewportShadingMode::Lighting;
+                else throw std::invalid_argument("--viewport-mode requires lit, unlit, normals, or lighting.");
+                continue;
+            }
             if (argument != "--frames")
                 throw std::invalid_argument("Unknown option: " + std::string(argument));
             if (++index == argc) throw std::invalid_argument("--frames requires a positive integer.");
@@ -82,7 +94,8 @@ namespace
         if (options.Project.empty())
             throw std::invalid_argument("Usage: KairoEditorApp --project <file.kproject> "
                 "[--document project-relative.kdoc] [--authoring code|graph|split] "
-                "[--frames positive-count] [--screenshot output.ppm] [--no-layout-persistence]");
+                "[--frames positive-count] [--viewport-mode lit|unlit|normals|lighting] "
+                "[--screenshot output.ppm] [--no-layout-persistence]");
         return options;
     }
 
@@ -136,6 +149,7 @@ int main(int argc, char** argv)
         kairo::editor::ImGuiRuntime imgui(renderer, layoutFile);
         kairo::editor::ApplyKairoEditorTheme();
         kairo::editor::EditorShell shell(state, project, layoutPlan.ShouldRebuild());
+        if (options.ViewportShading.has_value()) shell.SetViewportShading(*options.ViewportShading);
         if (options.AuthoringSurface.has_value()) state.SetAuthoringSurface(*options.AuthoringSurface);
 
         std::uint64_t renderedFrames = 0u;
@@ -155,6 +169,7 @@ int main(int argc, char** argv)
             renderer.SetCameraPose({ camera.Position, camera.Target, camera.Up });
             renderer.SubmitRenderScene(kairo::editor::BuildRenderScene(shell.RenderScene(), renderAssets));
             renderer.SubmitDebugDraw(shell.PhysicsDebugDraw());
+            renderer.SetViewportShadingMode(shell.ViewportShading());
             if (options.Screenshot.has_value() && renderedFrames == 1u)
                 renderer.RequestViewportCapture();
             if (const auto pick = shell.TakeViewportPickRequest(); pick.has_value())
