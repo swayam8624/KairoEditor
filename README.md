@@ -4,6 +4,11 @@
 separate repository from `KairoEngineCore`: EngineCore runs scenes, while the
 editor owns selection, workspace state, inspection, and play/edit transitions.
 
+The versioned `.kproject` descriptor and bounded text persistence primitives
+live in `KairoEngineCore` so KairoHub, KairoEditor, build tools, and KairoPlayer
+share one validated bootstrap contract. Editor-named modules remain as source
+compatibility facades; they do not duplicate parser or atomic-save logic.
+
 ![KairoEditor native docked shell](docs/images/editor-shell.png)
 
 ```text
