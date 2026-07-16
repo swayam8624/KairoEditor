@@ -1,9 +1,13 @@
 module;
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <limits>
 #include <stdexcept>
 #include <unordered_map>
+#include <type_traits>
+#include <variant>
 
 export module Kairo.Editor.PhysicsPreview;
 
@@ -30,21 +34,29 @@ export namespace kairo::editor
             for (const kairo::engine::Entity entity : runtimeScene.Entities())
             {
                 if (!runtimeScene.HasRigidBody(entity) && !runtimeScene.HasCollider(entity)) continue;
-                const auto& transform = runtimeScene.Transform(entity).Local;
-                const bool dynamic = runtimeScene.HasRigidBody(entity);
-                const auto halfExtents = PositiveHalfExtents(transform.Scale);
+                if (runtimeScene.HasRigidBody(entity) && !runtimeScene.HasCollider(entity))
+                    throw std::invalid_argument("A rigid body requires an authored collider in physics preview.");
+                const auto transform = runtimeScene.WorldTransform(entity);
+                const auto authoredCollider = runtimeScene.HasCollider(entity)
+                    ? runtimeScene.Collider(entity) : kairo::engine::ColliderComponent{};
+                const auto shape = MakeShape(authoredCollider, transform.Scale);
                 kairo::foundation::physics::RigidBodyDesc body;
-                body.Type = dynamic ? kairo::foundation::physics::BodyType::Dynamic :
-                    kairo::foundation::physics::BodyType::Static;
+                const auto authoredBody = runtimeScene.HasRigidBody(entity)
+                    ? runtimeScene.RigidBody(entity) : kairo::engine::RigidBodyComponent{
+                        .Motion = kairo::engine::RigidBodyMotion::Static };
+                body.Type = ToRuntimeMotion(authoredBody.Motion);
                 body.State.Position = transform.Translation;
                 body.State.Rotation = transform.Rotation;
-                if (dynamic)
-                    body.Mass = kairo::foundation::physics::BoxMassProperties(halfExtents, 1.0f);
+                body.GravityScale = authoredBody.GravityScale;
+                body.LinearDamping = authoredBody.LinearDamping;
+                body.AngularDamping = authoredBody.AngularDamping;
+                if (body.Type == kairo::foundation::physics::BodyType::Dynamic)
+                    body.Mass = MakeMass(shape, authoredBody.Density);
                 const auto bodyID = m_World.CreateRigidBody(body);
-                const auto colliderID = m_World.AddCollider(bodyID,
-                    kairo::foundation::physics::BoxCollider{ halfExtents });
-                runtimeScene.SetRigidBody(entity, { bodyID });
-                runtimeScene.SetCollider(entity, { colliderID });
+                const kairo::foundation::physics::PhysicsMaterial material{
+                    authoredCollider.Restitution, authoredCollider.Friction, authoredCollider.Friction };
+                const auto colliderID = m_World.AddCollider(bodyID, shape, material);
+                m_World.SetColliderTrigger(colliderID, authoredCollider.IsTrigger);
                 m_Entities.emplace(entity.Value, bodyID);
             }
             m_Active = true;
@@ -63,9 +75,10 @@ export namespace kairo::editor
                 const kairo::engine::Entity entity{ entityValue };
                 if (!runtimeScene.Contains(entity) || !m_World.IsValidBody(bodyID)) continue;
                 const auto& body = m_World.Bodies().at(bodyID);
-                auto& transform = runtimeScene.Transform(entity).Local;
-                transform.Translation = body.State.Position;
-                transform.Rotation = body.State.Rotation;
+                auto world = runtimeScene.WorldTransform(entity);
+                world.Translation = body.State.Position;
+                world.Rotation = body.State.Rotation;
+                runtimeScene.Transform(entity).Local = ToLocal(runtimeScene, entity, world);
             }
         }
 
@@ -91,11 +104,82 @@ export namespace kairo::editor
         std::unordered_map<std::uint32_t, kairo::foundation::physics::BodyID> m_Entities;
         bool m_Active = false;
 
-        [[nodiscard]] static kairo::foundation::math::Vec3f PositiveHalfExtents(
-            const kairo::foundation::math::Vec3f& scale) noexcept
+        [[nodiscard]] static kairo::foundation::physics::BodyType ToRuntimeMotion(
+            kairo::engine::RigidBodyMotion motion)
         {
-            return { std::max(0.05f, std::abs(scale.x)), std::max(0.05f, std::abs(scale.y)),
-                std::max(0.05f, std::abs(scale.z)) };
+            switch (motion)
+            {
+                case kairo::engine::RigidBodyMotion::Static:
+                    return kairo::foundation::physics::BodyType::Static;
+                case kairo::engine::RigidBodyMotion::Dynamic:
+                    return kairo::foundation::physics::BodyType::Dynamic;
+                case kairo::engine::RigidBodyMotion::Kinematic:
+                    return kairo::foundation::physics::BodyType::Kinematic;
+            }
+            throw std::invalid_argument("Authored rigid body motion enum is invalid.");
+        }
+
+        [[nodiscard]] static kairo::foundation::physics::ColliderShape MakeShape(
+            const kairo::engine::ColliderComponent& collider,
+            const kairo::foundation::math::Vec3f& scale)
+        {
+            const kairo::foundation::math::Vec3f absolute{
+                std::abs(scale.x), std::abs(scale.y), std::abs(scale.z) };
+            switch (collider.Shape)
+            {
+                case kairo::engine::ColliderShape::Box:
+                    return kairo::foundation::physics::BoxCollider{
+                        collider.HalfExtents * absolute };
+                case kairo::engine::ColliderShape::Sphere:
+                    return kairo::foundation::physics::SphereCollider{
+                        collider.Radius * std::max({ absolute.x, absolute.y, absolute.z }) };
+                case kairo::engine::ColliderShape::Capsule:
+                    return kairo::foundation::physics::CapsuleCollider{
+                        collider.Radius * std::max(absolute.x, absolute.z),
+                        collider.HalfHeight * absolute.y };
+            }
+            throw std::invalid_argument("Authored collider shape enum is invalid.");
+        }
+
+        [[nodiscard]] static kairo::foundation::physics::MassProperties MakeMass(
+            const kairo::foundation::physics::ColliderShape& shape, float density)
+        {
+            return std::visit([density](const auto& value) -> kairo::foundation::physics::MassProperties
+            {
+                using Shape = std::decay_t<decltype(value)>;
+                if constexpr (std::is_same_v<Shape, kairo::foundation::physics::BoxCollider>)
+                    return kairo::foundation::physics::BoxMassProperties(value.HalfExtents, density);
+                else if constexpr (std::is_same_v<Shape, kairo::foundation::physics::SphereCollider>)
+                    return kairo::foundation::physics::SphereMassProperties(value.Radius, density);
+                else if constexpr (std::is_same_v<Shape, kairo::foundation::physics::CapsuleCollider>)
+                    return kairo::foundation::physics::CapsuleMassProperties(
+                        value.Radius, value.HalfHeight * 2.0f, density);
+                else
+                    throw std::invalid_argument("Dynamic preview bodies require a finite primitive collider.");
+            }, shape);
+        }
+
+        [[nodiscard]] static kairo::foundation::math::Transformf ToLocal(
+            const kairo::engine::Scene& scene, kairo::engine::Entity entity,
+            const kairo::foundation::math::Transformf& world)
+        {
+            const auto parent = scene.Parent(entity);
+            if (!parent.has_value()) return world;
+            const auto parentWorld = scene.WorldTransform(*parent);
+            constexpr float epsilon = std::numeric_limits<float>::epsilon() * 10.0f;
+            if (std::abs(parentWorld.Scale.x) <= epsilon ||
+                std::abs(parentWorld.Scale.y) <= epsilon ||
+                std::abs(parentWorld.Scale.z) <= epsilon)
+                throw std::invalid_argument("Cannot update physics below a zero-scale parent.");
+            auto local = world;
+            local.Translation = kairo::foundation::math::WorldToLocal(parentWorld, world.Translation);
+            local.Rotation = (kairo::foundation::math::Inverse(parentWorld.Rotation) *
+                world.Rotation).Normalized();
+            local.Scale = {
+                world.Scale.x / parentWorld.Scale.x,
+                world.Scale.y / parentWorld.Scale.y,
+                world.Scale.z / parentWorld.Scale.z };
+            return local;
         }
     };
 }

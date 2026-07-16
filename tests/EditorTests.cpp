@@ -1188,8 +1188,11 @@ TEST_CASE("Scene commands restore stable entities and merge Inspector edits", "[
     auto& authoredScene = project.EditScene();
     authoredScene.SetMeshRenderer(entity, { { mesh }, { material }, false });
     authoredScene.SetCamera(entity, { 0.9f, 0.2f, 500.0f, true });
-    authoredScene.SetRigidBody(entity, { 17u });
-    authoredScene.SetCollider(entity, { 23u });
+    authoredScene.SetRigidBody(entity, {
+        kairo::engine::RigidBodyMotion::Kinematic, 3.0f, 0.5f, 0.1f, 0.2f });
+    authoredScene.SetCollider(entity, {
+        kairo::engine::ColliderShape::Sphere, { 0.5f, 0.5f, 0.5f },
+        0.75f, 0.5f, 0.8f, 0.3f, true });
     authoredScene.SetEnabled(entity, false);
     authoredScene.SetLayer(entity, 9u);
     authoredScene.AddTag(entity, "root");
@@ -1211,8 +1214,11 @@ TEST_CASE("Scene commands restore stable entities and merge Inspector edits", "[
     CHECK(project.Scene().MeshRenderer(entity).MaterialAsset.ID == material);
     CHECK_FALSE(project.Scene().MeshRenderer(entity).Visible);
     CHECK(project.Scene().Camera(entity).NearPlane == 0.2f);
-    CHECK(project.Scene().RigidBody(entity).Body == 17u);
-    CHECK(project.Scene().Collider(entity).Collider == 23u);
+    CHECK(project.Scene().RigidBody(entity).Motion == kairo::engine::RigidBodyMotion::Kinematic);
+    CHECK(project.Scene().RigidBody(entity).Density == 3.0f);
+    CHECK(project.Scene().Collider(entity).Shape == kairo::engine::ColliderShape::Sphere);
+    CHECK(project.Scene().Collider(entity).Radius == 0.75f);
+    CHECK(project.Scene().Collider(entity).IsTrigger);
     CHECK_FALSE(project.Scene().IsEnabled(entity));
     CHECK(project.Scene().Layer(entity) == 9u);
     CHECK(project.Scene().HasTag(entity, "root"));
