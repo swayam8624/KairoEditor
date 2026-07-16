@@ -1,11 +1,13 @@
 module;
 
 #include <memory>
+#include <cstdint>
 #include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 export module Kairo.Editor.SceneCommands;
 
@@ -155,6 +157,10 @@ export namespace kairo::editor
         kairo::engine::Entity ID;
         std::string Name;
         kairo::foundation::math::Transformf Transform;
+        std::optional<kairo::engine::Entity> Parent;
+        bool Enabled = true;
+        std::uint32_t Layer = 0u;
+        std::vector<std::string> Tags;
         std::optional<kairo::engine::MeshRendererComponent> MeshRenderer;
         std::optional<kairo::engine::CameraComponent> Camera;
         std::optional<kairo::engine::RigidBodyComponent> RigidBody;
@@ -165,6 +171,7 @@ export namespace kairo::editor
         const kairo::engine::Scene& scene, kairo::engine::Entity entity)
     {
         EntitySnapshot result{ entity, scene.Name(entity).Value, scene.Transform(entity).Local,
+            scene.Parent(entity), scene.IsEnabled(entity), scene.Layer(entity), scene.Tags(entity),
             std::nullopt, std::nullopt, std::nullopt, std::nullopt };
         if (scene.HasMeshRenderer(entity)) result.MeshRenderer = scene.MeshRenderer(entity);
         if (scene.HasCamera(entity)) result.Camera = scene.Camera(entity);
@@ -173,31 +180,59 @@ export namespace kairo::editor
         return result;
     }
 
-    inline void RestoreEntity(kairo::engine::Scene& scene, const EntitySnapshot& snapshot)
+    [[nodiscard]] inline std::vector<EntitySnapshot> CaptureEntitySubtree(
+        const kairo::engine::Scene& scene, kairo::engine::Entity root)
     {
-        const auto entity = scene.CreateEntityWithID(snapshot.ID, snapshot.Name);
-        scene.Transform(entity).Local = snapshot.Transform;
-        if (snapshot.MeshRenderer.has_value()) scene.SetMeshRenderer(entity, *snapshot.MeshRenderer);
-        if (snapshot.Camera.has_value()) scene.SetCamera(entity, *snapshot.Camera);
-        if (snapshot.RigidBody.has_value()) scene.SetRigidBody(entity, *snapshot.RigidBody);
-        if (snapshot.Collider.has_value()) scene.SetCollider(entity, *snapshot.Collider);
+        std::vector<EntitySnapshot> result;
+        std::vector<kairo::engine::Entity> pending{ root };
+        while (!pending.empty())
+        {
+            const auto entity = pending.back();
+            pending.pop_back();
+            result.push_back(CaptureEntity(scene, entity));
+            const auto& children = scene.Children(entity);
+            pending.insert(pending.end(), children.rbegin(), children.rend());
+        }
+        return result;
     }
 
-    /// Removes one entity while retaining all persistent components needed to
-    /// restore the exact authored state and stable scene-local ID.
+    inline void RestoreEntitySubtree(
+        kairo::engine::Scene& scene, const std::vector<EntitySnapshot>& snapshots)
+    {
+        // Allocate every stable ID before restoring relationships, allowing a
+        // parent to appear after its child in future snapshot producers.
+        for (const auto& snapshot : snapshots)
+            (void)scene.CreateEntityWithID(snapshot.ID, snapshot.Name);
+        for (const auto& snapshot : snapshots)
+        {
+            scene.Transform(snapshot.ID).Local = snapshot.Transform;
+            scene.SetEnabled(snapshot.ID, snapshot.Enabled);
+            scene.SetLayer(snapshot.ID, snapshot.Layer);
+            for (const auto& tag : snapshot.Tags) scene.AddTag(snapshot.ID, tag);
+            if (snapshot.MeshRenderer.has_value()) scene.SetMeshRenderer(snapshot.ID, *snapshot.MeshRenderer);
+            if (snapshot.Camera.has_value()) scene.SetCamera(snapshot.ID, *snapshot.Camera);
+            if (snapshot.RigidBody.has_value()) scene.SetRigidBody(snapshot.ID, *snapshot.RigidBody);
+            if (snapshot.Collider.has_value()) scene.SetCollider(snapshot.ID, *snapshot.Collider);
+        }
+        for (const auto& snapshot : snapshots)
+            if (snapshot.Parent.has_value()) scene.SetParent(snapshot.ID, snapshot.Parent);
+    }
+
+    /// Removes one hierarchy subtree while retaining all persistent components
+    /// and relationships needed to restore exact authored state and stable IDs.
     class DeleteEntityCommand final : public EditorCommand
     {
     public:
         DeleteEntityCommand(ProjectSession& project, kairo::engine::Entity entity)
-            : m_Project(&project), m_Snapshot(CaptureEntity(project.Scene(), entity)) {}
+            : m_Project(&project), m_Snapshots(CaptureEntitySubtree(project.Scene(), entity)) {}
 
         [[nodiscard]] std::string_view Name() const noexcept override { return "Delete Entity"; }
-        void Execute() override { m_Project->EditScene().DestroyEntity(m_Snapshot.ID); }
-        void Undo() override { RestoreEntity(m_Project->EditScene(), m_Snapshot); }
+        void Execute() override { m_Project->EditScene().DestroyEntity(m_Snapshots.front().ID); }
+        void Undo() override { RestoreEntitySubtree(m_Project->EditScene(), m_Snapshots); }
 
     private:
         ProjectSession* m_Project;
-        EntitySnapshot m_Snapshot;
+        std::vector<EntitySnapshot> m_Snapshots;
     };
 
     /// Replaces an entity name. Adjacent rename keystrokes merge into one user

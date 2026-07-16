@@ -34,7 +34,9 @@ TEST_CASE("Engine scenes extract visible renderer draws in entity order", "[Kair
     scene.SetMeshRenderer(hidden, { { MeshID }, { MaterialID }, false });
     scene.SetMeshRenderer(second, { { MeshID }, { MaterialID }, true });
     scene.Transform(first).Local.Translation = { -2.0f, 0.0f, 0.0f };
+    scene.Transform(second).Local.Translation = { 3.0f, 0.0f, 0.0f };
     scene.Transform(second).Local.Scale = { 0.5f, 2.0f, 0.5f };
+    scene.SetParent(second, first);
 
     kairo::assets::AssetRegistry registry;
     RegisterRenderAssets(registry);
@@ -47,6 +49,7 @@ TEST_CASE("Engine scenes extract visible renderer draws in entity order", "[Kair
     CHECK(renderScene.Draws()[0].ObjectID == first.Value);
     CHECK(renderScene.Draws()[0].Model(0u, 3u) == -2.0f);
     CHECK(renderScene.Draws()[1].ObjectID == second.Value);
+    CHECK(renderScene.Draws()[1].Model(0u, 3u) == 1.0f);
     CHECK(renderScene.Draws()[1].Model(1u, 1u) == 2.0f);
 }
 

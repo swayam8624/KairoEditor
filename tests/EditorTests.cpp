@@ -1190,11 +1190,21 @@ TEST_CASE("Scene commands restore stable entities and merge Inspector edits", "[
     authoredScene.SetCamera(entity, { 0.9f, 0.2f, 500.0f, true });
     authoredScene.SetRigidBody(entity, { 17u });
     authoredScene.SetCollider(entity, { 23u });
+    authoredScene.SetEnabled(entity, false);
+    authoredScene.SetLayer(entity, 9u);
+    authoredScene.AddTag(entity, "root");
+    const auto child = authoredScene.CreateEntity("Commanded Child");
+    authoredScene.SetParent(child, entity);
+    authoredScene.Transform(child).Local.Translation = { 0.0f, 5.0f, 0.0f };
+    authoredScene.SetLayer(child, 10u);
+    authoredScene.AddTag(child, "child");
 
     history.Execute(std::make_unique<DeleteEntityCommand>(project, entity));
     CHECK_FALSE(project.Scene().Contains(entity));
+    CHECK_FALSE(project.Scene().Contains(child));
     history.Undo();
     REQUIRE(project.Scene().Contains(entity));
+    REQUIRE(project.Scene().Contains(child));
     CHECK(project.Scene().Name(entity).Value == "Commanded Final");
     CHECK(project.Scene().Transform(entity).Local == finalTransform);
     CHECK(project.Scene().MeshRenderer(entity).MeshAsset.ID == mesh);
@@ -1203,8 +1213,16 @@ TEST_CASE("Scene commands restore stable entities and merge Inspector edits", "[
     CHECK(project.Scene().Camera(entity).NearPlane == 0.2f);
     CHECK(project.Scene().RigidBody(entity).Body == 17u);
     CHECK(project.Scene().Collider(entity).Collider == 23u);
+    CHECK_FALSE(project.Scene().IsEnabled(entity));
+    CHECK(project.Scene().Layer(entity) == 9u);
+    CHECK(project.Scene().HasTag(entity, "root"));
+    CHECK(project.Scene().Parent(child) == entity);
+    CHECK(project.Scene().Transform(child).Local.Translation.y == 5.0f);
+    CHECK(project.Scene().Layer(child) == 10u);
+    CHECK(project.Scene().HasTag(child, "child"));
     history.Redo();
     CHECK_FALSE(project.Scene().Contains(entity));
+    CHECK_FALSE(project.Scene().Contains(child));
 
     history.Clear();
     project.Close(UnsavedChangesPolicy::Discard);

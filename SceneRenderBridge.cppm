@@ -142,7 +142,7 @@ export namespace kairo::editor
             assets.ValidateMaterial(meshRenderer.MaterialAsset);
             result.Add({
                 assets.ResolveMesh(meshRenderer.MeshAsset),
-                kairo::foundation::math::ToMatrix4(scene.Transform(entity).Local),
+                kairo::foundation::math::ToMatrix4(scene.WorldTransform(entity)),
                 {},
                 entity.Value
             });
