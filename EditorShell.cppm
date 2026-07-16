@@ -379,13 +379,57 @@ export namespace kairo::editor
             if (ImGui::IsItemHovered()) ImGui::SetTooltip("Delete selected entity");
             ImGui::Separator();
             const auto& scene = m_Project.Scene();
-            for (const auto entity : scene.Entities())
-            {
-                const bool selected = m_State.SelectedEntity().has_value() && *m_State.SelectedEntity() == entity;
-                const std::string label = scene.Name(entity).Value + "##" + std::to_string(entity.Value);
-                if (ImGui::Selectable(label.c_str(), selected)) m_State.Select(entity);
-            }
+            if (ImGui::Button("Drop here to make root", ImVec2(-1.0f, 0.0f))) {}
+            AcceptHierarchyDrop(std::nullopt);
+            for (const auto entity : scene.RootEntities())
+                DrawHierarchyEntity(scene, entity);
             ImGui::End();
+        }
+
+        void DrawHierarchyEntity(const kairo::engine::Scene& scene, kairo::engine::Entity entity)
+        {
+            const bool selected = m_State.SelectedEntity().has_value() &&
+                *m_State.SelectedEntity() == entity;
+            const bool leaf = scene.Children(entity).empty();
+            ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow |
+                ImGuiTreeNodeFlags_OpenOnDoubleClick | ImGuiTreeNodeFlags_SpanAvailWidth;
+            if (selected) flags |= ImGuiTreeNodeFlags_Selected;
+            if (leaf) flags |= ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
+            const std::string label = scene.Name(entity).Value + "##" + std::to_string(entity.Value);
+            const bool open = ImGui::TreeNodeEx(label.c_str(), flags);
+            if (ImGui::IsItemClicked() && !ImGui::IsItemToggledOpen()) m_State.Select(entity);
+            if (ImGui::BeginDragDropSource())
+            {
+                ImGui::SetDragDropPayload("KAIRO_SCENE_ENTITY", &entity.Value, sizeof(entity.Value));
+                ImGui::TextUnformatted(scene.Name(entity).Value.c_str());
+                ImGui::EndDragDropSource();
+            }
+            AcceptHierarchyDrop(entity);
+            if (open && !leaf)
+            {
+                for (const auto child : scene.Children(entity)) DrawHierarchyEntity(scene, child);
+                ImGui::TreePop();
+            }
+        }
+
+        void AcceptHierarchyDrop(std::optional<kairo::engine::Entity> parent)
+        {
+            if (!ImGui::BeginDragDropTarget()) return;
+            if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("KAIRO_SCENE_ENTITY"))
+            {
+                if (payload->DataSize == sizeof(std::uint32_t))
+                {
+                    const auto child = kairo::engine::Entity{
+                        *static_cast<const std::uint32_t*>(payload->Data) };
+                    if (!parent.has_value() || child != *parent)
+                        RunCommand([this, child, parent]
+                        {
+                            m_History.Execute(std::make_unique<SetEntityParentCommand>(
+                                m_Project, child, parent));
+                        });
+                }
+            }
+            ImGui::EndDragDropTarget();
         }
 
         void DrawInspector()

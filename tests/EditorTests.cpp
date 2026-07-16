@@ -1278,6 +1278,48 @@ TEST_CASE("Editor state validates scene selection and play transitions", "[Kairo
     CHECK_FALSE(editor.SelectedEntity().has_value());
 }
 
+TEST_CASE("Hierarchy reparent commands preserve world transforms and reject cycles",
+    "[KairoEditor][Commands][Hierarchy]")
+{
+    const auto root = std::filesystem::temp_directory_path() /
+        ("kairo-reparent-scene-" + kairo::assets::GenerateAssetID().ToString());
+    ProjectSession project;
+    project.CreateProject(root, "Reparent Scene");
+    auto& scene = project.EditScene();
+    const auto firstParent = scene.CreateEntity("First Parent");
+    const auto secondParent = scene.CreateEntity("Second Parent");
+    const auto child = scene.CreateEntity("Child");
+    scene.Transform(firstParent).Local.Translation = { 10.0f, 0.0f, 0.0f };
+    scene.Transform(firstParent).Local.Scale = { 2.0f, 2.0f, 2.0f };
+    scene.Transform(secondParent).Local.Translation = { -4.0f, 0.0f, 0.0f };
+    scene.Transform(secondParent).Local.Scale = { 0.5f, 0.5f, 0.5f };
+    scene.Transform(child).Local.Translation = { 1.0f, 2.0f, 3.0f };
+    scene.SetParent(child, firstParent);
+    const auto originalLocal = scene.Transform(child).Local;
+    const auto originalWorld = scene.WorldTransform(child);
+
+    CommandHistory history;
+    history.Execute(std::make_unique<SetEntityParentCommand>(project, child, secondParent));
+    CHECK(scene.Parent(child) == secondParent);
+    CHECK(scene.WorldTransform(child) == originalWorld);
+    history.Undo();
+    CHECK(scene.Parent(child) == firstParent);
+    CHECK(scene.Transform(child).Local == originalLocal);
+    history.Redo();
+    CHECK(scene.Parent(child) == secondParent);
+    CHECK(scene.WorldTransform(child) == originalWorld);
+
+    const auto applied = history.AppliedCount();
+    REQUIRE_THROWS_AS(history.Execute(
+        std::make_unique<SetEntityParentCommand>(project, secondParent, child)),
+        std::invalid_argument);
+    CHECK(history.AppliedCount() == applied);
+    CHECK_FALSE(scene.Parent(secondParent).has_value());
+
+    project.Close(UnsavedChangesPolicy::Discard);
+    std::filesystem::remove_all(root);
+}
+
 TEST_CASE("Editor panel visibility persists independently of a UI backend", "[KairoEditor][Panels]")
 {
     kairo::engine::Scene scene;

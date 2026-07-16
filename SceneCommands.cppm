@@ -1,7 +1,9 @@
 module;
 
 #include <memory>
+#include <cmath>
 #include <cstdint>
+#include <limits>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -233,6 +235,69 @@ export namespace kairo::editor
     private:
         ProjectSession* m_Project;
         std::vector<EntitySnapshot> m_Snapshots;
+    };
+
+    /// Reparents one entity while preserving its authored world-space TRS.
+    /// The local transform is derived with KairoMath's scene-transform
+    /// convention; a parent with a zero scale axis is rejected before mutation.
+    class SetEntityParentCommand final : public EditorCommand
+    {
+    public:
+        SetEntityParentCommand(ProjectSession& project, kairo::engine::Entity child,
+            std::optional<kairo::engine::Entity> parent)
+            : m_Project(&project), m_Child(child), m_BeforeParent(project.Scene().Parent(child)),
+              m_AfterParent(parent), m_BeforeLocal(project.Scene().Transform(child).Local),
+              m_AfterLocal(RelativeTo(project.Scene(), child, parent)) {}
+
+        [[nodiscard]] std::string_view Name() const noexcept override { return "Reparent Entity"; }
+
+        void Execute() override
+        {
+            auto& scene = m_Project->EditScene();
+            scene.SetParent(m_Child, m_AfterParent);
+            scene.Transform(m_Child).Local = m_AfterLocal;
+        }
+
+        void Undo() override
+        {
+            auto& scene = m_Project->EditScene();
+            scene.SetParent(m_Child, m_BeforeParent);
+            scene.Transform(m_Child).Local = m_BeforeLocal;
+        }
+
+    private:
+        ProjectSession* m_Project;
+        kairo::engine::Entity m_Child;
+        std::optional<kairo::engine::Entity> m_BeforeParent;
+        std::optional<kairo::engine::Entity> m_AfterParent;
+        kairo::foundation::math::Transformf m_BeforeLocal;
+        kairo::foundation::math::Transformf m_AfterLocal;
+
+        [[nodiscard]] static kairo::foundation::math::Transformf RelativeTo(
+            const kairo::engine::Scene& scene, kairo::engine::Entity child,
+            std::optional<kairo::engine::Entity> parent)
+        {
+            const auto world = scene.WorldTransform(child);
+            if (!parent.has_value()) return world;
+            const auto parentWorld = scene.WorldTransform(*parent);
+            constexpr float epsilon = std::numeric_limits<float>::epsilon() * 10.0f;
+            if (std::abs(parentWorld.Scale.x) <= epsilon ||
+                std::abs(parentWorld.Scale.y) <= epsilon ||
+                std::abs(parentWorld.Scale.z) <= epsilon)
+                throw std::invalid_argument("Cannot preserve world transform under a zero-scale parent.");
+
+            kairo::foundation::math::Transformf local;
+            local.Translation = kairo::foundation::math::WorldToLocal(
+                parentWorld, world.Translation);
+            local.Rotation = (kairo::foundation::math::Inverse(parentWorld.Rotation) *
+                world.Rotation).Normalized();
+            local.Scale = {
+                world.Scale.x / parentWorld.Scale.x,
+                world.Scale.y / parentWorld.Scale.y,
+                world.Scale.z / parentWorld.Scale.z
+            };
+            return local;
+        }
     };
 
     /// Replaces an entity name. Adjacent rename keystrokes merge into one user
