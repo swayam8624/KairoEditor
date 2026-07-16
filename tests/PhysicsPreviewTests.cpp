@@ -15,8 +15,13 @@ TEST_CASE("Physics preview simulates marked runtime entities without authored-sc
     runtime.SetRigidBody(dynamic, {
         kairo::engine::RigidBodyMotion::Dynamic, 2.0f, 0.5f, 0.15f, 0.25f });
     runtime.SetCollider(dynamic, {
-        kairo::engine::ColliderShape::Sphere, { 0.5f, 0.5f, 0.5f },
-        0.75f, 0.5f, 0.9f, 0.4f, true });
+        .Shape = kairo::engine::ColliderShape::Sphere,
+        .Radius = 0.75f,
+        .Friction = 0.9f,
+        .Restitution = 0.4f,
+        .BelongsTo = 8u,
+        .CollidesWith = 2u,
+        .IsTrigger = true });
 
     const auto staticBody = runtime.CreateEntity("Static");
     runtime.Transform(staticBody).Local.Translation = { 0.0f, -2.0f, 0.0f };
@@ -36,6 +41,8 @@ TEST_CASE("Physics preview simulates marked runtime entities without authored-sc
     CHECK(runtimeCollider.IsTrigger);
     CHECK(runtimeCollider.Material.StaticFriction == 0.9f);
     CHECK(runtimeCollider.Material.Restitution == 0.4f);
+    CHECK(runtimeCollider.BelongsTo == 8u);
+    CHECK(runtimeCollider.CollidesWith == 2u);
     REQUIRE(std::holds_alternative<kairo::foundation::physics::SphereCollider>(
         runtimeCollider.Shape));
     CHECK(std::get<kairo::foundation::physics::SphereCollider>(runtimeCollider.Shape).Radius == 0.75f);

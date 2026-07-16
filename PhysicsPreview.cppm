@@ -56,6 +56,8 @@ export namespace kairo::editor
                 const kairo::foundation::physics::PhysicsMaterial material{
                     authoredCollider.Restitution, authoredCollider.Friction, authoredCollider.Friction };
                 const auto colliderID = m_World.AddCollider(bodyID, shape, material);
+                m_World.SetCollisionFilter(colliderID,
+                    authoredCollider.BelongsTo, authoredCollider.CollidesWith);
                 m_World.SetColliderTrigger(colliderID, authoredCollider.IsTrigger);
                 m_Entities.emplace(entity.Value, bodyID);
             }
