@@ -124,7 +124,8 @@ int main(int argc, char** argv)
             imgui.EndFrame();
             const auto camera = shell.ViewportCamera();
             renderer.SetCameraPose({ camera.Position, camera.Target, camera.Up });
-            renderer.SubmitRenderScene(kairo::editor::BuildRenderScene(project.Scene(), renderAssets));
+            renderer.SubmitRenderScene(kairo::editor::BuildRenderScene(shell.RenderScene(), renderAssets));
+            renderer.SubmitDebugDraw(shell.PhysicsDebugDraw());
             renderer.DrawFrame();
             ++renderedFrames;
         }

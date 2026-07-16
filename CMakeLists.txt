@@ -12,7 +12,7 @@ set(KAIRO_EDITOR_MONO_FONT_PATH "" CACHE FILEPATH "Optional monospace TTF font f
 # Immutable standalone fallback revisions. Local source directories and sibling
 # checkouts still take precedence for active workspace development.
 set(KAIRO_EDITOR_CORE_REVISION d098d4d87fd6105eefde858d57eb1b376edb230e)
-set(KAIRO_EDITOR_RENDERER_REVISION 2cabf7b0ab04584c36272ad18b5b8f0c2c49b98f)
+set(KAIRO_EDITOR_RENDERER_REVISION 163dd4eef63a34c2050ccb63de9bce6e1e073f3d)
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
     add_compile_options(-Wall -Wextra -Wpedantic -Wno-unused-parameter)
@@ -46,6 +46,10 @@ target_sources(KairoEditor PUBLIC FILE_SET CXX_MODULES BASE_DIRS ${CMAKE_CURRENT
 target_link_libraries(KairoEditor PUBLIC KairoEngineCore)
 
 if(KAIRO_EDITOR_BUILD_APP)
+    # Physics preview consumes KairoRenderer's optional debug bridge. Make the
+    # standalone editor build request it explicitly; the umbrella build already
+    # coordinates the same cache value at the workspace root.
+    set(KAIRO_RENDERER_BUILD_PHYSICS_BRIDGE ON CACHE BOOL "" FORCE)
     if(NOT TARGET KairoRenderer)
         set(KAIRO_RENDERER_SOURCE_DIR "" CACHE PATH "Path to a local KairoRenderer checkout")
         if(KAIRO_RENDERER_SOURCE_DIR AND EXISTS "${KAIRO_RENDERER_SOURCE_DIR}/CMakeLists.txt")
@@ -96,6 +100,15 @@ if(KAIRO_EDITOR_BUILD_APP)
     target_sources(KairoEditorRendererBridge PUBLIC FILE_SET CXX_MODULES BASE_DIRS ${CMAKE_CURRENT_SOURCE_DIR} FILES
         SceneRenderBridge.cppm)
     target_link_libraries(KairoEditorRendererBridge PUBLIC KairoEditor KairoRenderer)
+
+    add_library(KairoEditorPhysics)
+    target_sources(KairoEditorPhysics PUBLIC FILE_SET CXX_MODULES BASE_DIRS ${CMAKE_CURRENT_SOURCE_DIR} FILES
+        PhysicsPreview.cppm)
+    if(NOT TARGET KairoRendererPhysicsDebug)
+        message(FATAL_ERROR "KairoEditor physics preview requires KairoRendererPhysicsDebug. Enable KAIRO_RENDERER_BUILD_PHYSICS_BRIDGE.")
+    endif()
+    target_link_libraries(KairoEditorPhysics PUBLIC KairoEditor KairoRendererPhysicsDebug)
+    target_link_libraries(KairoEditorImGui PUBLIC KairoEditorPhysics)
     if(KAIRO_EDITOR_UI_FONT_PATH)
         target_compile_definitions(KairoEditorImGui PRIVATE
             KAIRO_EDITOR_UI_FONT_PATH="${KAIRO_EDITOR_UI_FONT_PATH}")
@@ -136,6 +149,9 @@ if(KAIRO_EDITOR_BUILD_TESTS)
         add_executable(KairoEditorUITests tests/KairoUITests.cpp)
         target_link_libraries(KairoEditorUITests PRIVATE KairoEditorImGui Catch2::Catch2WithMain)
         add_test(NAME KairoEditorUITests COMMAND KairoEditorUITests)
+        add_executable(KairoEditorPhysicsPreviewTests tests/PhysicsPreviewTests.cpp)
+        target_link_libraries(KairoEditorPhysicsPreviewTests PRIVATE KairoEditorPhysics Catch2::Catch2WithMain)
+        add_test(NAME KairoEditorPhysicsPreviewTests COMMAND KairoEditorPhysicsPreviewTests)
         add_test(NAME KairoEditorNativeSmoke COMMAND KairoEditorApp
             --project ${CMAKE_CURRENT_SOURCE_DIR}/examples/StarterProject/Project.kproject
             --document Logic/Player.kdoc

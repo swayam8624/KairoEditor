@@ -96,6 +96,57 @@ export namespace kairo::editor
         std::optional<kairo::engine::Entity> m_Entity;
     };
 
+    /// Marks or unmarks one entity for the editor's runtime physics preview.
+    /// Persistent components only express participation; the preview creates
+    /// process-local PhysicsWorld IDs on Play, so saved scenes never retain a
+    /// stale allocation from a prior simulation session.
+    class SetPhysicsPreviewCommand final : public EditorCommand
+    {
+    public:
+        SetPhysicsPreviewCommand(ProjectSession& project, kairo::engine::Entity entity, bool enabled)
+            : m_Project(&project), m_Entity(entity), m_Enabled(enabled),
+              m_BeforeRigidBody(project.Scene().HasRigidBody(entity)
+                  ? std::optional(project.Scene().RigidBody(entity)) : std::nullopt),
+              m_BeforeCollider(project.Scene().HasCollider(entity)
+                  ? std::optional(project.Scene().Collider(entity)) : std::nullopt) {}
+
+        [[nodiscard]] std::string_view Name() const noexcept override
+        {
+            return m_Enabled ? "Add Physics Preview" : "Remove Physics Preview";
+        }
+
+        void Execute() override
+        {
+            auto& scene = m_Project->EditScene();
+            if (m_Enabled)
+            {
+                scene.SetRigidBody(m_Entity, {});
+                scene.SetCollider(m_Entity, {});
+            }
+            else
+            {
+                (void)scene.RemoveRigidBody(m_Entity);
+                (void)scene.RemoveCollider(m_Entity);
+            }
+        }
+
+        void Undo() override
+        {
+            auto& scene = m_Project->EditScene();
+            (void)scene.RemoveRigidBody(m_Entity);
+            (void)scene.RemoveCollider(m_Entity);
+            if (m_BeforeRigidBody.has_value()) scene.SetRigidBody(m_Entity, *m_BeforeRigidBody);
+            if (m_BeforeCollider.has_value()) scene.SetCollider(m_Entity, *m_BeforeCollider);
+        }
+
+    private:
+        ProjectSession* m_Project;
+        kairo::engine::Entity m_Entity;
+        bool m_Enabled;
+        std::optional<kairo::engine::RigidBodyComponent> m_BeforeRigidBody;
+        std::optional<kairo::engine::ColliderComponent> m_BeforeCollider;
+    };
+
     /// A complete entity snapshot for the component types EngineCore currently
     /// exposes. Opaque physics bindings are retained as authored references;
     /// this command never reaches into or snapshots an external runtime world.

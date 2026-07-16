@@ -25,10 +25,12 @@ import Kairo.Editor;
 import Kairo.Editor.ImGuiGraphCanvas;
 import Kairo.Editor.ImGuiReflectionInspector;
 import Kairo.Editor.UI;
+import Kairo.Editor.PhysicsPreview;
 import Kairo.EngineCore;
 import Kairo.EngineCore.Reflection;
 import Kairo.Reflection;
 import Kairo.Foundation.Math.Quaternion;
+import Kairo.Renderer.DebugDraw;
 
 export namespace kairo::editor
 {
@@ -62,6 +64,8 @@ export namespace kairo::editor
             DrawVisiblePanels();
             if (m_Project.HasProject() && m_ViewportFocused && !ImGui::GetIO().WantTextInput)
                 HandleViewportShortcuts();
+            if (m_State.Mode() == EditorMode::Play && m_RuntimeScene.has_value())
+                RunCommand([this] { m_PhysicsPreview.Step(*m_RuntimeScene, ImGui::GetIO().DeltaTime); });
             DrawDocumentLifecyclePopups();
             DrawErrorPopup();
         }
@@ -74,6 +78,17 @@ export namespace kairo::editor
             return m_ViewportController.Pose();
         }
 
+        [[nodiscard]] const kairo::engine::Scene& RenderScene() const noexcept
+        {
+            return m_RuntimeScene.has_value() ? *m_RuntimeScene : m_Project.Scene();
+        }
+
+        [[nodiscard]] kairo::renderer::DebugDrawList PhysicsDebugDraw() const
+        {
+            return m_PhysicsPreview.Active() ? m_PhysicsPreview.DebugDraw(m_ShowPhysicsBroadphase)
+                : kairo::renderer::DebugDrawList{};
+        }
+
     private:
         EditorState& m_State;
         ProjectSession& m_Project;
@@ -83,8 +98,11 @@ export namespace kairo::editor
         DocumentSchemaRegistry m_Schemas = CreateCoreDocumentSchemaRegistry();
         ImGuiGraphCanvas m_GraphCanvas;
         ViewportController m_ViewportController;
+        PhysicsPreview m_PhysicsPreview;
+        std::optional<kairo::engine::Scene> m_RuntimeScene;
         EditorAction m_ActiveTool = EditorAction::SelectTool;
         bool m_ViewportFocused = false;
+        bool m_ShowPhysicsBroadphase = false;
         bool m_LayoutBuilt = false;
         bool m_DocumentPanelFocused = false;
         std::array<char, 256> m_AssetFilter{};
@@ -193,11 +211,11 @@ export namespace kairo::editor
         {
             if (m_State.Mode() == EditorMode::Edit)
             {
-                if (ActionButton("Play", UIButtonTone::Primary)) m_State.Play();
+                if (ActionButton("Play", UIButtonTone::Primary)) StartPlay();
             }
             else
             {
-                if (ActionButton("Stop", UIButtonTone::Destructive)) m_State.Stop();
+                if (ActionButton("Stop", UIButtonTone::Destructive)) StopPlay();
                 ImGui::SameLine();
                 if (m_State.Mode() == EditorMode::Play && ActionButton("Pause")) m_State.Pause();
                 else if (m_State.Mode() == EditorMode::Pause && ActionButton("Resume", UIButtonTone::Primary)) m_State.Resume();
@@ -347,6 +365,17 @@ export namespace kairo::editor
                 });
             }
             ImGui::TextDisabled("Rotation is stored as a normalized quaternion.");
+            SectionHeader("Physics Preview");
+            const bool physicsEnabled = scene.HasRigidBody(*selected) || scene.HasCollider(*selected);
+            if (ActionButton(physicsEnabled ? "Remove Physics" : "Add Dynamic Box Physics",
+                physicsEnabled ? UIButtonTone::Destructive : UIButtonTone::Primary))
+            {
+                RunCommand([this, entity = *selected, enabled = !physicsEnabled]
+                {
+                    m_History.Execute(std::make_unique<SetPhysicsPreviewCommand>(m_Project, entity, enabled));
+                });
+            }
+            ImGui::TextDisabled(physicsEnabled ? "Dynamic box collider on Play" : "Uses local scale for runtime box bounds");
             ImGui::End();
         }
 
@@ -446,8 +475,8 @@ export namespace kairo::editor
             if (ImGui::Shortcut(ImGuiKey_F)) FocusSelection();
             if (ImGui::Shortcut(ImGuiKey_F5))
             {
-                if (m_State.Mode() == EditorMode::Edit) m_State.Play();
-                else m_State.Stop();
+                if (m_State.Mode() == EditorMode::Edit) StartPlay();
+                else StopPlay();
             }
             const auto selected = m_State.SelectedEntity();
             if (selected.has_value() && (ImGui::Shortcut(ImGuiKey_Delete) || ImGui::Shortcut(ImGuiKey_X)))
@@ -484,6 +513,20 @@ export namespace kairo::editor
             const auto selected = m_State.SelectedEntity();
             if (!selected.has_value()) return;
             m_ViewportController.Focus(m_Project.Scene().Transform(*selected).Local.Translation);
+        }
+
+        void StartPlay()
+        {
+            m_RuntimeScene = m_Project.Scene();
+            m_PhysicsPreview.Start(*m_RuntimeScene);
+            m_State.Play();
+        }
+
+        void StopPlay() noexcept
+        {
+            m_PhysicsPreview.Reset();
+            m_RuntimeScene.reset();
+            m_State.Stop();
         }
 
         void HandleViewportNavigation(bool hovered)
@@ -559,9 +602,24 @@ export namespace kairo::editor
                 }
             }
             else if (panel == Panel::Console) ImGui::TextDisabled("No engine messages.");
+            else if (panel == Panel::PhysicsDebug) DrawPhysicsDebug();
             else if (panel == Panel::ContentBrowser) DrawContentBrowser();
             else ImGui::TextDisabled("No active document for this workspace.");
             ImGui::End();
+        }
+
+        void DrawPhysicsDebug()
+        {
+            if (!m_PhysicsPreview.Active())
+            {
+                ImGui::TextDisabled("Enter Play to build the physics preview.");
+                return;
+            }
+            const auto& world = m_PhysicsPreview.World();
+            ImGui::Text("Bodies %zu  Colliders %zu  Contacts %zu", world.Bodies().size(),
+                world.Colliders().size(), world.Contacts().size());
+            ImGui::Checkbox("Broadphase AABBs", &m_ShowPhysicsBroadphase);
+            ImGui::TextDisabled("Collider outlines and contact normals are drawn in the viewport.");
         }
 
         void DrawContentBrowser()
