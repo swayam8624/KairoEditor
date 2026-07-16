@@ -10,6 +10,7 @@ module;
 export module Kairo.Editor.SceneCommands;
 
 import Kairo.Editor.CommandHistory;
+import Kairo.Editor.PrimitiveTypes;
 import Kairo.Editor.ProjectSession;
 import Kairo.EngineCore;
 import Kairo.EngineCore.Reflection;
@@ -46,6 +47,51 @@ export namespace kairo::editor
 
     private:
         ProjectSession* m_Project;
+        std::string m_Name;
+        std::optional<kairo::engine::Entity> m_Entity;
+    };
+
+    /// Creates one visible built-in primitive and retains its entity identity
+    /// for undo/redo. The command references persistent project assets; actual
+    /// mesh upload remains the renderer bridge's responsibility.
+    class CreatePrimitiveCommand final : public EditorCommand
+    {
+    public:
+        CreatePrimitiveCommand(ProjectSession& project, PrimitiveKind kind,
+            std::string name = {})
+            : m_Project(&project), m_Kind(kind),
+              m_Name(name.empty() ? std::string(kairo::editor::Name(kind)) : std::move(name)) {}
+
+        [[nodiscard]] std::string_view Name() const noexcept override { return "Create Primitive"; }
+        [[nodiscard]] kairo::engine::Entity CreatedEntity() const
+        {
+            if (!m_Entity.has_value()) throw std::logic_error("Create Primitive has not executed yet.");
+            return *m_Entity;
+        }
+
+        void Execute() override
+        {
+            auto& scene = m_Project->EditScene();
+            const auto mesh = PrimitiveMeshAsset(m_Kind);
+            const auto material = DefaultPrimitiveMaterial();
+            // Resolve before mutating the scene so a project without the
+            // builtin catalog reports one atomic, actionable failure.
+            (void)m_Project->Assets().Resolve(mesh);
+            (void)m_Project->Assets().Resolve(material);
+            const auto entity = m_Entity.has_value()
+                ? scene.CreateEntityWithID(*m_Entity, m_Name)
+                : scene.CreateEntity(m_Name);
+            if (!m_Entity.has_value()) m_Entity = entity;
+            scene.SetMeshRenderer(entity, { mesh, material, true });
+            if (m_Kind == PrimitiveKind::Plane)
+                scene.Transform(entity).Local.Scale = { 3.0f, 1.0f, 3.0f };
+        }
+
+        void Undo() override { m_Project->EditScene().DestroyEntity(CreatedEntity()); }
+
+    private:
+        ProjectSession* m_Project;
+        PrimitiveKind m_Kind;
         std::string m_Name;
         std::optional<kairo::engine::Entity> m_Entity;
     };

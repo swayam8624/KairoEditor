@@ -6,6 +6,7 @@ module;
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -27,6 +28,7 @@ import Kairo.Editor.UI;
 import Kairo.EngineCore;
 import Kairo.EngineCore.Reflection;
 import Kairo.Reflection;
+import Kairo.Foundation.Math.Quaternion;
 
 export namespace kairo::editor
 {
@@ -58,8 +60,18 @@ export namespace kairo::editor
             BuildDefaultLayout(dockspace);
             ImGui::DockSpaceOverViewport(dockspace, nullptr, ImGuiDockNodeFlags_PassthruCentralNode);
             DrawVisiblePanels();
+            if (m_Project.HasProject() && m_ViewportFocused && !ImGui::GetIO().WantTextInput)
+                HandleViewportShortcuts();
             DrawDocumentLifecyclePopups();
             DrawErrorPopup();
+        }
+
+        /// Output: current editor-owned navigation pose. The application host
+        /// adapts this to KairoRenderer after UI construction, keeping ImGui
+        /// input and Vulkan camera uploads in separate modules.
+        [[nodiscard]] ViewportCameraPose ViewportCamera() const noexcept
+        {
+            return m_ViewportController.Pose();
         }
 
     private:
@@ -70,6 +82,9 @@ export namespace kairo::editor
         AuthoringWorkspaceState m_AuthoringWorkspace;
         DocumentSchemaRegistry m_Schemas = CreateCoreDocumentSchemaRegistry();
         ImGuiGraphCanvas m_GraphCanvas;
+        ViewportController m_ViewportController;
+        EditorAction m_ActiveTool = EditorAction::SelectTool;
+        bool m_ViewportFocused = false;
         bool m_LayoutBuilt = false;
         bool m_DocumentPanelFocused = false;
         std::array<char, 256> m_AssetFilter{};
@@ -171,6 +186,7 @@ export namespace kairo::editor
                 RunCommand([&history] { history.Redo(); });
             else if (history.CanUndo() && ImGui::Shortcut(ImGuiMod_Shortcut | ImGuiKey_Z))
                 RunCommand([&history] { history.Undo(); });
+
         }
 
         void DrawPlayControls()
@@ -253,6 +269,7 @@ export namespace kairo::editor
         void DrawVisiblePanels()
         {
             m_DocumentPanelFocused = false;
+            m_ViewportFocused = false;
             if (m_State.Panels().IsVisible(Panel::Hierarchy)) DrawHierarchy();
             if (m_State.Panels().IsVisible(Panel::Inspector)) DrawInspector();
             if (m_State.Panels().IsVisible(Panel::Viewport)) DrawViewport();
@@ -338,9 +355,185 @@ export namespace kairo::editor
             ImGui::SetNextWindowBgAlpha(0.0f);
             if (ImGui::Begin("Viewport", nullptr, ImGuiWindowFlags_NoBackground))
             {
+                m_ViewportFocused = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);
+                const auto camera = m_ViewportController.Pose();
                 ImGui::TextDisabled("Perspective  |  Lit  |  %s", m_State.Mode() == EditorMode::Edit ? "Edit" : "Runtime");
+                ImGui::SameLine();
+                DrawViewportToolButton(EditorAction::SelectTool, "Q");
+                ImGui::SameLine();
+                DrawViewportToolButton(EditorAction::TranslateTool, "W");
+                ImGui::SameLine();
+                DrawViewportToolButton(EditorAction::RotateTool, "E");
+                ImGui::SameLine();
+                DrawViewportToolButton(EditorAction::ScaleTool, "R");
+                ImGui::SameLine();
+                if (ActionButton("+", UIButtonTone::Primary, true, 25.0f)) OpenAddPrimitivePopup();
+                if (ImGui::IsItemHovered()) ImGui::SetTooltip("Add primitive (Shift+A)");
+                DrawPrimitivePopup();
+
+                const ImVec2 viewportMin = ImGui::GetCursorScreenPos();
+                const ImVec2 viewportSize = ImGui::GetContentRegionAvail();
+                ImGui::InvisibleButton("##ViewportInput", viewportSize,
+                    ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonMiddle | ImGuiButtonFlags_MouseButtonRight);
+                const bool hovered = ImGui::IsItemHovered();
+                if (hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) ImGui::SetWindowFocus();
+                HandleViewportNavigation(hovered);
+
+                const ImVec2 overlay = { viewportMin.x + 12.0f, viewportMin.y + 12.0f };
+                ImGui::GetWindowDrawList()->AddText(overlay, IM_COL32(210, 225, 238, 210),
+                    m_ActiveTool == EditorAction::SelectTool ? "SELECT" :
+                    m_ActiveTool == EditorAction::TranslateTool ? "MOVE" :
+                    m_ActiveTool == EditorAction::RotateTool ? "ROTATE" : "SCALE");
+                ImGui::GetWindowDrawList()->AddText({ overlay.x, overlay.y + 18.0f }, IM_COL32(135, 165, 184, 190),
+                    "MMB orbit  Shift+MMB pan  RMB+WASD fly");
+                const auto selected = m_State.SelectedEntity();
+                if (selected.has_value())
+                {
+                    const auto& position = m_Project.Scene().Transform(*selected).Local.Translation;
+                    ImGui::GetWindowDrawList()->AddText({ overlay.x, overlay.y + 36.0f }, IM_COL32(140, 208, 170, 220),
+                        ("Focus: " + m_Project.Scene().Name(*selected).Value).c_str());
+                    (void)position;
+                }
+                (void)camera;
             }
             ImGui::End();
+        }
+
+        void DrawViewportToolButton(EditorAction tool, const char* label)
+        {
+            if (ToolbarButton(label, m_ActiveTool == tool)) m_ActiveTool = tool;
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s (%s)",
+                BindingFor(tool).DisplayName.data(), BindingFor(tool).Shortcut.data());
+        }
+
+        void OpenAddPrimitivePopup()
+        {
+            ImGui::OpenPopup("Add Scene Primitive");
+        }
+
+        void DrawPrimitivePopup()
+        {
+            if (!ImGui::BeginPopup("Add Scene Primitive")) return;
+            for (const PrimitiveKind kind : { PrimitiveKind::Cube, PrimitiveKind::Plane,
+                PrimitiveKind::UVSphere, PrimitiveKind::Cylinder })
+            {
+                if (ImGui::MenuItem(Name(kind).data())) CreatePrimitive(kind);
+            }
+            ImGui::EndPopup();
+        }
+
+        void CreatePrimitive(PrimitiveKind kind)
+        {
+            auto command = std::make_unique<CreatePrimitiveCommand>(m_Project, kind);
+            auto* created = command.get();
+            RunCommand([this, &command] { m_History.Execute(std::move(command)); });
+            if (command == nullptr)
+            {
+                m_State.Select(created->CreatedEntity());
+                m_ViewportController.Focus(m_Project.Scene().Transform(created->CreatedEntity()).Local.Translation);
+            }
+        }
+
+        void HandleViewportShortcuts()
+        {
+            if (ImGui::Shortcut(ImGuiMod_Shift | ImGuiKey_A)) OpenAddPrimitivePopup();
+            if (ImGui::Shortcut(ImGuiKey_Q)) m_ActiveTool = EditorAction::SelectTool;
+            if (ImGui::Shortcut(ImGuiKey_W)) m_ActiveTool = EditorAction::TranslateTool;
+            if (ImGui::Shortcut(ImGuiKey_E)) m_ActiveTool = EditorAction::RotateTool;
+            if (ImGui::Shortcut(ImGuiKey_R)) m_ActiveTool = EditorAction::ScaleTool;
+            if (ImGui::Shortcut(ImGuiKey_G)) m_ActiveTool = EditorAction::TranslateTool;
+            if (ImGui::Shortcut(ImGuiKey_S)) m_ActiveTool = EditorAction::ScaleTool;
+            if (ImGui::Shortcut(ImGuiKey_F)) FocusSelection();
+            if (ImGui::Shortcut(ImGuiKey_F5))
+            {
+                if (m_State.Mode() == EditorMode::Edit) m_State.Play();
+                else m_State.Stop();
+            }
+            const auto selected = m_State.SelectedEntity();
+            if (selected.has_value() && (ImGui::Shortcut(ImGuiKey_Delete) || ImGui::Shortcut(ImGuiKey_X)))
+            {
+                RunCommand([this, entity = *selected]
+                {
+                    m_History.Execute(std::make_unique<DeleteEntityCommand>(m_Project, entity));
+                    m_State.ClearSelection();
+                });
+            }
+            if (selected.has_value() && ImGui::Shortcut(ImGuiMod_Shortcut | ImGuiKey_D))
+            {
+                const auto& source = m_Project.Scene();
+                auto command = std::make_unique<CreateEntityCommand>(m_Project,
+                    source.Name(*selected).Value + " Copy");
+                auto* duplicate = command.get();
+                RunCommand([this, &command, selected, duplicate]
+                {
+                    m_History.Execute(std::move(command));
+                    const auto created = duplicate->CreatedEntity();
+                    auto& scene = m_Project.EditScene();
+                    scene.Transform(created).Local = scene.Transform(*selected).Local;
+                    if (scene.HasMeshRenderer(*selected)) scene.SetMeshRenderer(created, scene.MeshRenderer(*selected));
+                    if (scene.HasCamera(*selected)) scene.SetCamera(created, scene.Camera(*selected));
+                    if (scene.HasRigidBody(*selected)) scene.SetRigidBody(created, scene.RigidBody(*selected));
+                    if (scene.HasCollider(*selected)) scene.SetCollider(created, scene.Collider(*selected));
+                    m_State.Select(created);
+                });
+            }
+        }
+
+        void FocusSelection()
+        {
+            const auto selected = m_State.SelectedEntity();
+            if (!selected.has_value()) return;
+            m_ViewportController.Focus(m_Project.Scene().Transform(*selected).Local.Translation);
+        }
+
+        void HandleViewportNavigation(bool hovered)
+        {
+            if (!hovered) return;
+            const ImGuiIO& io = ImGui::GetIO();
+            const bool rightMouse = ImGui::IsMouseDown(ImGuiMouseButton_Right);
+            ViewportInput input;
+            input.MouseDeltaX = io.MouseDelta.x;
+            input.MouseDeltaY = io.MouseDelta.y;
+            input.WheelDelta = io.MouseWheel;
+            input.DeltaSeconds = io.DeltaTime;
+            input.Orbit = ImGui::IsMouseDown(ImGuiMouseButton_Middle) && !io.KeyShift;
+            input.Pan = ImGui::IsMouseDown(ImGuiMouseButton_Middle) && io.KeyShift;
+            input.Fly = rightMouse;
+            if (rightMouse)
+            {
+                input.MoveForward = (ImGui::IsKeyDown(ImGuiKey_W) ? 1.0f : 0.0f) -
+                    (ImGui::IsKeyDown(ImGuiKey_S) ? 1.0f : 0.0f);
+                input.MoveRight = (ImGui::IsKeyDown(ImGuiKey_D) ? 1.0f : 0.0f) -
+                    (ImGui::IsKeyDown(ImGuiKey_A) ? 1.0f : 0.0f);
+                input.MoveUp = (ImGui::IsKeyDown(ImGuiKey_E) ? 1.0f : 0.0f) -
+                    (ImGui::IsKeyDown(ImGuiKey_Q) ? 1.0f : 0.0f);
+            }
+            m_ViewportController.Update(input);
+
+            const auto selected = m_State.SelectedEntity();
+            if (!selected.has_value() || !ImGui::IsMouseDragging(ImGuiMouseButton_Left, 0.0f)) return;
+            if (m_ActiveTool == EditorAction::SelectTool) return;
+            auto transform = m_Project.Scene().Transform(*selected).Local;
+            if (m_ActiveTool == EditorAction::TranslateTool)
+            {
+                const float sensitivity = std::max(0.0025f, m_ViewportController.Distance() * 0.0035f);
+                transform.Translation.x += io.MouseDelta.x * sensitivity;
+                transform.Translation.y -= io.MouseDelta.y * sensitivity;
+            }
+            else if (m_ActiveTool == EditorAction::RotateTool)
+            {
+                transform.Rotation = (kairo::foundation::math::RotationAroundY(io.MouseDelta.x * 0.0125f) *
+                    kairo::foundation::math::RotationAroundX(io.MouseDelta.y * 0.0125f) * transform.Rotation).Normalized();
+            }
+            else if (m_ActiveTool == EditorAction::ScaleTool)
+            {
+                const float factor = std::clamp(std::exp(io.MouseDelta.x * 0.0125f), 0.1f, 10.0f);
+                transform.Scale *= factor;
+            }
+            RunCommand([this, entity = *selected, transform]
+            {
+                m_History.Execute(std::make_unique<SetEntityTransformCommand>(m_Project, entity, transform));
+            });
         }
 
         void DrawToolPanel(Panel panel)

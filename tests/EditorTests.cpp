@@ -21,6 +21,33 @@ using namespace kairo::editor;
 
 static_assert(!std::is_same_v<NodeID, PinID>);
 
+TEST_CASE("Editor actions and viewport navigation provide deterministic authoring input", "[KairoEditor][Input][Viewport]")
+{
+    const auto bindings = DefaultEditorActionBindings();
+    REQUIRE(bindings.size() == static_cast<std::size_t>(EditorAction::Count));
+    CHECK(BindingFor(EditorAction::AddPrimitive).Shortcut == "Shift+A");
+    CHECK(BindingFor(EditorAction::FocusSelection).Shortcut == "F");
+
+    ViewportController viewport;
+    const auto initial = viewport.Pose();
+    viewport.Update({ .MouseDeltaX = 24.0f, .MouseDeltaY = -12.0f, .Orbit = true });
+    const auto orbit = viewport.Pose();
+    CHECK(orbit.Position != initial.Position);
+    viewport.Update({ .WheelDelta = 2.0f });
+    CHECK(viewport.Distance() < 5.0f);
+    viewport.Focus({ 2.0f, 1.0f, -3.0f }, 7.0f);
+    CHECK(viewport.Pose().Target == kairo::foundation::math::Vec3f{ 2.0f, 1.0f, -3.0f });
+    REQUIRE_THROWS_AS(viewport.Focus({ 0.0f, 0.0f, 0.0f }, 0.0f), std::invalid_argument);
+}
+
+TEST_CASE("Builtin primitive identities are stable persistent asset references", "[KairoEditor][Primitives]")
+{
+    CHECK(Name(PrimitiveKind::Cube) == "Cube");
+    CHECK(Name(PrimitiveKind::UVSphere) == "UV Sphere");
+    CHECK(PrimitiveMeshAsset(PrimitiveKind::Cube).ID != PrimitiveMeshAsset(PrimitiveKind::Plane).ID);
+    CHECK(DefaultPrimitiveMaterial().IsValid());
+}
+
 TEST_CASE("Document text and values enforce persistent data boundaries", "[KairoEditor][Document][Types]")
 {
     CHECK(IsValidUtf8("Kairo \xE2\x9C\x93"));

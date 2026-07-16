@@ -1,6 +1,7 @@
 module;
 
 #include <filesystem>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
@@ -60,6 +61,23 @@ export namespace kairo::editor
             projectRoot, std::move(record), importer, registry, imports, cache);
         auto mesh = kairo::assets::ParseMeshDerivedArtifact(outcome.Artifact);
         return { kairo::renderer::Mesh::FromArtifact(mesh), outcome.Key, outcome.CacheHit };
+    }
+
+    /// Input: one registered builtin mesh metadata record.
+    /// Output: procedural renderer geometry when Kairo owns that identifier,
+    /// otherwise std::nullopt so callers can continue normal asset handling.
+    /// Task: bind persistent primitive asset IDs to one renderer mesh factory
+    /// rather than storing duplicate OBJ source files or GPU handles in scenes.
+    [[nodiscard]] inline std::optional<kairo::renderer::Mesh> MakeBuiltinRenderMesh(
+        const kairo::assets::AssetMetadata& metadata)
+    {
+        if (metadata.Type != kairo::assets::AssetType::Mesh ||
+            metadata.Origin != kairo::assets::AssetOrigin::Builtin)
+            return std::nullopt;
+        if (metadata.Importer == "kairo.builtin.plane") return kairo::renderer::Mesh::MakePlane();
+        if (metadata.Importer == "kairo.builtin.uv-sphere") return kairo::renderer::Mesh::MakeUVSphere();
+        if (metadata.Importer == "kairo.builtin.cylinder") return kairo::renderer::Mesh::MakeCylinder();
+        return std::nullopt;
     }
 
     /// Maps registered persistent mesh assets to renderer-owned GPU handles.

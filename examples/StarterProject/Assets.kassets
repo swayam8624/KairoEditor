@@ -3,5 +3,11 @@ asset 00000000-0000-4000-8000-000000000201 mesh source 1 "Meshes/ShowcaseCube.ob
 end
 asset 00000000-0000-4000-8000-000000000202 material builtin 1 "builtin/default-material" "kairo.builtin"
 end
+asset 00000000-0000-4000-8000-000000000211 mesh builtin 1 "builtin/plane" "kairo.builtin.plane"
+end
+asset 00000000-0000-4000-8000-000000000212 mesh builtin 1 "builtin/uv-sphere" "kairo.builtin.uv-sphere"
+end
+asset 00000000-0000-4000-8000-000000000213 mesh builtin 1 "builtin/cylinder" "kairo.builtin.cylinder"
+end
 asset 00000000-0000-4000-8000-000000000203 document source 1 "Logic/Player.kdoc" "kairo.document-v1"
 end

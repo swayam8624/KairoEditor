@@ -65,6 +65,20 @@ TEST_CASE("Render asset bindings reject ambiguous and missing assets", "[KairoEd
     REQUIRE_THROWS_AS(BuildRenderScene(scene, assets), std::out_of_range);
 }
 
+TEST_CASE("Builtin primitive metadata maps to renderer geometry once", "[KairoEditor][RenderBridge][Builtin]")
+{
+    kairo::assets::AssetMetadata plane{ MeshID, kairo::assets::AssetType::Mesh,
+        kairo::assets::AssetOrigin::Builtin, "builtin/plane", "kairo.builtin.plane", 1u, {} };
+    const auto mesh = MakeBuiltinRenderMesh(plane);
+    REQUIRE(mesh.has_value());
+    CHECK(mesh->Indices().size() == 6u);
+
+    plane.Importer = "kairo.builtin.unknown";
+    CHECK_FALSE(MakeBuiltinRenderMesh(plane).has_value());
+    plane.Type = kairo::assets::AssetType::Material;
+    CHECK_FALSE(MakeBuiltinRenderMesh(plane).has_value());
+}
+
 TEST_CASE("Source OBJ meshes import through shared assets into renderer geometry", "[KairoEditor][RenderBridge][Import]")
 {
     const auto root = std::filesystem::temp_directory_path() /

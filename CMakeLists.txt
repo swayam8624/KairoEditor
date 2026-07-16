@@ -41,7 +41,7 @@ target_sources(KairoEditor PUBLIC FILE_SET CXX_MODULES BASE_DIRS ${CMAKE_CURRENT
     AuthoringDocument.cppm DocumentValidation.cppm DocumentSerialization.cppm DocumentCommands.cppm
     DocumentCompiler.cppm ProjectDocuments.cppm GraphCanvas.cppm DocumentProjection.cppm
     AuthoringWorkspaceState.cppm
-    ProjectDescriptor.cppm ProjectSession.cppm CommandHistory.cppm SceneCommands.cppm
+    ProjectDescriptor.cppm ProjectSession.cppm CommandHistory.cppm EditorActions.cppm ViewportController.cppm PrimitiveTypes.cppm SceneCommands.cppm
     EditorState.cppm PanelState.cppm KairoEditor.cppm)
 target_link_libraries(KairoEditor PUBLIC KairoEngineCore)
 

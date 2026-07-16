@@ -97,9 +97,16 @@ int main(int argc, char** argv)
         for (const auto& asset : project.Assets().Snapshot())
         {
             if (asset.Type != kairo::assets::AssetType::Mesh) continue;
-            auto imported = kairo::editor::ImportRenderMesh(
-                project.ProjectRoot(), { asset.ID }, project.Assets(), meshImports, derivedCache);
-            renderAssets.BindMesh({ asset.ID }, renderer.CreateMesh(imported.Geometry));
+            if (asset.Origin == kairo::assets::AssetOrigin::SourceFile)
+            {
+                auto imported = kairo::editor::ImportRenderMesh(
+                    project.ProjectRoot(), { asset.ID }, project.Assets(), meshImports, derivedCache);
+                renderAssets.BindMesh({ asset.ID }, renderer.CreateMesh(imported.Geometry));
+            }
+            else if (const auto builtin = kairo::editor::MakeBuiltinRenderMesh(asset); builtin.has_value())
+            {
+                renderAssets.BindMesh({ asset.ID }, renderer.CreateMesh(*builtin));
+            }
         }
         const std::filesystem::path layoutFile = options.PersistLayout
             ? project.ProjectRoot() / ".kairo" / "editor-layout.ini" : std::filesystem::path{};
@@ -115,6 +122,8 @@ int main(int argc, char** argv)
             imgui.BeginFrame();
             shell.Draw();
             imgui.EndFrame();
+            const auto camera = shell.ViewportCamera();
+            renderer.SetCameraPose({ camera.Position, camera.Target, camera.Up });
             renderer.SubmitRenderScene(kairo::editor::BuildRenderScene(project.Scene(), renderAssets));
             renderer.DrawFrame();
             ++renderedFrames;
