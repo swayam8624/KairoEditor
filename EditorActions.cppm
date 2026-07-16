@@ -26,6 +26,13 @@ export namespace kairo::editor
         RotateTool,
         ScaleTool,
         TogglePlay,
+        GraphAddNode,
+        GraphDelete,
+        GraphDuplicate,
+        GraphCopy,
+        GraphPaste,
+        GraphFrameSelection,
+        GraphFrameAll,
         Count
     };
 
@@ -54,7 +61,14 @@ export namespace kairo::editor
             { EditorAction::TranslateTool, "Move Tool", "W / G" },
             { EditorAction::RotateTool, "Rotate Tool", "E / R" },
             { EditorAction::ScaleTool, "Scale Tool", "R / S" },
-            { EditorAction::TogglePlay, "Play / Stop", "F5" }
+            { EditorAction::TogglePlay, "Play / Stop", "F5" },
+            { EditorAction::GraphAddNode, "Add Node", "Shift+A / Space" },
+            { EditorAction::GraphDelete, "Delete Nodes", "Backspace / Delete" },
+            { EditorAction::GraphDuplicate, "Duplicate Nodes", "Cmd+D" },
+            { EditorAction::GraphCopy, "Copy Nodes", "Cmd+C" },
+            { EditorAction::GraphPaste, "Paste Nodes", "Cmd+V" },
+            { EditorAction::GraphFrameSelection, "Frame Selection", "F" },
+            { EditorAction::GraphFrameAll, "Frame All", "Home" }
         }};
     }
 

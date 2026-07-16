@@ -28,6 +28,33 @@ TEST_CASE("Editor actions and viewport navigation provide deterministic authorin
     CHECK(BindingFor(EditorAction::AddPrimitive).Shortcut == "Shift+A");
     CHECK(BindingFor(EditorAction::FocusSelection).Shortcut == "F");
 
+    EditorInputRouter router(KeymapProfile::Blender);
+    router.SetContext(InputContext::Scene);
+    router.BeginFrame();
+    CHECK(router.Route({ { EditorKey::G } }));
+    CHECK(router.Consume(EditorAction::TranslateTool));
+    CHECK_FALSE(router.Consume(EditorAction::TranslateTool));
+
+    router.SetContext(InputContext::Graph);
+    router.BeginFrame();
+    CHECK(router.Route({ { EditorKey::A, KeyModifiers::Shift } }));
+    CHECK(router.Triggered(EditorAction::GraphAddNode));
+    CHECK(router.Route({ { EditorKey::Backspace } }));
+    CHECK(router.Consume(EditorAction::GraphDelete));
+
+    router.SetContext(InputContext::Text);
+    router.BeginFrame();
+    CHECK_FALSE(router.Route({ { EditorKey::Backspace } }));
+    CHECK_FALSE(router.Route({ { EditorKey::S, KeyModifiers::Shortcut } }));
+    CHECK_FALSE(router.Triggered(EditorAction::Save));
+
+    router.SetProfile(KeymapProfile::Unreal);
+    router.SetContext(InputContext::Scene);
+    router.BeginFrame();
+    CHECK(router.Route({ { EditorKey::W } }));
+    CHECK(router.Consume(EditorAction::TranslateTool));
+    CHECK_FALSE(router.Route({ { EditorKey::G } }));
+
     ViewportController viewport;
     const auto initial = viewport.Pose();
     CHECK(initial.Position.y > 0.0f);
