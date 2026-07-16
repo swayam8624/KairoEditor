@@ -41,8 +41,9 @@ export namespace kairo::editor
     class EditorShell final
     {
     public:
-        EditorShell(EditorState& state, ProjectSession& project)
-            : m_State(state), m_Project(project), m_GraphCanvas(m_Schemas)
+        EditorShell(EditorState& state, ProjectSession& project, bool rebuildLayout = true)
+            : m_State(state), m_Project(project), m_GraphCanvas(m_Schemas),
+              m_RebuildLayout(rebuildLayout)
         {
             kairo::engine::RegisterEngineCoreReflection(m_Reflection);
             if (const auto active = m_Project.Documents().ActiveID(); active.has_value())
@@ -133,6 +134,7 @@ export namespace kairo::editor
         bool m_ViewportFocused = false;
         bool m_ShowPhysicsBroadphase = false;
         bool m_LayoutBuilt = false;
+        bool m_RebuildLayout = true;
         bool m_DocumentPanelFocused = false;
         std::array<char, 256> m_AssetFilter{};
         std::array<char, 256> m_NewDocumentName{};
@@ -271,6 +273,11 @@ export namespace kairo::editor
         void BuildDefaultLayout(ImGuiID dockspace)
         {
             if (m_LayoutBuilt) return;
+            if (!m_RebuildLayout && ImGui::DockBuilderGetNode(dockspace) != nullptr)
+            {
+                m_LayoutBuilt = true;
+                return;
+            }
             ImGui::DockBuilderRemoveNode(dockspace);
             ImGui::DockBuilderAddNode(dockspace, ImGuiDockNodeFlags_DockSpace);
             ImGui::DockBuilderSetNodeSize(dockspace, ImGui::GetMainViewport()->WorkSize);

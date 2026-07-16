@@ -132,9 +132,10 @@ int main(int argc, char** argv)
         }
         const std::filesystem::path layoutFile = options.PersistLayout
             ? project.ProjectRoot() / ".kairo" / "editor-layout.ini" : std::filesystem::path{};
+        const kairo::editor::EditorLayoutPlan layoutPlan = kairo::editor::PrepareEditorLayout(layoutFile);
         kairo::editor::ImGuiRuntime imgui(renderer, layoutFile);
         kairo::editor::ApplyKairoEditorTheme();
-        kairo::editor::EditorShell shell(state, project);
+        kairo::editor::EditorShell shell(state, project, layoutPlan.ShouldRebuild());
         if (options.AuthoringSurface.has_value()) state.SetAuthoringSurface(*options.AuthoringSurface);
 
         std::uint64_t renderedFrames = 0u;

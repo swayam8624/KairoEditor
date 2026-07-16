@@ -20,6 +20,7 @@ export import Kairo.Editor.ProjectSession;
 export import Kairo.Editor.CommandHistory;
 export import Kairo.Editor.Actions;
 export import Kairo.Editor.InputRouter;
+export import Kairo.Editor.LayoutRecovery;
 export import Kairo.Editor.ViewportController;
 export import Kairo.Editor.PrimitiveTypes;
 export import Kairo.Editor.SceneCommands;

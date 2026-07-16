@@ -1239,3 +1239,52 @@ TEST_CASE("Authoring workspace preserves document views and detects stale text d
     workspace.Clear();
     CHECK(workspace.Size() == 0u);
 }
+
+TEST_CASE("Editor layouts restore only compatible dock schemas", "[KairoEditor][Layout][Recovery]")
+{
+    const auto root = std::filesystem::temp_directory_path() / "kairo-editor-layout-recovery-test";
+    std::filesystem::remove_all(root);
+    const auto layout = root / "editor-layout.ini";
+
+    const EditorLayoutPlan disabled = PrepareEditorLayout({});
+    CHECK(disabled.Disposition == EditorLayoutDisposition::PersistenceDisabled);
+    CHECK(disabled.ShouldRebuild());
+
+    const EditorLayoutPlan missing = PrepareEditorLayout(layout, 3u);
+    CHECK(missing.Disposition == EditorLayoutDisposition::RebuildMissing);
+    CHECK(missing.ShouldRebuild());
+    REQUIRE(std::filesystem::exists(missing.VersionFile));
+
+    {
+        std::ofstream output(layout);
+        output << "[Docking][Data]\nDockSpace ID=0x1234\n";
+    }
+    const EditorLayoutPlan compatible = PrepareEditorLayout(layout, 3u);
+    CHECK(compatible.Disposition == EditorLayoutDisposition::RestoreCompatible);
+    CHECK_FALSE(compatible.ShouldRebuild());
+    CHECK_FALSE(compatible.PreservedLayout.has_value());
+
+    {
+        std::ofstream version(compatible.VersionFile, std::ios::trunc);
+        version << "2\n";
+    }
+    const EditorLayoutPlan obsolete = PrepareEditorLayout(layout, 3u);
+    CHECK(obsolete.Disposition == EditorLayoutDisposition::RebuildObsoleteVersion);
+    REQUIRE(obsolete.PreservedLayout.has_value());
+    CHECK(std::filesystem::exists(*obsolete.PreservedLayout));
+    CHECK_FALSE(std::filesystem::exists(layout));
+
+    {
+        std::ofstream output(layout);
+        output << "corrupt layout survives as a backup\n";
+        std::ofstream version(obsolete.VersionFile, std::ios::trunc);
+        version << "not-a-version\n";
+    }
+    const EditorLayoutPlan invalid = PrepareEditorLayout(layout, 3u);
+    CHECK(invalid.Disposition == EditorLayoutDisposition::RebuildInvalidVersion);
+    REQUIRE(invalid.PreservedLayout.has_value());
+    CHECK(std::filesystem::exists(*invalid.PreservedLayout));
+    REQUIRE_THROWS_AS(PrepareEditorLayout(layout, 0u), std::invalid_argument);
+
+    std::filesystem::remove_all(root);
+}
