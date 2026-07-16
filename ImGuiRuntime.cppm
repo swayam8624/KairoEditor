@@ -109,6 +109,24 @@ export namespace kairo::editor
 
         void EndFrame() { ImGui::Render(); }
 
+        /// Output: ImGui texture ID for the renderer's current offscreen scene.
+        /// Task: rebuild the backend descriptor exactly when the renderer's
+        /// viewport generation changes after a resize.
+        [[nodiscard]] ImTextureID ViewportTexture()
+        {
+            const auto texture = m_Renderer.ViewportTexture();
+            if (!texture.IsValid()) throw std::runtime_error("KairoRenderer provided an invalid viewport texture.");
+            if (texture.Generation == m_ViewportGeneration && m_ViewportDescriptor != VK_NULL_HANDLE)
+                return static_cast<ImTextureID>(reinterpret_cast<std::uintptr_t>(m_ViewportDescriptor));
+            if (m_ViewportDescriptor != VK_NULL_HANDLE)
+                ImGui_ImplVulkan_RemoveTexture(m_ViewportDescriptor);
+            m_ViewportDescriptor = ImGui_ImplVulkan_AddTexture(texture.View, texture.Layout);
+            if (m_ViewportDescriptor == VK_NULL_HANDLE)
+                throw std::runtime_error("Dear ImGui could not register the Kairo viewport texture.");
+            m_ViewportGeneration = texture.Generation;
+            return static_cast<ImTextureID>(reinterpret_cast<std::uintptr_t>(m_ViewportDescriptor));
+        }
+
     private:
         kairo::renderer::RendererRuntime& m_Renderer;
         std::string m_IniFilename;
@@ -118,6 +136,8 @@ export namespace kairo::editor
         bool m_GlfwInitialized = false;
         bool m_VulkanInitialized = false;
         bool m_OverlayInstalled = false;
+        VkDescriptorSet m_ViewportDescriptor = VK_NULL_HANDLE;
+        std::uint64_t m_ViewportGeneration = 0u;
 
         void Shutdown() noexcept
         {
@@ -130,6 +150,12 @@ export namespace kairo::editor
             {
                 const auto context = m_Renderer.BackendContext();
                 if (context.Device != VK_NULL_HANDLE) vkDeviceWaitIdle(context.Device);
+                if (m_ViewportDescriptor != VK_NULL_HANDLE)
+                {
+                    ImGui_ImplVulkan_RemoveTexture(m_ViewportDescriptor);
+                    m_ViewportDescriptor = VK_NULL_HANDLE;
+                    m_ViewportGeneration = 0u;
+                }
                 ImGui_ImplVulkan_Shutdown();
                 m_VulkanInitialized = false;
             }

@@ -120,6 +120,7 @@ int main(int argc, char** argv)
         {
             renderer.NativeWindow().PollEvents();
             imgui.BeginFrame();
+            shell.SetViewportTexture(imgui.ViewportTexture());
             shell.Draw();
             imgui.EndFrame();
             const auto camera = shell.ViewportCamera();
@@ -127,6 +128,8 @@ int main(int argc, char** argv)
             renderer.SubmitRenderScene(kairo::editor::BuildRenderScene(shell.RenderScene(), renderAssets));
             renderer.SubmitDebugDraw(shell.PhysicsDebugDraw());
             renderer.DrawFrame();
+            const auto [viewportWidth, viewportHeight] = shell.RequestedViewportExtent();
+            renderer.ResizeViewport(viewportWidth, viewportHeight);
             ++renderedFrames;
         }
         return 0;

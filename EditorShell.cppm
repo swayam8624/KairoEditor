@@ -89,6 +89,13 @@ export namespace kairo::editor
                 : kairo::renderer::DebugDrawList{};
         }
 
+        void SetViewportTexture(ImTextureID texture) noexcept { m_ViewportTexture = texture; }
+
+        [[nodiscard]] std::pair<std::uint32_t, std::uint32_t> RequestedViewportExtent() const noexcept
+        {
+            return { m_RequestedViewportWidth, m_RequestedViewportHeight };
+        }
+
     private:
         EditorState& m_State;
         ProjectSession& m_Project;
@@ -114,6 +121,9 @@ export namespace kairo::editor
         std::optional<kairo::assets::AssetID> m_PendingDocumentClose;
         std::string m_LastError;
         bool m_RequestErrorPopup = false;
+        ImTextureID m_ViewportTexture = ImTextureID_Invalid;
+        std::uint32_t m_RequestedViewportWidth = 1u;
+        std::uint32_t m_RequestedViewportHeight = 1u;
 
         void DrawMainBar()
         {
@@ -381,8 +391,8 @@ export namespace kairo::editor
 
         void DrawViewport()
         {
-            ImGui::SetNextWindowBgAlpha(0.0f);
-            if (ImGui::Begin("Viewport", nullptr, ImGuiWindowFlags_NoBackground))
+            if (ImGui::Begin("Viewport", nullptr, ImGuiWindowFlags_NoScrollbar |
+                ImGuiWindowFlags_NoScrollWithMouse))
             {
                 m_ViewportFocused = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);
                 const auto camera = m_ViewportController.Pose();
@@ -402,8 +412,20 @@ export namespace kairo::editor
 
                 const ImVec2 viewportMin = ImGui::GetCursorScreenPos();
                 const ImVec2 viewportSize = ImGui::GetContentRegionAvail();
-                ImGui::InvisibleButton("##ViewportInput", viewportSize,
-                    ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonMiddle | ImGuiButtonFlags_MouseButtonRight);
+                const ImVec2 framebufferScale = ImGui::GetIO().DisplayFramebufferScale;
+                m_RequestedViewportWidth = static_cast<std::uint32_t>(std::clamp(
+                    std::lround(std::max(viewportSize.x, 1.0f) * framebufferScale.x), 1l, 16384l));
+                m_RequestedViewportHeight = static_cast<std::uint32_t>(std::clamp(
+                    std::lround(std::max(viewportSize.y, 1.0f) * framebufferScale.y), 1l, 16384l));
+                if (m_ViewportTexture != ImTextureID_Invalid)
+                    ImGui::Image(ImTextureRef(m_ViewportTexture), viewportSize);
+                else
+                {
+                    ImGui::InvisibleButton("##ViewportUnavailable", viewportSize);
+                    ImGui::GetWindowDrawList()->AddText(
+                        { viewportMin.x + 12.0f, viewportMin.y + 12.0f },
+                        IM_COL32(230, 125, 125, 255), "Viewport texture unavailable");
+                }
                 const bool hovered = ImGui::IsItemHovered();
                 if (hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) ImGui::SetWindowFocus();
                 HandleViewportNavigation(hovered);

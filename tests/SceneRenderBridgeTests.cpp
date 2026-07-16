@@ -44,7 +44,9 @@ TEST_CASE("Engine scenes extract visible renderer draws in entity order", "[Kair
 
     REQUIRE(renderScene.Draws().size() == 2u);
     CHECK(renderScene.Draws()[0].Mesh == 7u);
+    CHECK(renderScene.Draws()[0].ObjectID == first.Value);
     CHECK(renderScene.Draws()[0].Model(0u, 3u) == -2.0f);
+    CHECK(renderScene.Draws()[1].ObjectID == second.Value);
     CHECK(renderScene.Draws()[1].Model(1u, 1u) == 2.0f);
 }
 
