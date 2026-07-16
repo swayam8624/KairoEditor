@@ -30,6 +30,7 @@ TEST_CASE("Editor actions and viewport navigation provide deterministic authorin
 
     ViewportController viewport;
     const auto initial = viewport.Pose();
+    CHECK(initial.Position.y > 0.0f);
     viewport.Update({ .MouseDeltaX = 24.0f, .MouseDeltaY = -12.0f, .Orbit = true });
     const auto orbit = viewport.Pose();
     CHECK(orbit.Position != initial.Position);

@@ -51,7 +51,9 @@ export namespace kairo::editor
                 std::sin(m_Pitch),
                 cosinePitch * std::cos(m_Yaw)
             };
-            return { m_Target - direction * m_Distance, m_Target, Vec3f::Up() };
+            // `direction` points from the orbit target toward the camera. Keeping
+            // that convention yields the familiar elevated three-quarter editor view.
+            return { m_Target + direction * m_Distance, m_Target, Vec3f::Up() };
         }
 
         [[nodiscard]] float Distance() const noexcept { return m_Distance; }
