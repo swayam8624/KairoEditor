@@ -150,5 +150,15 @@ if(KAIRO_EDITOR_BUILD_TESTS)
         set_tests_properties(KairoEditorCodeSurfaceSmoke PROPERTIES SKIP_RETURN_CODE 77)
         add_test(NAME KairoEditorRequiresProject COMMAND KairoEditorApp --frames 1)
         set_tests_properties(KairoEditorRequiresProject PROPERTIES WILL_FAIL TRUE TIMEOUT 20)
+        if(WIN32)
+            # GLFW and the Vulkan loader are DLLs in the Windows vcpkg lane.
+            # Make the native smoke tests hermetic instead of relying on the
+            # runner's global PATH to discover their runtime dependencies.
+            set(_kairo_editor_runtime_path
+                "$<TARGET_FILE_DIR:glfw>;$<TARGET_FILE_DIR:Vulkan::Vulkan>;$ENV{PATH}")
+            set_tests_properties(KairoEditorNativeSmoke KairoEditorCodeSurfaceSmoke
+                KairoEditorRequiresProject PROPERTIES
+                ENVIRONMENT "PATH=${_kairo_editor_runtime_path}")
+        endif()
     endif()
 endif()
