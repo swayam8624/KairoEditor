@@ -124,6 +124,27 @@ export namespace kairo::editor
             else m_State.ClearSelection();
         }
 
+        /// Rehydrates non-authoritative text buffers after ProjectSession has
+        /// restored canonical files and reopened documents. Invalid drafts stay
+        /// editable in the Code surface and never enter graph/runtime state
+        /// until the user fixes and explicitly applies them.
+        void RestoreRecoveryDrafts(const RecoverySnapshot& snapshot)
+        {
+            for (const RecoveryFile& file : snapshot.Files)
+            {
+                if (file.Role != RecoveryFileRole::TextDraft) continue;
+                const auto metadata = m_Project.Assets().FindByPath(file.TargetPath);
+                if (!metadata.has_value() ||
+                    metadata->Type != kairo::assets::AssetType::Document ||
+                    !m_Project.Documents().Contains(metadata->ID))
+                    throw std::runtime_error("Recovery text draft no longer resolves to an open document.");
+                (void)m_AuthoringWorkspace.Open(m_Project.Document(metadata->ID));
+                m_AuthoringWorkspace.At(metadata->ID).SetTextDraft(
+                    LoadRecoveryPayload(snapshot, file));
+            }
+            m_RecoveryStatus = "Recovered snapshot";
+        }
+
     private:
         EditorState& m_State;
         ProjectSession& m_Project;

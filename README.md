@@ -152,6 +152,18 @@ creates one immediately. Recovery is a journal, not an implicit save:
 backend-neutral contract used by the editor and KairoHub. This makes recovery
 testable without Dear ImGui or a native window.
 
+KairoHub launches an explicitly selected snapshot with:
+
+```bash
+./build/KairoEditorApp \
+  --project /absolute/path/Project.kproject \
+  --recovery-snapshot /absolute/path/.kairo/recovery/snapshot-...
+```
+
+The editor rejects snapshots owned by another project and disables persisted
+docking for the recovered session. Recovery is never selected implicitly by
+this command line interface.
+
 ## Commands and undo
 
 `CommandHistory` is independent from Dear ImGui and owns a bounded linear

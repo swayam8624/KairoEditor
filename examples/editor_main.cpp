@@ -23,6 +23,7 @@ namespace
     {
         std::filesystem::path Project;
         std::optional<std::filesystem::path> Document;
+        std::optional<std::filesystem::path> RecoverySnapshot;
         std::optional<kairo::editor::AuthoringSurface> AuthoringSurface;
         std::optional<std::uint64_t> FrameLimit;
         std::optional<std::filesystem::path> Screenshot;
@@ -51,6 +52,14 @@ namespace
             {
                 if (++index == argc) throw std::invalid_argument("--document requires a project-relative .kdoc path.");
                 options.Document = std::filesystem::path(argv[index]);
+                continue;
+            }
+            if (argument == "--recovery-snapshot")
+            {
+                if (++index == argc) throw std::invalid_argument(
+                    "--recovery-snapshot requires a published snapshot directory.");
+                options.RecoverySnapshot = std::filesystem::path(argv[index]);
+                options.PersistLayout = false;
                 continue;
             }
             if (argument == "--authoring")
@@ -94,6 +103,7 @@ namespace
         if (options.Project.empty())
             throw std::invalid_argument("Usage: KairoEditorApp --project <file.kproject> "
                 "[--document project-relative.kdoc] [--authoring code|graph|split] "
+                "[--recovery-snapshot snapshot-directory] "
                 "[--frames positive-count] [--viewport-mode lit|unlit|normals|lighting] "
                 "[--screenshot output.ppm] [--no-layout-persistence]");
         return options;
@@ -121,6 +131,20 @@ int main(int argc, char** argv)
         const AppOptions options = ParseOptions(argc, argv);
         kairo::editor::ProjectSession project;
         project.OpenProject(options.Project);
+        std::optional<kairo::editor::RecoverySnapshot> recovered;
+        if (options.RecoverySnapshot.has_value())
+        {
+            recovered = kairo::editor::LoadRecoverySnapshot(*options.RecoverySnapshot);
+            const auto requested = kairo::editor::CanonicalExistingFile(
+                options.Project, "requested project descriptor");
+            const auto recorded = std::filesystem::canonical(
+                recovered->OriginalProjectRoot / recovered->ProjectFile);
+            if (requested != recorded)
+                throw std::invalid_argument(
+                    "Recovery snapshot belongs to a different project descriptor.");
+            project.RestoreRecoveryPoint(recovered->Directory,
+                kairo::editor::UnsavedChangesPolicy::Discard);
+        }
         if (options.Document.has_value()) (void)project.OpenDocument(*options.Document);
         kairo::renderer::RendererRuntime renderer({ project.Descriptor().Name, 1600u, 1000u, true });
         kairo::editor::EditorState state(project.Scene());
@@ -149,6 +173,7 @@ int main(int argc, char** argv)
         kairo::editor::ImGuiRuntime imgui(renderer, layoutFile);
         kairo::editor::ApplyKairoEditorTheme();
         kairo::editor::EditorShell shell(state, project, layoutPlan.ShouldRebuild());
+        if (recovered.has_value()) shell.RestoreRecoveryDrafts(*recovered);
         if (options.ViewportShading.has_value()) shell.SetViewportShading(*options.ViewportShading);
         if (options.AuthoringSurface.has_value()) state.SetAuthoringSurface(*options.AuthoringSurface);
 
