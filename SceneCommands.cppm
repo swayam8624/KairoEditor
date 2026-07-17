@@ -151,6 +151,48 @@ export namespace kairo::editor
         std::optional<kairo::engine::ColliderComponent> m_BeforeCollider;
     };
 
+    /// Adds, replaces, or removes one entity's authored logic document through
+    /// the same undo history as all other scene mutations. The typed asset is
+    /// resolved before mutation, so a stale or wrong-kind handle cannot replace
+    /// the prior component.
+    class SetLogicDocumentCommand final : public EditorCommand
+    {
+    public:
+        SetLogicDocumentCommand(ProjectSession& project, kairo::engine::Entity entity,
+            std::optional<kairo::assets::DocumentAssetHandle> document)
+            : m_Project(&project), m_Entity(entity), m_After(document),
+              m_Before(project.Scene().HasLogic(entity)
+                  ? std::optional(project.Scene().Logic(entity)) : std::nullopt) {}
+
+        [[nodiscard]] std::string_view Name() const noexcept override
+        {
+            return m_After.has_value() ? "Set Logic Document" : "Remove Logic Document";
+        }
+
+        void Execute() override
+        {
+            if (m_After.has_value())
+            {
+                (void)m_Project->Assets().Resolve(*m_After);
+                m_Project->EditScene().SetLogic(m_Entity, { *m_After, true });
+            }
+            else (void)m_Project->EditScene().RemoveLogic(m_Entity);
+        }
+
+        void Undo() override
+        {
+            auto& scene = m_Project->EditScene();
+            (void)scene.RemoveLogic(m_Entity);
+            if (m_Before.has_value()) scene.SetLogic(m_Entity, *m_Before);
+        }
+
+    private:
+        ProjectSession* m_Project;
+        kairo::engine::Entity m_Entity;
+        std::optional<kairo::assets::DocumentAssetHandle> m_After;
+        std::optional<kairo::engine::LogicComponent> m_Before;
+    };
+
     /// A complete entity snapshot for the component types EngineCore currently
     /// exposes. Opaque physics bindings are retained as authored references;
     /// this command never reaches into or snapshots an external runtime world.
@@ -165,6 +207,7 @@ export namespace kairo::editor
         std::vector<std::string> Tags;
         std::optional<kairo::engine::MeshRendererComponent> MeshRenderer;
         std::optional<kairo::engine::CameraComponent> Camera;
+        std::optional<kairo::engine::LogicComponent> Logic;
         std::optional<kairo::engine::RigidBodyComponent> RigidBody;
         std::optional<kairo::engine::ColliderComponent> Collider;
     };
@@ -174,9 +217,10 @@ export namespace kairo::editor
     {
         EntitySnapshot result{ entity, scene.Name(entity).Value, scene.Transform(entity).Local,
             scene.Parent(entity), scene.IsEnabled(entity), scene.Layer(entity), scene.Tags(entity),
-            std::nullopt, std::nullopt, std::nullopt, std::nullopt };
+            std::nullopt, std::nullopt, std::nullopt, std::nullopt, std::nullopt };
         if (scene.HasMeshRenderer(entity)) result.MeshRenderer = scene.MeshRenderer(entity);
         if (scene.HasCamera(entity)) result.Camera = scene.Camera(entity);
+        if (scene.HasLogic(entity)) result.Logic = scene.Logic(entity);
         if (scene.HasRigidBody(entity)) result.RigidBody = scene.RigidBody(entity);
         if (scene.HasCollider(entity)) result.Collider = scene.Collider(entity);
         return result;
@@ -213,6 +257,7 @@ export namespace kairo::editor
             for (const auto& tag : snapshot.Tags) scene.AddTag(snapshot.ID, tag);
             if (snapshot.MeshRenderer.has_value()) scene.SetMeshRenderer(snapshot.ID, *snapshot.MeshRenderer);
             if (snapshot.Camera.has_value()) scene.SetCamera(snapshot.ID, *snapshot.Camera);
+            if (snapshot.Logic.has_value()) scene.SetLogic(snapshot.ID, *snapshot.Logic);
             if (snapshot.RigidBody.has_value()) scene.SetRigidBody(snapshot.ID, *snapshot.RigidBody);
             if (snapshot.Collider.has_value()) scene.SetCollider(snapshot.ID, *snapshot.Collider);
         }

@@ -488,6 +488,47 @@ export namespace kairo::editor
                 });
             }
             ImGui::TextDisabled("Rotation is stored as a normalized quaternion.");
+            SectionHeader("Gameplay Logic");
+            const char* logicPreview = "None";
+            std::string logicPath;
+            if (scene.HasLogic(*selected))
+            {
+                logicPath = m_Project.Assets().Resolve(scene.Logic(*selected).Document).Path.generic_string();
+                logicPreview = logicPath.c_str();
+            }
+            if (ImGui::BeginCombo("Document##GameplayLogic", logicPreview))
+            {
+                for (const auto& metadata : m_Project.Assets().Snapshot())
+                {
+                    if (metadata.Type != kairo::assets::AssetType::Document) continue;
+                    try
+                    {
+                        if (LoadDocument(m_Project.ProjectRoot() / metadata.Path).Kind() != DocumentKind::Logic)
+                            continue;
+                    }
+                    catch (const std::exception&) { continue; }
+                    const bool active = scene.HasLogic(*selected) &&
+                        scene.Logic(*selected).Document.ID == metadata.ID;
+                    const std::string label = metadata.Path.generic_string();
+                    if (ImGui::Selectable(label.c_str(), active))
+                    {
+                        RunCommand([this, entity = *selected, id = metadata.ID]
+                        {
+                            m_History.Execute(std::make_unique<SetLogicDocumentCommand>(
+                                m_Project, entity, kairo::assets::DocumentAssetHandle{ id }));
+                        });
+                    }
+                }
+                ImGui::EndCombo();
+            }
+            if (scene.HasLogic(*selected) && ActionButton("Remove Logic", UIButtonTone::Destructive))
+            {
+                RunCommand([this, entity = *selected]
+                {
+                    m_History.Execute(std::make_unique<SetLogicDocumentCommand>(
+                        m_Project, entity, std::nullopt));
+                });
+            }
             SectionHeader("Physics Preview");
             const bool physicsEnabled = scene.HasRigidBody(*selected) || scene.HasCollider(*selected);
             if (ActionButton(physicsEnabled ? "Remove Physics" : "Add Dynamic Box Physics",
@@ -667,6 +708,7 @@ export namespace kairo::editor
                     scene.Transform(created).Local = scene.Transform(*selected).Local;
                     if (scene.HasMeshRenderer(*selected)) scene.SetMeshRenderer(created, scene.MeshRenderer(*selected));
                     if (scene.HasCamera(*selected)) scene.SetCamera(created, scene.Camera(*selected));
+                    if (scene.HasLogic(*selected)) scene.SetLogic(created, scene.Logic(*selected));
                     if (scene.HasRigidBody(*selected)) scene.SetRigidBody(created, scene.RigidBody(*selected));
                     if (scene.HasCollider(*selected)) scene.SetCollider(created, scene.Collider(*selected));
                     m_State.Select(created);

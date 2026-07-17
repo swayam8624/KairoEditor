@@ -1206,9 +1206,18 @@ TEST_CASE("Scene commands restore stable entities and merge Inspector edits", "[
 
     const auto mesh = kairo::assets::AssetID::Parse("00000000-0000-4000-8000-000000000401");
     const auto material = kairo::assets::AssetID::Parse("00000000-0000-4000-8000-000000000402");
+    const auto logic = project.CreateDocument(
+        DocumentKind::Logic, "Command Logic", "Logic/Command.kdoc");
     auto& authoredScene = project.EditScene();
     authoredScene.SetMeshRenderer(entity, { { mesh }, { material }, false });
     authoredScene.SetCamera(entity, { 0.9f, 0.2f, 500.0f, true });
+    CommandHistory logicHistory;
+    logicHistory.Execute(std::make_unique<SetLogicDocumentCommand>(
+        project, entity, kairo::assets::DocumentAssetHandle{ logic }));
+    CHECK(project.Scene().Logic(entity).Document.ID == logic);
+    logicHistory.Undo();
+    CHECK_FALSE(project.Scene().HasLogic(entity));
+    logicHistory.Redo();
     authoredScene.SetRigidBody(entity, {
         kairo::engine::RigidBodyMotion::Kinematic, 3.0f, 0.5f, 0.1f, 0.2f });
     authoredScene.SetCollider(entity, {
@@ -1240,6 +1249,7 @@ TEST_CASE("Scene commands restore stable entities and merge Inspector edits", "[
     CHECK(project.Scene().MeshRenderer(entity).MaterialAsset.ID == material);
     CHECK_FALSE(project.Scene().MeshRenderer(entity).Visible);
     CHECK(project.Scene().Camera(entity).NearPlane == 0.2f);
+    CHECK(project.Scene().Logic(entity).Document.ID == logic);
     CHECK(project.Scene().RigidBody(entity).Motion == kairo::engine::RigidBodyMotion::Kinematic);
     CHECK(project.Scene().RigidBody(entity).Density == 3.0f);
     CHECK(project.Scene().Collider(entity).Shape == kairo::engine::ColliderShape::Sphere);
