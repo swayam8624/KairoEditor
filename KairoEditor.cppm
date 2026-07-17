@@ -28,5 +28,6 @@ export import Kairo.Editor.LayoutRecovery;
 export import Kairo.Editor.ViewportController;
 export import Kairo.Editor.PrimitiveTypes;
 export import Kairo.Editor.SceneCommands;
+export import Kairo.Editor.AITools;
 export import Kairo.Editor.PanelState;
 export import Kairo.Editor.State;

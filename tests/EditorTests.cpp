@@ -13,6 +13,7 @@
 #include <vector>
 
 import Kairo.Editor;
+import Kairo.AI;
 import Kairo.EngineCore;
 import Kairo.Foundation.Math;
 import Kairo.Reflection;
@@ -1159,6 +1160,58 @@ TEST_CASE("Failed project opens preserve the live session", "[KairoEditor][Proje
     CHECK(session.Scene().Contains(stable));
     CHECK_FALSE(session.HasUnsavedChanges());
     std::filesystem::remove_all(base);
+}
+
+TEST_CASE("AI editor tools preview approve audit and undo scene mutations", "[KairoEditor][AI][Commands]")
+{
+    const auto root = std::filesystem::temp_directory_path() /
+        ("kairo-ai-editor-" + kairo::assets::GenerateAssetID().ToString());
+    ProjectSession project;
+    project.CreateProject(root, "AI Tool Project");
+    CommandHistory history;
+    AIEditorTools tools(project, history);
+
+    const kairo::ai::ToolCall list{ "read-1", "project.list_entities", "{}" };
+    const auto listed = tools.Execute(kairo::ai::InteractionMode::Ask, list);
+    CHECK(listed.Invoked);
+    CHECK(listed.Output == "[]");
+
+    const kairo::ai::ToolCall create{ "create-1", "scene.create_entity",
+        R"({"name":"AI Cube"})" };
+    const auto preview = tools.Preview(create);
+    CHECK(preview.RequiresApproval);
+    CHECK(preview.Summary == "Create entity 'AI Cube'.");
+    CHECK_FALSE(tools.Execute(kairo::ai::InteractionMode::Plan, create).Invoked);
+    CHECK(project.Scene().Entities().empty());
+
+    const kairo::ai::ToolApproval createApproval{
+        create.ID, create.Name, create.Arguments, true };
+    const auto created = tools.Execute(kairo::ai::InteractionMode::Agent, create, createApproval);
+    REQUIRE(created.Invoked);
+    REQUIRE(project.Scene().Entities().size() == 1u);
+    const auto entity = project.Scene().Entities().front();
+    CHECK(project.Scene().Name(entity).Value == "AI Cube");
+    CHECK(history.UndoName() == "Create Entity");
+    history.Undo();
+    CHECK(project.Scene().Entities().empty());
+    history.Redo();
+    REQUIRE(project.Scene().Contains(entity));
+
+    const kairo::ai::ToolCall remove{ "delete-1", "scene.delete_entity",
+        "{\"entity\":" + std::to_string(entity.Value) + "}" };
+    const kairo::ai::ToolApproval removeApproval{
+        remove.ID, remove.Name, remove.Arguments, true };
+    CHECK(tools.Execute(kairo::ai::InteractionMode::Agent, remove, removeApproval).Invoked);
+    CHECK_FALSE(project.Scene().Contains(entity));
+    history.Undo();
+    CHECK(project.Scene().Contains(entity));
+
+    CHECK(tools.Audit().size() == 4u);
+    CHECK_FALSE(tools.Audit()[1].Invoked);
+    CHECK(tools.Audit()[2].Invoked);
+    REQUIRE_THROWS_AS(tools.Preview({ "bad-1", "scene.create_entity",
+        R"({"name":"Cube","untrusted_approval":true})" }), std::invalid_argument);
+    std::filesystem::remove_all(root);
 }
 
 TEST_CASE("Scene commands restore stable entities and merge Inspector edits", "[KairoEditor][Commands][Scene]")

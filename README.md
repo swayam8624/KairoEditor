@@ -199,6 +199,21 @@ on undo. Commands retain a `ProjectSession` reference, so a host must clear its
 history before replacing or closing that session; the native host currently
 opens one project for its process lifetime.
 
+## AI command boundary
+
+`AIEditorTools` is the backend for future Ask, Plan, and Agent UI surfaces. It
+currently exposes three strict JSON tools: read the entity list, create an empty
+entity, and delete an entity subtree. This is intentionally not presented as a
+chat panel or cloud integration yet.
+
+Every call is parsed and fully previewed before execution. Unknown fields are
+rejected, persistent entity IDs are range-checked, and mutations pass through
+KairoAI's exact-call approval policy. Approved changes execute through the same
+`CreateEntityCommand`, `DeleteEntityCommand`, and `CommandHistory` used by the
+manual editor, so they remain dirty-state aware and undoable. The bridge records
+both rejected and executed calls in a process-local audit trail. Model output
+is never treated as approval, and credential access is not an editor tool.
+
 ## Typed document foundation
 
 The backend-neutral authoring kernel now defines strongly separated node and

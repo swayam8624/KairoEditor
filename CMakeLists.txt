@@ -13,9 +13,36 @@ set(KAIRO_EDITOR_MONO_FONT_PATH "" CACHE FILEPATH "Optional monospace TTF font f
 # checkouts still take precedence for active workspace development.
 set(KAIRO_EDITOR_CORE_REVISION 10db0f120c158e3a34c4897c7eec4e519bf81cd2)
 set(KAIRO_EDITOR_RENDERER_REVISION d59d0c7293e379e64e8f9aef198ca302fa87558b)
+set(KAIRO_EDITOR_AI_REVISION d0e193d5d7318bc20d8893996a76cb4c15b17fc0)
+set(KAIRO_EDITOR_JSON_REVISION 65ee68451d8eb2b5f3a30b410476ab83deb3289b)
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
     add_compile_options(-Wall -Wextra -Wpedantic -Wno-unused-parameter)
+endif()
+
+if(NOT TARGET KairoAI)
+    set(KAIRO_AI_SOURCE_DIR "" CACHE PATH "Path to a local KairoAI checkout")
+    if(KAIRO_AI_SOURCE_DIR AND EXISTS "${KAIRO_AI_SOURCE_DIR}/CMakeLists.txt")
+        add_subdirectory("${KAIRO_AI_SOURCE_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/_deps/KairoAI")
+    elseif(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../KairoAI/CMakeLists.txt")
+        add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../KairoAI" "${CMAKE_CURRENT_BINARY_DIR}/_deps/KairoAI")
+    else()
+        include(FetchContent)
+        FetchContent_Declare(KairoAI
+            GIT_REPOSITORY https://github.com/swayam8624/KairoAI.git
+            GIT_TAG ${KAIRO_EDITOR_AI_REVISION}
+            GIT_SHALLOW TRUE)
+        FetchContent_MakeAvailable(KairoAI)
+    endif()
+endif()
+
+if(NOT TARGET nlohmann_json::nlohmann_json)
+    include(FetchContent)
+    FetchContent_Declare(nlohmann_json
+        GIT_REPOSITORY https://github.com/nlohmann/json.git
+        GIT_TAG ${KAIRO_EDITOR_JSON_REVISION}
+        GIT_SHALLOW TRUE)
+    FetchContent_MakeAvailable(nlohmann_json)
 endif()
 
 if(NOT TARGET KairoEngineCore)
@@ -42,8 +69,8 @@ target_sources(KairoEditor PUBLIC FILE_SET CXX_MODULES BASE_DIRS ${CMAKE_CURRENT
     DocumentCompiler.cppm LogicDocumentCompiler.cppm ProjectLogicBuild.cppm ProjectDocuments.cppm GraphCanvas.cppm DocumentProjection.cppm
     AuthoringWorkspaceState.cppm
     ProjectDescriptor.cppm ProjectRecovery.cppm ProjectSession.cppm CommandHistory.cppm EditorActions.cppm EditorInputRouter.cppm KeymapSettings.cppm EditorLayoutRecovery.cppm ViewportController.cppm PrimitiveTypes.cppm SceneCommands.cppm
-    EditorState.cppm PanelState.cppm KairoEditor.cppm)
-target_link_libraries(KairoEditor PUBLIC KairoEngineCore)
+    AIEditorTools.cppm EditorState.cppm PanelState.cppm KairoEditor.cppm)
+target_link_libraries(KairoEditor PUBLIC KairoEngineCore KairoAI nlohmann_json::nlohmann_json)
 
 add_executable(KairoProjectCompiler examples/project_compiler_main.cpp)
 target_link_libraries(KairoProjectCompiler PRIVATE KairoEditor)
