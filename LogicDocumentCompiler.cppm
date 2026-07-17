@@ -78,6 +78,10 @@ export namespace kairo::editor
                             CompileEntry(id, kairo::engine::LogicEventKind::InputReleased, action, "released");
                         }
                     }
+                    else if (node.TypeKey == "kairo.logic.collision-begin")
+                        CompileEntry(id, kairo::engine::LogicEventKind::CollisionBegin, {}, "then");
+                    else if (node.TypeKey == "kairo.logic.collision-end")
+                        CompileEntry(id, kairo::engine::LogicEventKind::CollisionEnd, {}, "then");
                 }
                 if (m_Program.Entries.empty())
                     Error("missing-entry", "Logic document requires at least one event entry node.");
@@ -236,6 +240,8 @@ export namespace kairo::editor
                 }
                 else if (producer.TypeKey == "kairo.logic.event-tick" && output.Key == "delta_seconds") result = 0u;
                 else if (producer.TypeKey == "kairo.logic.input-action" && output.Key == "value") result = 1u;
+                else if ((producer.TypeKey == "kairo.logic.collision-begin" ||
+                    producer.TypeKey == "kairo.logic.collision-end") && output.Key == "other") result = 2u;
                 else if (producer.TypeKey == "kairo.logic.entity-reference" && output.Key == "entity")
                     result = CompileConstant(Property(producer, "entity"), producer.ID, output.ID);
                 else if (producer.TypeKey == "kairo.logic.vector3" && output.Key == "value")

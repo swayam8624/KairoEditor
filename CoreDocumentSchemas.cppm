@@ -114,6 +114,21 @@ export namespace kairo::editor
         inputAction.PropertyDefaults.emplace("action", DocumentValue(std::string("Jump")));
         registry.Register(std::move(inputAction));
 
+        // Collision events expose the counterpart as a typed entity value. The
+        // runtime dispatches one event per contact transition, so graph authors
+        // do not need to decode process-local collider or body identifiers.
+        NodeSchema collisionBegin = Node(DocumentKind::Logic, "kairo.logic.collision-begin",
+            "Collision Begin", "Physics Events");
+        collisionBegin.Pins = { Output("then", "Then", ValueType::Flow),
+            Output("other", "Other Entity", ValueType::Entity) };
+        registry.Register(std::move(collisionBegin));
+
+        NodeSchema collisionEnd = Node(DocumentKind::Logic, "kairo.logic.collision-end",
+            "Collision End", "Physics Events");
+        collisionEnd.Pins = { Output("then", "Then", ValueType::Flow),
+            Output("other", "Other Entity", ValueType::Entity) };
+        registry.Register(std::move(collisionEnd));
+
         NodeSchema setPosition = Node(DocumentKind::Logic, "kairo.logic.set-position", "Set Position", "Transform");
         setPosition.Pins = { FlowInput("in", "In"), RequiredInput("entity", "Entity", ValueType::Entity),
             RequiredInput("position", "Position", ValueType::Vector3), Output("then", "Then", ValueType::Flow) };

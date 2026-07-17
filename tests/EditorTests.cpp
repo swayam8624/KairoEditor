@@ -189,7 +189,7 @@ TEST_CASE("Core document schemas cover every authoring domain with valid contrac
     "[KairoEditor][Document][Schema]")
 {
     const DocumentSchemaRegistry registry = CreateCoreDocumentSchemaRegistry();
-    CHECK(registry.Size() == 27u);
+    CHECK(registry.Size() == 29u);
 
     for (const DocumentKind kind : { DocumentKind::Logic, DocumentKind::Material,
         DocumentKind::Audio, DocumentKind::AnimationState, DocumentKind::Simulation })
@@ -212,6 +212,8 @@ TEST_CASE("Core document schemas cover every authoring domain with valid contrac
     CHECK(state.Pins[1].Required);
     CHECK(state.Pins[1].Type == ValueType::Asset);
     CHECK(registry.Require("kairo.logic.input-action").Category == "Input");
+    CHECK(registry.Require("kairo.logic.collision-begin").Pins[1].Type == ValueType::Entity);
+    CHECK(registry.Require("kairo.logic.collision-end").Pins[1].Type == ValueType::Entity);
     CHECK(registry.Require("kairo.logic.set-position").Pins[1].Type == ValueType::Entity);
     CHECK(registry.Require("kairo.logic.spawn-entity").Pins[3].Type == ValueType::Entity);
     CHECK(registry.Require("kairo.simulation.raycast").Pins.size() == 7u);

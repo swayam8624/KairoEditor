@@ -136,8 +136,10 @@ namespace
         const NodeID setPosition = document.AddNode(schemas.Require("kairo.logic.set-position"));
         const NodeID print = document.AddNode(schemas.Require("kairo.logic.print"));
         const NodeID input = document.AddNode(schemas.Require("kairo.logic.input-action"));
+        const NodeID collision = document.AddNode(schemas.Require("kairo.logic.collision-begin"));
         const NodeID branch = document.AddNode(schemas.Require("kairo.logic.branch"));
         const NodeID impulse = document.AddNode(schemas.Require("kairo.logic.apply-impulse"));
+        const NodeID collisionImpulse = document.AddNode(schemas.Require("kairo.logic.apply-impulse"));
         const NodeID entity = document.AddNode(schemas.Require("kairo.logic.entity-reference"));
         const NodeID position = document.AddNode(schemas.Require("kairo.logic.vector3"));
         const NodeID impulseValue = document.AddNode(schemas.Require("kairo.logic.vector3"));
@@ -158,6 +160,9 @@ namespace
         connect(branch, "true", impulse, "in");
         connect(entity, "entity", impulse, "entity");
         connect(impulseValue, "value", impulse, "impulse");
+        connect(collision, "then", collisionImpulse, "in");
+        connect(collision, "other", collisionImpulse, "entity");
+        connect(impulseValue, "value", collisionImpulse, "impulse");
 
         LogicDocumentCompiler compiler;
         const DocumentCompileResult first = CompileDocument(document, schemas, compiler);
@@ -183,6 +188,13 @@ namespace
         Expect(host.Impulsed == kairo::engine::Entity{ 7u } &&
             host.Impulse == kairo::foundation::math::Vec3d{ 0.0, 5.0, 0.0 },
             "compiled input and branch flow must invoke the physics host");
+        host.Impulsed = {};
+        (void)instance.Dispatch({ 99u }, { .Event = kairo::engine::LogicEventKind::CollisionBegin,
+            .Action = {}, .DeltaSeconds = 0.0, .ActionValue = 0.0,
+            .OtherEntity = kairo::engine::Entity{ 42u } }, host);
+        Expect(host.Impulsed == kairo::engine::Entity{ 42u } &&
+            host.Impulse == kairo::foundation::math::Vec3d{ 0.0, 5.0, 0.0 },
+            "compiled collision flow must expose the counterpart entity to physics nodes");
     }
 
     void TestCoreLogicCompilerRejectsCycles()

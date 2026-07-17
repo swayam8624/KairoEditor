@@ -224,7 +224,7 @@ parsing is bounded and line/column located, and saves replace the destination
 atomically. This makes missing schemas a validation diagnostic instead of a
 data-loss event.
 
-The shipped core catalog contributes 27 validated contracts across logic,
+The shipped core catalog contributes 29 validated contracts across logic,
 material, audio, animation-state, and simulation documents. Registry search is
 bounded, tokenized, ASCII case-insensitive, and deterministically relevance
 ordered. Scene Entity and Vector 3 value nodes feed typed transform and physics
