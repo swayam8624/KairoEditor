@@ -15,7 +15,9 @@ export module Kairo.Editor.LayoutRecovery;
 
 export namespace kairo::editor
 {
-    inline constexpr std::uint32_t CurrentEditorLayoutVersion = 1u;
+    // V2 adds the Kairo AI dock to the default right-side tool stack. Rebuild
+    // V1 layouts once so the new panel cannot appear undocked over the viewport.
+    inline constexpr std::uint32_t CurrentEditorLayoutVersion = 2u;
 
     /// Describes why the native shell should either restore an ImGui dock tree
     /// or construct the known-good default. The policy is independent from

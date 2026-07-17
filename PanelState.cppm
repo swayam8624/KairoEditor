@@ -33,11 +33,13 @@ export namespace kairo::editor
             switch (workspace)
             {
             case Workspace::Scene:
-                Show({ Panel::Hierarchy, Panel::Inspector, Panel::Viewport, Panel::ContentBrowser, Panel::Console }); break;
+                Show({ Panel::Hierarchy, Panel::Inspector, Panel::Viewport, Panel::ContentBrowser,
+                    Panel::Console, Panel::AIAssistant }); break;
             case Workspace::World:
                 Show({ Panel::Hierarchy, Panel::Inspector, Panel::Viewport, Panel::ContentBrowser, Panel::WorldTools }); break;
             case Workspace::Logic:
-                Show({ Panel::Hierarchy, Panel::Inspector, Panel::Viewport, Panel::CodeEditor, Panel::NodeGraph, Panel::Console }); break;
+                Show({ Panel::Hierarchy, Panel::Inspector, Panel::Viewport, Panel::CodeEditor,
+                    Panel::NodeGraph, Panel::Console, Panel::AIAssistant }); break;
             case Workspace::Materials:
                 Show({ Panel::Inspector, Panel::Viewport, Panel::ContentBrowser, Panel::CodeEditor, Panel::NodeGraph }); break;
             case Workspace::Animation:

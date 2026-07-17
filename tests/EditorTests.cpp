@@ -1477,6 +1477,7 @@ TEST_CASE("Editor panel visibility persists independently of a UI backend", "[Ka
     kairo::engine::Scene scene;
     EditorState editor(scene);
     REQUIRE(editor.Panels().IsVisible(Panel::Console));
+    REQUIRE(editor.Panels().IsVisible(Panel::AIAssistant));
     editor.Panels().Toggle(Panel::Console);
     CHECK_FALSE(editor.Panels().IsVisible(Panel::Console));
 }
@@ -1489,6 +1490,7 @@ TEST_CASE("Task workspaces expose focused production tool sets", "[KairoEditor][
     CHECK(editor.Panels().IsVisible(Panel::Viewport));
     CHECK(editor.Panels().IsVisible(Panel::CodeEditor));
     CHECK(editor.Panels().IsVisible(Panel::NodeGraph));
+    CHECK(editor.Panels().IsVisible(Panel::AIAssistant));
     CHECK_FALSE(editor.Panels().IsVisible(Panel::Timeline));
 
     editor.SetAuthoringSurface(AuthoringSurface::Graph);

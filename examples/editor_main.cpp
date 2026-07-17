@@ -1,24 +1,54 @@
 #include <charconv>
+#include <cstdlib>
 #include <cstdint>
 #include <exception>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <memory>
 #include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
 
 import Kairo.Editor;
+import Kairo.AI;
 import Kairo.Editor.Theme;
 import Kairo.Editor.ImGuiRuntime;
 import Kairo.Editor.ImGuiShell;
 import Kairo.Editor.SceneRenderBridge;
 import Kairo.EngineCore;
 import Kairo.Renderer;
+#if defined(KAIRO_EDITOR_HAS_AI_CLOUD)
+import Kairo.AI.Cloud;
+#endif
 
 namespace
 {
+    struct AIHost final
+    {
+        std::shared_ptr<kairo::ai::Provider> Provider;
+        std::string Model;
+    };
+
+    [[nodiscard]] AIHost CreateAIHost()
+    {
+#if defined(KAIRO_EDITOR_HAS_AI_CLOUD)
+        const char* key = std::getenv("KAIRO_AI_API_KEY");
+        const char* model = std::getenv("KAIRO_AI_MODEL");
+        if (key == nullptr || *key == '\0' || model == nullptr || *model == '\0') return {};
+        kairo::ai::OpenAICompatibleConfig config;
+        config.APIKey = key;
+        if (const char* endpoint = std::getenv("KAIRO_AI_ENDPOINT");
+            endpoint != nullptr && *endpoint != '\0')
+            config.Endpoint = endpoint;
+        return { std::make_shared<kairo::ai::OpenAICompatibleProvider>(
+            std::move(config), std::make_shared<kairo::ai::CprChatTransport>()), model };
+#else
+        return {};
+#endif
+    }
+
     struct AppOptions final
     {
         std::filesystem::path Project;
@@ -180,8 +210,9 @@ int main(int argc, char** argv)
             std::cerr << "KairoEditor keymap settings warning: " << error.what()
                 << " Using the Kairo profile.\n";
         }
+        AIHost ai = CreateAIHost();
         kairo::editor::EditorShell shell(state, project, layoutPlan.ShouldRebuild(),
-            keymapProfile, keymapSettings);
+            keymapProfile, keymapSettings, std::move(ai.Provider), std::move(ai.Model));
         if (recovered.has_value()) shell.RestoreRecoveryDrafts(*recovered);
         if (options.ViewportShading.has_value()) shell.SetViewportShading(*options.ViewportShading);
         if (options.AuthoringSurface.has_value()) state.SetAuthoringSurface(*options.AuthoringSurface);

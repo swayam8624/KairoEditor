@@ -206,9 +206,29 @@ empty entity, and delete an entity subtree. `AIEditorSession` owns the
 provider-neutral Ask/Plan/Agent conversation above that command boundary. It
 constructs bounded project context, runs one cancellable request on an owned
 worker, copies streamed text through a locked mailbox, and returns tool previews
-to the editor thread. This is intentionally not presented as a chat panel yet;
-the native dock and optional cloud-provider configuration are separate UI/host
-integration batches.
+to the editor thread.
+
+The native `Kairo AI` dock exposes Ask, Plan, and Agent modes, streamed text,
+cancellation, and explicit mutation approval/rejection. The core editor remains
+credential-free by default. Enable the optional host adapter and provide secrets
+only through its process environment:
+
+```bash
+cmake -S . -B build-ai-cloud -G Ninja \
+  -DCMAKE_CXX_COMPILER=/opt/homebrew/opt/llvm/bin/clang++ \
+  -DKAIRO_EDITOR_BUILD_AI_CLOUD_PROVIDER=ON
+cmake --build build-ai-cloud --target KairoEditorApp
+
+KAIRO_AI_API_KEY='...' \
+KAIRO_AI_MODEL='your-openai-compatible-model' \
+./build-ai-cloud/KairoEditorApp \
+  --project examples/StarterProject/Project.kproject
+```
+
+`KAIRO_AI_ENDPOINT` may override the default HTTPS Chat Completions endpoint.
+Remote plaintext HTTP is rejected; loopback HTTP remains available for a local
+development provider. Keys are passed only to the transport constructor and are
+never stored in `.kproject`, scene, recovery, layout, or editor log files.
 
 Every call is parsed and fully previewed before execution. Unknown fields are
 rejected, persistent entity IDs are range-checked, and mutations pass through

@@ -6,6 +6,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 option(KAIRO_EDITOR_BUILD_TESTS "Build KairoEditor tests" ${PROJECT_IS_TOP_LEVEL})
 option(KAIRO_EDITOR_BUILD_APP "Build the Vulkan Dear ImGui editor application" ${PROJECT_IS_TOP_LEVEL})
+option(KAIRO_EDITOR_BUILD_AI_CLOUD_PROVIDER "Build the optional cloud provider for the editor host" OFF)
 set(KAIRO_EDITOR_UI_FONT_PATH "" CACHE FILEPATH "Optional UI TTF font for the native editor")
 set(KAIRO_EDITOR_MONO_FONT_PATH "" CACHE FILEPATH "Optional monospace TTF font for the native editor")
 
@@ -13,7 +14,7 @@ set(KAIRO_EDITOR_MONO_FONT_PATH "" CACHE FILEPATH "Optional monospace TTF font f
 # checkouts still take precedence for active workspace development.
 set(KAIRO_EDITOR_CORE_REVISION 10db0f120c158e3a34c4897c7eec4e519bf81cd2)
 set(KAIRO_EDITOR_RENDERER_REVISION d59d0c7293e379e64e8f9aef198ca302fa87558b)
-set(KAIRO_EDITOR_AI_REVISION d0e193d5d7318bc20d8893996a76cb4c15b17fc0)
+set(KAIRO_EDITOR_AI_REVISION 4de1a0c00830c3da92d2d6cc718d7ed27ff40d3a)
 set(KAIRO_EDITOR_JSON_REVISION 65ee68451d8eb2b5f3a30b410476ab83deb3289b)
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
@@ -21,6 +22,7 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
 endif()
 
 if(NOT TARGET KairoAI)
+    set(KAIRO_AI_BUILD_CLOUD_PROVIDER ${KAIRO_EDITOR_BUILD_AI_CLOUD_PROVIDER} CACHE BOOL "" FORCE)
     set(KAIRO_AI_SOURCE_DIR "" CACHE PATH "Path to a local KairoAI checkout")
     if(KAIRO_AI_SOURCE_DIR AND EXISTS "${KAIRO_AI_SOURCE_DIR}/CMakeLists.txt")
         add_subdirectory("${KAIRO_AI_SOURCE_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/_deps/KairoAI")
@@ -159,6 +161,10 @@ if(KAIRO_EDITOR_BUILD_APP)
 
     add_executable(KairoEditorApp examples/editor_main.cpp)
     target_link_libraries(KairoEditorApp PRIVATE KairoEditorImGui KairoEditorRendererBridge)
+    if(TARGET KairoAICloud)
+        target_link_libraries(KairoEditorApp PRIVATE KairoAICloud)
+        target_compile_definitions(KairoEditorApp PRIVATE KAIRO_EDITOR_HAS_AI_CLOUD=1)
+    endif()
 endif()
 
 if(KAIRO_EDITOR_BUILD_TESTS)

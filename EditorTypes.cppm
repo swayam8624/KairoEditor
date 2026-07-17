@@ -40,6 +40,7 @@ export namespace kairo::editor
         RendererDebug,
         WorldTools,
         Sequencer,
+        AIAssistant,
         Count
     };
 
@@ -61,6 +62,7 @@ export namespace kairo::editor
         case Panel::RendererDebug: return "Renderer Debug";
         case Panel::WorldTools: return "World Tools";
         case Panel::Sequencer: return "Sequencer";
+        case Panel::AIAssistant: return "Kairo AI";
         case Panel::Count: break;
         }
         return "Unknown";

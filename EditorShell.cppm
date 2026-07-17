@@ -23,6 +23,7 @@ module;
 export module Kairo.Editor.ImGuiShell;
 
 import Kairo.Editor;
+import Kairo.AI;
 import Kairo.Editor.ImGuiGraphCanvas;
 import Kairo.Editor.TransformGizmo;
 import Kairo.Editor.ImGuiReflectionInspector;
@@ -45,11 +46,17 @@ export namespace kairo::editor
     public:
         EditorShell(EditorState& state, ProjectSession& project, bool rebuildLayout = true,
             KeymapProfile keymapProfile = KeymapProfile::Kairo,
-            std::filesystem::path keymapSettingsPath = {})
+            std::filesystem::path keymapSettingsPath = {},
+            std::shared_ptr<kairo::ai::Provider> aiProvider = {}, std::string aiModel = {})
             : m_State(state), m_Project(project), m_GraphCanvas(m_Schemas),
               m_InputRouter(keymapProfile), m_RebuildLayout(rebuildLayout),
               m_KeymapSettingsPath(std::move(keymapSettingsPath))
         {
+            if (static_cast<bool>(aiProvider) != !aiModel.empty())
+                throw std::invalid_argument("AI editor provider and model must be configured together.");
+            if (aiProvider)
+                m_AISession = std::make_unique<AIEditorSession>(
+                    m_Project, m_History, std::move(aiProvider), std::move(aiModel));
             kairo::engine::RegisterEngineCoreReflection(m_Reflection);
             m_NextAutosave = std::chrono::steady_clock::now() + AutosaveInterval;
             if (const auto active = m_Project.Documents().ActiveID(); active.has_value())
@@ -66,6 +73,7 @@ export namespace kairo::editor
             m_State.ValidateSelection();
             m_GraphCanvas.BeginFrame();
             RunAutosaveIfDue();
+            if (m_AISession) (void)m_AISession->Poll();
             DrawMainBar();
             DrawStatusBar();
             const ImGuiID dockspace = ImGui::GetID("KairoEditorDockspace");
@@ -164,6 +172,7 @@ export namespace kairo::editor
         ViewportController m_ViewportController;
         PhysicsPreview m_PhysicsPreview;
         std::optional<kairo::engine::Scene> m_RuntimeScene;
+        std::unique_ptr<AIEditorSession> m_AISession;
         EditorAction m_ActiveTool = EditorAction::SelectTool;
         bool m_ViewportFocused = false;
         bool m_ShowPhysicsBroadphase = false;
@@ -174,6 +183,7 @@ export namespace kairo::editor
         std::array<char, 256> m_AssetFilter{};
         std::array<char, 256> m_NewDocumentName{};
         std::array<char, 512> m_NewDocumentPath{};
+        std::array<char, 4096> m_AIPrompt{};
         int m_NewDocumentKind = 0;
         bool m_RequestNewDocumentPopup = false;
         bool m_RequestCloseDocumentPopup = false;
@@ -354,6 +364,7 @@ export namespace kairo::editor
             ImGui::DockBuilderDockWindow("Content Browser", left);
             ImGui::DockBuilderDockWindow("Inspector", right);
             ImGui::DockBuilderDockWindow("Statistics", right);
+            ImGui::DockBuilderDockWindow("Kairo AI", right);
             ImGui::DockBuilderDockWindow("Console", bottom);
             ImGui::DockBuilderDockWindow("Timeline", bottom);
             ImGui::DockBuilderDockWindow("Code", bottom);
@@ -911,8 +922,94 @@ export namespace kairo::editor
             else if (panel == Panel::Console) ImGui::TextDisabled("No engine messages.");
             else if (panel == Panel::PhysicsDebug) DrawPhysicsDebug();
             else if (panel == Panel::ContentBrowser) DrawContentBrowser();
+            else if (panel == Panel::AIAssistant) DrawAIAssistant();
             else ImGui::TextDisabled("No active document for this workspace.");
             ImGui::End();
+        }
+
+        void DrawAIAssistant()
+        {
+            if (!m_AISession)
+            {
+                ImGui::TextDisabled("AI provider unavailable");
+                ImGui::TextWrapped("Enable the AI cloud provider build option and set "
+                    "KAIRO_AI_API_KEY plus KAIRO_AI_MODEL in the editor process environment.");
+                return;
+            }
+
+            const auto drawMode = [this](const char* label, kairo::ai::InteractionMode mode)
+            {
+                const bool active = m_AISession->Mode() == mode;
+                if (active) ImGui::BeginDisabled();
+                if (ImGui::Button(label) && !m_AISession->Busy())
+                    RunCommand([this, mode] { m_AISession->SetMode(mode); });
+                if (active) ImGui::EndDisabled();
+            };
+            drawMode("Ask", kairo::ai::InteractionMode::Ask);
+            ImGui::SameLine();
+            drawMode("Plan", kairo::ai::InteractionMode::Plan);
+            ImGui::SameLine();
+            drawMode("Agent", kairo::ai::InteractionMode::Agent);
+
+            const float composerHeight = 112.0f;
+            if (ImGui::BeginChild("##AIConversation", { 0.0f,
+                std::max(80.0f, ImGui::GetContentRegionAvail().y - composerHeight) },
+                ImGuiChildFlags_Borders))
+            {
+                for (const AIConversationEntry& entry : m_AISession->Conversation())
+                {
+                    ImGui::TextDisabled("%s", entry.Role == kairo::ai::MessageRole::User
+                        ? "You" : "Kairo AI");
+                    ImGui::TextWrapped("%s", entry.Text.c_str());
+                    ImGui::Spacing();
+                }
+                if (m_AISession->Busy())
+                {
+                    const std::string streamed = m_AISession->StreamedText();
+                    ImGui::TextDisabled("Kairo AI");
+                    if (streamed.empty()) ImGui::TextDisabled("Working...");
+                    else ImGui::TextWrapped("%s", streamed.c_str());
+                }
+                for (const AIPendingEditorCall& pending : m_AISession->PendingCalls())
+                {
+                    ImGui::PushID(pending.Call.ID.c_str());
+                    ImGui::SeparatorText(pending.Call.Name.c_str());
+                    ImGui::TextWrapped("%s", pending.Preview.Summary.c_str());
+                    if (!pending.Resolved)
+                    {
+                        if (ActionButton("Approve", UIButtonTone::Primary))
+                            RunCommand([this, id = pending.Call.ID] { (void)m_AISession->Approve(id); });
+                        ImGui::SameLine();
+                        if (ActionButton("Reject", UIButtonTone::Destructive))
+                            RunCommand([this, id = pending.Call.ID] { (void)m_AISession->Reject(id); });
+                    }
+                    else ImGui::TextDisabled("%s", pending.Result.c_str());
+                    ImGui::PopID();
+                }
+                if (!m_AISession->LastError().empty())
+                {
+                    ImGui::Separator();
+                    ImGui::TextWrapped("%s", m_AISession->LastError().data());
+                }
+            }
+            ImGui::EndChild();
+
+            ImGui::InputTextMultiline("##AIPrompt", m_AIPrompt.data(), m_AIPrompt.size(),
+                { -1.0f, 58.0f });
+            const bool canSend = !m_AISession->Busy() && m_AIPrompt[0] != '\0';
+            if (!canSend) ImGui::BeginDisabled();
+            if (ActionButton("Send", UIButtonTone::Primary))
+            {
+                const std::string prompt(m_AIPrompt.data());
+                RunCommand([this, prompt] { m_AISession->Submit(prompt); });
+                m_AIPrompt.fill('\0');
+            }
+            if (!canSend) ImGui::EndDisabled();
+            if (m_AISession->Busy())
+            {
+                ImGui::SameLine();
+                if (ActionButton("Cancel", UIButtonTone::Destructive)) m_AISession->Cancel();
+            }
         }
 
         void DrawPhysicsDebug()
