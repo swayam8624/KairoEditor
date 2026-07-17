@@ -105,6 +105,11 @@ build-profile "Development" development "Build/Development"
 build-profile "Release" release "Build/Release"
 ```
 
+The referenced `.kinput` file is the shared EngineCore gameplay-action format,
+not an editor shortcut profile. Editor keymaps remain user-specific tool
+settings; project input actions are portable runtime data consumed identically
+by KairoPlayer, visual logic, and C++ gameplay.
+
 Format 2 additionally accepts repeatable `plugin` statements. Format 1 remains
 readable and receives deterministic engine, input, rendering, and build-profile
 defaults in memory; the migration reaches disk only through an explicit project

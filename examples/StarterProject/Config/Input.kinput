@@ -1,0 +1,16 @@
+kairo-input 1
+action "Move" axis2d
+action "Look" axis2d
+action "Jump" button
+action "Quit" button
+bind "Move" key W 0 1 0
+bind "Move" key S 0 -1 0
+bind "Move" key A -1 0 0
+bind "Move" key D 1 0 0
+bind "Move" gamepad-axis LeftX 1 0 0.15
+bind "Move" gamepad-axis LeftY 0 -1 0.15
+bind "Look" gamepad-axis RightX 1 0 0.15
+bind "Look" gamepad-axis RightY 0 -1 0.15
+bind "Jump" key Space 1 0 0
+bind "Jump" gamepad-button A 1 0 0
+bind "Quit" key Escape 1 0 0
