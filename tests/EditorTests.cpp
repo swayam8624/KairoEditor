@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
@@ -10,6 +11,7 @@
 #include <string>
 #include <string_view>
 #include <type_traits>
+#include <thread>
 #include <vector>
 
 import Kairo.Editor;
@@ -1211,6 +1213,52 @@ TEST_CASE("AI editor tools preview approve audit and undo scene mutations", "[Ka
     CHECK(tools.Audit()[2].Invoked);
     REQUIRE_THROWS_AS(tools.Preview({ "bad-1", "scene.create_entity",
         R"({"name":"Cube","untrusted_approval":true})" }), std::invalid_argument);
+    std::filesystem::remove_all(root);
+}
+
+TEST_CASE("AI editor session streams then resolves tools only on the editor thread",
+    "[KairoEditor][AI][Session]")
+{
+    const auto root = std::filesystem::temp_directory_path() /
+        ("kairo-ai-session-" + kairo::assets::GenerateAssetID().ToString());
+    ProjectSession project;
+    project.CreateProject(root, "AI Session Project");
+    CommandHistory history;
+    auto provider = std::make_shared<kairo::ai::MockProvider>(
+        std::vector<kairo::ai::StreamEvent>{
+            kairo::ai::StreamEvent::Delta("I can add the requested entity."),
+            kairo::ai::StreamEvent::Call({ "read-1", "project.list_entities", "{}" }),
+            kairo::ai::StreamEvent::Call({ "create-1", "scene.create_entity",
+                R"({"name":"Generated Cube"})" })
+        }, std::chrono::milliseconds(1));
+    AIEditorSession session(project, history, provider, "deterministic-test-model");
+    session.SetMode(kairo::ai::InteractionMode::Agent);
+    session.Submit("Create one entity named Generated Cube.");
+
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (!session.Poll() && std::chrono::steady_clock::now() < deadline)
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+
+    CHECK_FALSE(session.Busy());
+    CHECK(session.LastError().empty());
+    REQUIRE(session.Conversation().size() == 2u);
+    CHECK(session.Conversation()[1].Text == "I can add the requested entity.");
+    CHECK(session.StreamedText() == session.Conversation()[1].Text);
+    REQUIRE(session.PendingCalls().size() == 2u);
+    CHECK(session.PendingCalls()[0].Resolved);
+    CHECK(session.PendingCalls()[0].Approved);
+    CHECK(session.PendingCalls()[0].Result == "[]");
+    CHECK_FALSE(session.PendingCalls()[1].Resolved);
+    CHECK(project.Scene().Entities().empty());
+
+    const auto& approved = session.Approve("create-1");
+    CHECK(approved.Resolved);
+    CHECK(approved.Approved);
+    REQUIRE(project.Scene().Entities().size() == 1u);
+    CHECK(project.Scene().Name(project.Scene().Entities().front()).Value == "Generated Cube");
+    history.Undo();
+    CHECK(project.Scene().Entities().empty());
+    REQUIRE_THROWS_AS(session.Approve("create-1"), std::logic_error);
     std::filesystem::remove_all(root);
 }
 

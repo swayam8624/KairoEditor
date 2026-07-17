@@ -201,10 +201,14 @@ opens one project for its process lifetime.
 
 ## AI command boundary
 
-`AIEditorTools` is the backend for future Ask, Plan, and Agent UI surfaces. It
-currently exposes three strict JSON tools: read the entity list, create an empty
-entity, and delete an entity subtree. This is intentionally not presented as a
-chat panel or cloud integration yet.
+`AIEditorTools` exposes three strict JSON tools: read the entity list, create an
+empty entity, and delete an entity subtree. `AIEditorSession` owns the
+provider-neutral Ask/Plan/Agent conversation above that command boundary. It
+constructs bounded project context, runs one cancellable request on an owned
+worker, copies streamed text through a locked mailbox, and returns tool previews
+to the editor thread. This is intentionally not presented as a chat panel yet;
+the native dock and optional cloud-provider configuration are separate UI/host
+integration batches.
 
 Every call is parsed and fully previewed before execution. Unknown fields are
 rejected, persistent entity IDs are range-checked, and mutations pass through
@@ -213,6 +217,9 @@ KairoAI's exact-call approval policy. Approved changes execute through the same
 manual editor, so they remain dirty-state aware and undoable. The bridge records
 both rejected and executed calls in a process-local audit trail. Model output
 is never treated as approval, and credential access is not an editor tool.
+Read-only calls may resolve immediately under policy. Scene mutations remain in
+a pending queue until the host supplies an exact out-of-band approval; rejection
+and duplicate-resolution paths are explicit and tested.
 
 ## Typed document foundation
 

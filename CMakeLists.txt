@@ -69,7 +69,7 @@ target_sources(KairoEditor PUBLIC FILE_SET CXX_MODULES BASE_DIRS ${CMAKE_CURRENT
     DocumentCompiler.cppm LogicDocumentCompiler.cppm ProjectLogicBuild.cppm ProjectDocuments.cppm GraphCanvas.cppm DocumentProjection.cppm
     AuthoringWorkspaceState.cppm
     ProjectDescriptor.cppm ProjectRecovery.cppm ProjectSession.cppm CommandHistory.cppm EditorActions.cppm EditorInputRouter.cppm KeymapSettings.cppm EditorLayoutRecovery.cppm ViewportController.cppm PrimitiveTypes.cppm SceneCommands.cppm
-    AIEditorTools.cppm EditorState.cppm PanelState.cppm KairoEditor.cppm)
+    AIEditorTools.cppm AIEditorSession.cppm EditorState.cppm PanelState.cppm KairoEditor.cppm)
 target_link_libraries(KairoEditor PUBLIC KairoEngineCore KairoAI nlohmann_json::nlohmann_json)
 
 add_executable(KairoProjectCompiler examples/project_compiler_main.cpp)
