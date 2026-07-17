@@ -189,7 +189,7 @@ TEST_CASE("Core document schemas cover every authoring domain with valid contrac
     "[KairoEditor][Document][Schema]")
 {
     const DocumentSchemaRegistry registry = CreateCoreDocumentSchemaRegistry();
-    CHECK(registry.Size() == 24u);
+    CHECK(registry.Size() == 27u);
 
     for (const DocumentKind kind : { DocumentKind::Logic, DocumentKind::Material,
         DocumentKind::Audio, DocumentKind::AnimationState, DocumentKind::Simulation })

@@ -9,6 +9,7 @@
 
 import Kairo.Editor;
 import Kairo.EngineCore;
+import Kairo.Foundation.Math;
 
 using namespace kairo::editor;
 
@@ -97,6 +98,107 @@ namespace
             if (diagnostic.Code == code) return true;
         return false;
     }
+
+    [[nodiscard]] const DocumentPin& Pin(const AuthoringDocument& document,
+        NodeID node, std::string_view key)
+    {
+        for (const DocumentPin& pin : document.Node(node).Pins)
+            if (pin.Key == key) return pin;
+        throw std::logic_error("test node is missing expected pin");
+    }
+
+    class RuntimeHost final : public kairo::engine::LogicHost
+    {
+    public:
+        std::vector<std::string> Messages;
+        kairo::engine::Entity Positioned;
+        kairo::engine::Entity Impulsed;
+        kairo::foundation::math::Vec3d Position;
+        kairo::foundation::math::Vec3d Impulse;
+        void Print(kairo::engine::Entity, std::string_view message) override
+        { Messages.emplace_back(message); }
+        void SetEntityPosition(kairo::engine::Entity entity,
+            const kairo::foundation::math::Vec3d& value) override
+        { Positioned = entity; Position = value; }
+        void ApplyEntityImpulse(kairo::engine::Entity entity,
+            const kairo::foundation::math::Vec3d& value) override
+        { Impulsed = entity; Impulse = value; }
+    };
+
+    void TestCoreLogicCompiler()
+    {
+        const auto schemas = CreateCoreDocumentSchemaRegistry();
+        const auto id = kairo::assets::AssetID::Parse("00000000-0000-4000-8000-000000000777");
+        AuthoringDocument document(id, DocumentKind::Logic, "Runtime Logic");
+        const NodeID begin = document.AddNode(schemas.Require("kairo.logic.event-begin-play"));
+        const NodeID setPosition = document.AddNode(schemas.Require("kairo.logic.set-position"));
+        const NodeID print = document.AddNode(schemas.Require("kairo.logic.print"));
+        const NodeID input = document.AddNode(schemas.Require("kairo.logic.input-action"));
+        const NodeID branch = document.AddNode(schemas.Require("kairo.logic.branch"));
+        const NodeID impulse = document.AddNode(schemas.Require("kairo.logic.apply-impulse"));
+        const NodeID entity = document.AddNode(schemas.Require("kairo.logic.entity-reference"));
+        const NodeID position = document.AddNode(schemas.Require("kairo.logic.vector3"));
+        const NodeID impulseValue = document.AddNode(schemas.Require("kairo.logic.vector3"));
+        document.SetPinDefault(Pin(document, print, "message").ID, DocumentValue(std::string("Ready")));
+        document.SetProperty(input, "action", DocumentValue(std::string("Jump")));
+        document.SetPinDefault(Pin(document, branch, "condition").ID, DocumentValue(true));
+        document.SetProperty(entity, "entity", DocumentValue(kairo::engine::Entity{ 7u }));
+        document.SetProperty(position, "value", DocumentValue(kairo::foundation::math::Vec3d{ 1.0, 2.0, 3.0 }));
+        document.SetProperty(impulseValue, "value", DocumentValue(kairo::foundation::math::Vec3d{ 0.0, 5.0, 0.0 }));
+
+        const auto connect = [&](NodeID from, std::string_view output, NodeID to, std::string_view inputKey)
+        { document.Connect(Pin(document, from, output).ID, Pin(document, to, inputKey).ID); };
+        connect(begin, "then", setPosition, "in");
+        connect(entity, "entity", setPosition, "entity");
+        connect(position, "value", setPosition, "position");
+        connect(setPosition, "then", print, "in");
+        connect(input, "pressed", branch, "in");
+        connect(branch, "true", impulse, "in");
+        connect(entity, "entity", impulse, "entity");
+        connect(impulseValue, "value", impulse, "impulse");
+
+        LogicDocumentCompiler compiler;
+        const DocumentCompileResult first = CompileDocument(document, schemas, compiler);
+        const DocumentCompileResult second = CompileDocument(document, schemas, compiler);
+        Expect(first.Succeeded(), "core logic graph must compile into runtime bytecode");
+        Expect(second.Succeeded(), "repeated core logic compilation must succeed");
+        if (!first.Artifact || !second.Artifact) return;
+        Expect(first.Artifact->Payload == second.Artifact->Payload,
+            "logic compilation must be byte-for-byte deterministic");
+        const kairo::engine::LogicProgram program =
+            kairo::engine::ParseLogicProgram(first.Artifact->Payload);
+        RuntimeHost host;
+        kairo::engine::LogicInstance instance(program);
+        (void)instance.Dispatch({ 99u }, { .Event = kairo::engine::LogicEventKind::BeginPlay,
+            .Action = {}, .DeltaSeconds = 0.0, .ActionValue = 0.0, .OtherEntity = {} }, host);
+        Expect(host.Messages == std::vector<std::string>{ "Ready" },
+            "compiled Begin Play flow must invoke Print");
+        Expect(host.Positioned == kairo::engine::Entity{ 7u } &&
+            host.Position == kairo::foundation::math::Vec3d{ 1.0, 2.0, 3.0 },
+            "compiled transform flow must preserve typed constants");
+        (void)instance.Dispatch({ 99u }, { .Event = kairo::engine::LogicEventKind::InputPressed,
+            .Action = "Jump", .DeltaSeconds = 0.0, .ActionValue = 1.0, .OtherEntity = {} }, host);
+        Expect(host.Impulsed == kairo::engine::Entity{ 7u } &&
+            host.Impulse == kairo::foundation::math::Vec3d{ 0.0, 5.0, 0.0 },
+            "compiled input and branch flow must invoke the physics host");
+    }
+
+    void TestCoreLogicCompilerRejectsCycles()
+    {
+        const auto schemas = CreateCoreDocumentSchemaRegistry();
+        const auto id = kairo::assets::AssetID::Parse("00000000-0000-4000-8000-000000000778");
+        AuthoringDocument document(id, DocumentKind::Logic, "Cycle");
+        const NodeID begin = document.AddNode(schemas.Require("kairo.logic.event-begin-play"));
+        const NodeID first = document.AddNode(schemas.Require("kairo.logic.print"));
+        const NodeID second = document.AddNode(schemas.Require("kairo.logic.print"));
+        (void)begin;
+        document.Connect(Pin(document, first, "then").ID, Pin(document, second, "in").ID);
+        document.Connect(Pin(document, second, "then").ID, Pin(document, first, "in").ID);
+        LogicDocumentCompiler compiler;
+        const auto result = CompileDocument(document, schemas, compiler);
+        Expect(!result.Succeeded() && HasDiagnosticCode(result.Diagnostics, "flow-cycle"),
+            "flow cycles must fail with a stable compiler diagnostic");
+    }
     void TestSuccessfulCompilation()
     {
         CompilerGraphFixture fixture;
@@ -172,6 +274,8 @@ int main()
     TestSuccessfulCompilation();
     TestRejectedInputs();
     TestBackendFailures();
+    TestCoreLogicCompiler();
+    TestCoreLogicCompilerRejectsCycles();
 
     if (FailureCount == 0)
     {

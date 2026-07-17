@@ -9,6 +9,7 @@ export module Kairo.Editor.CoreDocumentSchemas;
 
 import Kairo.Editor.DocumentSchema;
 import Kairo.Editor.DocumentTypes;
+import Kairo.EngineCore.Entity;
 import Kairo.Foundation.Math;
 
 export namespace kairo::editor
@@ -84,6 +85,17 @@ export namespace kairo::editor
         };
         registry.Register(std::move(addFloat));
 
+        NodeSchema entityReference = Node(DocumentKind::Logic, "kairo.logic.entity-reference",
+            "Scene Entity", "Values");
+        entityReference.Pins = { Output("entity", "Entity", ValueType::Entity) };
+        entityReference.PropertyDefaults.emplace("entity", DocumentValue(kairo::engine::Entity{ 1u }));
+        registry.Register(std::move(entityReference));
+
+        NodeSchema vector3 = Node(DocumentKind::Logic, "kairo.logic.vector3", "Vector 3", "Values");
+        vector3.Pins = { Output("value", "Value", ValueType::Vector3) };
+        vector3.PropertyDefaults.emplace("value", DocumentValue(Vec3d{}));
+        registry.Register(std::move(vector3));
+
         NodeSchema print = Node(DocumentKind::Logic, "kairo.logic.print", "Print", "Debug");
         print.Pins = {
             FlowInput("in", "In"),
@@ -106,6 +118,14 @@ export namespace kairo::editor
         setPosition.Pins = { FlowInput("in", "In"), RequiredInput("entity", "Entity", ValueType::Entity),
             RequiredInput("position", "Position", ValueType::Vector3), Output("then", "Then", ValueType::Flow) };
         registry.Register(std::move(setPosition));
+
+        NodeSchema applyImpulse = Node(DocumentKind::Logic, "kairo.logic.apply-impulse",
+            "Apply Impulse", "Physics");
+        applyImpulse.Pins = { FlowInput("in", "In"),
+            RequiredInput("entity", "Entity", ValueType::Entity),
+            RequiredInput("impulse", "Impulse", ValueType::Vector3),
+            Output("then", "Then", ValueType::Flow) };
+        registry.Register(std::move(applyImpulse));
 
         NodeSchema spawnEntity = Node(DocumentKind::Logic, "kairo.logic.spawn-entity", "Spawn Entity", "World");
         spawnEntity.Pins = { FlowInput("in", "In"), RequiredInput("prefab", "Prefab", ValueType::Asset),

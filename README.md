@@ -224,11 +224,13 @@ parsing is bounded and line/column located, and saves replace the destination
 atomically. This makes missing schemas a validation diagnostic instead of a
 data-loss event.
 
-The shipped core catalog contributes 24 validated contracts across logic,
+The shipped core catalog contributes 27 validated contracts across logic,
 material, audio, animation-state, and simulation documents. Registry search is
 bounded, tokenized, ASCII case-insensitive, and deterministically relevance
-ordered. These contracts define authored data shape; each domain compiler still
-owns runtime meaning rather than letting the editor emulate execution.
+ordered. Scene Entity and Vector 3 value nodes feed typed transform and physics
+actions without conflating scene-local entity IDs with persistent asset IDs.
+These contracts define authored data shape; each domain compiler owns runtime
+meaning rather than letting the editor emulate execution.
 
 Document changes now use the same bounded `CommandHistory` as hierarchy and
 Inspector edits. Node create/delete, edge connect/disconnect, movement,
@@ -242,6 +244,14 @@ simulation semantics remain separate compiler implementations. Backend target,
 diagnostic references, diagnostic text, and artifact size are validated before
 an identity-bearing artifact can enter build or play; failures remain editor
 diagnostics rather than partially published output.
+
+`LogicDocumentCompiler` is the first concrete backend. It deterministically
+lowers Begin Play, Tick, Input Action, Branch, Add Float, Print, Set Position,
+and Apply Impulse graphs to EngineCore's bounded `kairo.logic.bytecode-v1`
+format. It rejects flow/data cycles, missing runtime inputs, dynamic strings,
+and nodes without executable semantics with node/pin-local diagnostics. The
+runtime consumes only the validated bytecode: it never links editor code or
+parses mutable `.kdoc` authoring data.
 
 `ProjectDocuments` owns multiple open `.kdoc` files against one canonical
 project root. It enforces persistent-ID and portable case-insensitive path
