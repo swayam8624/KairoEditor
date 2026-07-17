@@ -11,7 +11,7 @@ set(KAIRO_EDITOR_MONO_FONT_PATH "" CACHE FILEPATH "Optional monospace TTF font f
 
 # Immutable standalone fallback revisions. Local source directories and sibling
 # checkouts still take precedence for active workspace development.
-set(KAIRO_EDITOR_CORE_REVISION 6eece9fdd50bd8f61c37156ce5b06b1a338e3327)
+set(KAIRO_EDITOR_CORE_REVISION 10db0f120c158e3a34c4897c7eec4e519bf81cd2)
 set(KAIRO_EDITOR_RENDERER_REVISION d59d0c7293e379e64e8f9aef198ca302fa87558b)
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
@@ -39,11 +39,14 @@ target_sources(KairoEditor PUBLIC FILE_SET CXX_MODULES BASE_DIRS ${CMAKE_CURRENT
     EditorTypes.cppm TextValidation.cppm TextFormat.cppm ProjectPaths.cppm DocumentTypes.cppm DocumentSchema.cppm
     CoreDocumentSchemas.cppm
     AuthoringDocument.cppm DocumentValidation.cppm DocumentSerialization.cppm DocumentCommands.cppm
-    DocumentCompiler.cppm LogicDocumentCompiler.cppm ProjectDocuments.cppm GraphCanvas.cppm DocumentProjection.cppm
+    DocumentCompiler.cppm LogicDocumentCompiler.cppm ProjectLogicBuild.cppm ProjectDocuments.cppm GraphCanvas.cppm DocumentProjection.cppm
     AuthoringWorkspaceState.cppm
     ProjectDescriptor.cppm ProjectRecovery.cppm ProjectSession.cppm CommandHistory.cppm EditorActions.cppm EditorInputRouter.cppm KeymapSettings.cppm EditorLayoutRecovery.cppm ViewportController.cppm PrimitiveTypes.cppm SceneCommands.cppm
     EditorState.cppm PanelState.cppm KairoEditor.cppm)
 target_link_libraries(KairoEditor PUBLIC KairoEngineCore)
+
+add_executable(KairoProjectCompiler examples/project_compiler_main.cpp)
+target_link_libraries(KairoProjectCompiler PRIVATE KairoEditor)
 
 if(KAIRO_EDITOR_BUILD_APP)
     # Physics preview consumes KairoRenderer's optional debug bridge. Make the

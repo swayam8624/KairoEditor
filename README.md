@@ -253,6 +253,14 @@ and nodes without executable semantics with node/pin-local diagnostics. The
 runtime consumes only the validated bytecode: it never links editor code or
 parses mutable `.kdoc` authoring data.
 
+Saving and building are intentionally separate. Authors can save incomplete or
+temporarily invalid graphs. `KairoProjectCompiler` resolves only the unique
+logic documents attached to startup-scene entities, compiles all of them before
+publishing any result, and writes atomic source-bound artifacts under
+`.kairo/compiled-logic/<document-id>.klogic`. Each artifact records the source
+asset ID and SHA-256 of the exact saved `.kdoc`; KairoPlayer rejects missing,
+foreign, or stale output instead of executing old gameplay.
+
 `ProjectDocuments` owns multiple open `.kdoc` files against one canonical
 project root. It enforces persistent-ID and portable case-insensitive path
 uniqueness, bounded tab counts, explicit dirty state, validated reopen,
@@ -335,6 +343,7 @@ KairoUI implementation can share identical conflict and tab-switch behavior.
 cmake -S . -B build -G Ninja -DCMAKE_CXX_COMPILER=/opt/homebrew/opt/llvm/bin/clang++
 cmake --build build
 ctest --test-dir build --output-on-failure
+./build/KairoProjectCompiler examples/StarterProject/Project.kproject
 ./build/KairoEditorApp \
   --project examples/StarterProject/Project.kproject \
   --document Logic/Player.kdoc \
@@ -347,6 +356,8 @@ From the game-engine superproject:
 cd /Users/swayamsingal/Desktop/Programming/Kairo
 cmake --preset dev-clang
 cmake --build --preset dev-clang --parallel
+./build/dev-clang/KairoEditor/KairoProjectCompiler \
+  "$PWD/KairoEditor/examples/StarterProject/Project.kproject"
 ./build/dev-clang/KairoEditor/KairoEditorApp \
   --project "$PWD/KairoEditor/examples/StarterProject/Project.kproject" \
   --document Logic/Player.kdoc --authoring split

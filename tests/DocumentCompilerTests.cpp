@@ -1,5 +1,7 @@
 #include <cstddef>
 #include <cstdint>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <optional>
 #include <stdexcept>
@@ -199,6 +201,47 @@ namespace
         Expect(!result.Succeeded() && HasDiagnosticCode(result.Diagnostics, "flow-cycle"),
             "flow cycles must fail with a stable compiler diagnostic");
     }
+
+    void TestProjectLogicBuildPublishesSourceBoundArtifacts()
+    {
+        const auto root = std::filesystem::temp_directory_path() /
+            ("kairo-logic-build-" + kairo::assets::GenerateAssetID().ToString());
+        std::filesystem::create_directories(root / "Logic");
+        const auto id = kairo::assets::AssetID::Parse("00000000-0000-4000-8000-000000000779");
+        const auto schemas = CreateCoreDocumentSchemaRegistry();
+        AuthoringDocument document(id, DocumentKind::Logic, "Built Logic");
+        const NodeID begin = document.AddNode(schemas.Require("kairo.logic.event-begin-play"));
+        const NodeID print = document.AddNode(schemas.Require("kairo.logic.print"));
+        document.SetPinDefault(Pin(document, print, "message").ID,
+            DocumentValue(std::string("Published")));
+        document.Connect(Pin(document, begin, "then").ID, Pin(document, print, "in").ID);
+        const auto source = root / "Logic" / "Built.kdoc";
+        SaveDocument(source, document);
+
+        kairo::assets::AssetRegistry assets;
+        assets.Insert({ id, kairo::assets::AssetType::Document,
+            kairo::assets::AssetOrigin::SourceFile, "Logic/Built.kdoc",
+            "kairo.document-v1", 1u, {} });
+        kairo::engine::Scene scene;
+        const auto entity = scene.CreateEntity("Scripted");
+        scene.SetLogic(entity, { { id }, true });
+        const auto built = BuildAttachedLogicArtifacts(root, scene, assets);
+        Expect(built.size() == 1u && std::filesystem::is_regular_file(built.front().ArtifactPath),
+            "project logic build must atomically publish each attached graph");
+        if (!built.empty())
+        {
+            const auto artifact = kairo::engine::LoadCompiledLogicArtifact(built.front().ArtifactPath);
+            Expect(artifact.Source == id &&
+                artifact.SourceFingerprint == kairo::assets::FingerprintFile(source),
+                "published artifact must bind source identity and exact bytes");
+            std::ofstream changed(source, std::ios::app);
+            changed << '\n';
+            changed.close();
+            Expect(artifact.SourceFingerprint != kairo::assets::FingerprintFile(source),
+                "source edits must make a previously published artifact detectably stale");
+        }
+        std::filesystem::remove_all(root);
+    }
     void TestSuccessfulCompilation()
     {
         CompilerGraphFixture fixture;
@@ -276,6 +319,7 @@ int main()
     TestBackendFailures();
     TestCoreLogicCompiler();
     TestCoreLogicCompilerRejectsCycles();
+    TestProjectLogicBuildPublishesSourceBoundArtifacts();
 
     if (FailureCount == 0)
     {

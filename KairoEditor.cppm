@@ -12,6 +12,7 @@ export import Kairo.Editor.DocumentSerialization;
 export import Kairo.Editor.DocumentCommands;
 export import Kairo.Editor.DocumentCompiler;
 export import Kairo.Editor.LogicDocumentCompiler;
+export import Kairo.Editor.ProjectLogicBuild;
 export import Kairo.Editor.ProjectDocuments;
 export import Kairo.Editor.GraphCanvas;
 export import Kairo.Editor.DocumentProjection;
