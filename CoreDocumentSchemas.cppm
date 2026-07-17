@@ -103,14 +103,14 @@ export namespace kairo::editor
         registry.Register(std::move(inputAction));
 
         NodeSchema setPosition = Node(DocumentKind::Logic, "kairo.logic.set-position", "Set Position", "Transform");
-        setPosition.Pins = { FlowInput("in", "In"), RequiredInput("entity", "Entity", ValueType::Asset),
+        setPosition.Pins = { FlowInput("in", "In"), RequiredInput("entity", "Entity", ValueType::Entity),
             RequiredInput("position", "Position", ValueType::Vector3), Output("then", "Then", ValueType::Flow) };
         registry.Register(std::move(setPosition));
 
         NodeSchema spawnEntity = Node(DocumentKind::Logic, "kairo.logic.spawn-entity", "Spawn Entity", "World");
         spawnEntity.Pins = { FlowInput("in", "In"), RequiredInput("prefab", "Prefab", ValueType::Asset),
             DefaultedInput("position", "Position", ValueType::Vector3, DocumentValue(Vec3d{})),
-            Output("entity", "Entity", ValueType::Asset), Output("then", "Then", ValueType::Flow) };
+            Output("entity", "Entity", ValueType::Entity), Output("then", "Then", ValueType::Flow) };
         registry.Register(std::move(spawnEntity));
 
         NodeSchema color = Node(DocumentKind::Material, "kairo.material.constant-color",
@@ -200,24 +200,24 @@ export namespace kairo::editor
             "Apply Force", "Bodies");
         applyForce.Pins = {
             FlowInput("in", "In"),
-            RequiredInput("body", "Body", ValueType::Asset),
+            RequiredInput("body", "Body", ValueType::Entity),
             RequiredInput("force", "Force", ValueType::Vector3),
             Output("then", "Then", ValueType::Flow)
         };
         registry.Register(std::move(applyForce));
 
         NodeSchema impulse = Node(DocumentKind::Simulation, "kairo.simulation.apply-impulse", "Apply Impulse", "Bodies");
-        impulse.Pins = { FlowInput("in", "In"), RequiredInput("body", "Body", ValueType::Asset),
+        impulse.Pins = { FlowInput("in", "In"), RequiredInput("body", "Body", ValueType::Entity),
             RequiredInput("impulse", "Impulse", ValueType::Vector3), Output("then", "Then", ValueType::Flow) };
         registry.Register(std::move(impulse));
 
         NodeSchema setTrigger = Node(DocumentKind::Simulation, "kairo.simulation.set-trigger", "Set Trigger", "Collision");
-        setTrigger.Pins = { FlowInput("in", "In"), RequiredInput("collider", "Collider", ValueType::Asset),
+        setTrigger.Pins = { FlowInput("in", "In"), RequiredInput("collider", "Collider", ValueType::Entity),
             DefaultedInput("enabled", "Enabled", ValueType::Boolean, DocumentValue(true)), Output("then", "Then", ValueType::Flow) };
         registry.Register(std::move(setTrigger));
 
         NodeSchema collisionEvent = Node(DocumentKind::Simulation, "kairo.simulation.on-collision", "On Collision", "Collision");
-        collisionEvent.Pins = { Output("then", "Then", ValueType::Flow), Output("other", "Other", ValueType::Asset),
+        collisionEvent.Pins = { Output("then", "Then", ValueType::Flow), Output("other", "Other", ValueType::Entity),
             Output("normal", "Normal", ValueType::Vector3) };
         registry.Register(std::move(collisionEvent));
 

@@ -551,6 +551,7 @@ export namespace kairo::editor
                 case ValueType::Vector4: return IM_COL32(219, 184, 83, 255);
                 case ValueType::String: return IM_COL32(217, 114, 187, 255);
                 case ValueType::Asset: return IM_COL32(105, 151, 226, 255);
+                case ValueType::Entity: return IM_COL32(87, 190, 222, 255);
             }
             return IM_COL32(180, 180, 180, 255);
         }

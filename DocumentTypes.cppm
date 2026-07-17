@@ -15,6 +15,7 @@ module;
 export module Kairo.Editor.DocumentTypes;
 
 import Kairo.Assets;
+import Kairo.EngineCore.Entity;
 import Kairo.Editor.TextValidation;
 import Kairo.Foundation.Math;
 
@@ -50,7 +51,10 @@ export namespace kairo::editor
     enum class DocumentKind : std::uint8_t { Logic, Material, Audio, AnimationState, Simulation };
     enum class PinDirection : std::uint8_t { Input, Output };
     enum class PinCardinality : std::uint8_t { Single, Multiple };
-    enum class ValueType : std::uint8_t { Flow, Boolean, Integer, Float, Vector2, Vector3, Vector4, String, Asset };
+    enum class ValueType : std::uint8_t
+    {
+        Flow, Boolean, Integer, Float, Vector2, Vector3, Vector4, String, Asset, Entity
+    };
 
     [[nodiscard]] constexpr std::string_view Name(DocumentKind kind) noexcept
     {
@@ -78,6 +82,7 @@ export namespace kairo::editor
             case ValueType::Vector4: return "vec4";
             case ValueType::String: return "string";
             case ValueType::Asset: return "asset";
+            case ValueType::Entity: return "entity";
         }
         return "unknown";
     }
@@ -113,6 +118,7 @@ export namespace kairo::editor
         if (value == "vec4") return ValueType::Vector4;
         if (value == "string") return ValueType::String;
         if (value == "asset") return ValueType::Asset;
+        if (value == "entity") return ValueType::Entity;
         return std::nullopt;
     }
 
@@ -138,7 +144,8 @@ export namespace kairo::editor
     public:
         using Storage = std::variant<std::monostate, bool, std::int64_t, double,
             kairo::foundation::math::Vec2d, kairo::foundation::math::Vec3d,
-            kairo::foundation::math::Vec4d, std::string, kairo::assets::AssetID>;
+            kairo::foundation::math::Vec4d, std::string, kairo::assets::AssetID,
+            kairo::engine::Entity>;
 
         DocumentValue() noexcept = default;
         explicit DocumentValue(bool value) noexcept : m_Value(value) {}
@@ -149,12 +156,13 @@ export namespace kairo::editor
         explicit DocumentValue(kairo::foundation::math::Vec4d value) : m_Value(value) { Validate(); }
         explicit DocumentValue(std::string value) : m_Value(std::move(value)) { Validate(); }
         explicit DocumentValue(kairo::assets::AssetID value) : m_Value(value) { Validate(); }
+        explicit DocumentValue(kairo::engine::Entity value) : m_Value(value) { Validate(); }
 
         [[nodiscard]] ValueType Type() const noexcept
         {
             constexpr ValueType types[] = { ValueType::Flow, ValueType::Boolean, ValueType::Integer,
                 ValueType::Float, ValueType::Vector2, ValueType::Vector3, ValueType::Vector4,
-                ValueType::String, ValueType::Asset };
+                ValueType::String, ValueType::Asset, ValueType::Entity };
             return types[m_Value.index()];
         }
 
@@ -187,6 +195,9 @@ export namespace kairo::editor
             if (const auto* value = std::get_if<kairo::assets::AssetID>(&m_Value);
                 value != nullptr && !value->IsValid())
                 throw std::invalid_argument("Document asset value requires a valid persistent asset ID.");
+            if (const auto* value = std::get_if<kairo::engine::Entity>(&m_Value);
+                value != nullptr && !*value)
+                throw std::invalid_argument("Document entity value requires a non-zero scene entity ID.");
         }
 
         [[nodiscard]] bool operator==(const DocumentValue& other) const
@@ -206,6 +217,7 @@ export namespace kairo::editor
                     other.Get<kairo::foundation::math::Vec4d>();
                 case ValueType::String: return Get<std::string>() == other.Get<std::string>();
                 case ValueType::Asset: return Get<kairo::assets::AssetID>() == other.Get<kairo::assets::AssetID>();
+                case ValueType::Entity: return Get<kairo::engine::Entity>() == other.Get<kairo::engine::Entity>();
             }
             return false;
         }

@@ -22,6 +22,7 @@ import Kairo.Assets;
 import Kairo.Editor.AuthoringDocument;
 import Kairo.Editor.DocumentTypes;
 import Kairo.Editor.TextFormat;
+import Kairo.EngineCore.Entity;
 import Kairo.Foundation.Math;
 
 export namespace kairo::editor
@@ -116,6 +117,8 @@ export namespace kairo::editor
                 }
                 case ValueType::String: return "string " + QuoteFormatText(value.Get<std::string>());
                 case ValueType::Asset: return "asset " + value.Get<kairo::assets::AssetID>().ToString();
+                case ValueType::Entity: return "entity " +
+                    std::to_string(value.Get<kairo::engine::Entity>().Value);
             }
             throw std::logic_error("Unknown document value type.");
         }
@@ -162,6 +165,14 @@ export namespace kairo::editor
                         ParseDouble(tokens[start + 3u], line), ParseDouble(tokens[start + 4u], line) });
                     case ValueType::String: return DocumentValue(tokens[start + 1u].Text);
                     case ValueType::Asset: return DocumentValue(kairo::assets::AssetID::Parse(tokens[start + 1u].Text));
+                    case ValueType::Entity:
+                    {
+                        const std::uint64_t value = ParseID(tokens[start + 1u], line, "entity ID");
+                        if (value > std::numeric_limits<std::uint32_t>::max())
+                            throw DocumentFormatError(line, tokens[start + 1u].Column,
+                                "entity ID exceeds the 32-bit scene identity range");
+                        return DocumentValue(kairo::engine::Entity{ static_cast<std::uint32_t>(value) });
+                    }
                     case ValueType::Flow: break;
                 }
             }

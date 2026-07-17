@@ -114,9 +114,11 @@ TEST_CASE("Document text and values enforce persistent data boundaries", "[Kairo
     CHECK(DocumentValue(true).Get<bool>());
     CHECK(DocumentValue(std::int64_t{ 42 }).Get<std::int64_t>() == 42);
     CHECK(DocumentValue(kairo::foundation::math::Vec3d{ 1.0, 2.0, 3.0 }).Type() == ValueType::Vector3);
+    CHECK(DocumentValue(kairo::engine::Entity{ 42u }).Type() == ValueType::Entity);
     REQUIRE_THROWS_AS(DocumentValue(std::numeric_limits<double>::infinity()), std::invalid_argument);
     REQUIRE_THROWS_AS(DocumentValue(std::string("bad\xC0", 4u)), std::invalid_argument);
     REQUIRE_THROWS_AS(DocumentValue(kairo::assets::AssetID{}), std::invalid_argument);
+    REQUIRE_THROWS_AS(DocumentValue(kairo::engine::Entity{}), std::invalid_argument);
     REQUIRE_THROWS_AS(DocumentValue(1.0).Get<bool>(), std::logic_error);
 
     const NodeID node{ 7u };
@@ -210,6 +212,8 @@ TEST_CASE("Core document schemas cover every authoring domain with valid contrac
     CHECK(state.Pins[1].Required);
     CHECK(state.Pins[1].Type == ValueType::Asset);
     CHECK(registry.Require("kairo.logic.input-action").Category == "Input");
+    CHECK(registry.Require("kairo.logic.set-position").Pins[1].Type == ValueType::Entity);
+    CHECK(registry.Require("kairo.logic.spawn-entity").Pins[3].Type == ValueType::Entity);
     CHECK(registry.Require("kairo.simulation.raycast").Pins.size() == 7u);
 
     DocumentSchemaRegistry duplicate;
@@ -389,6 +393,7 @@ TEST_CASE("Authoring documents persist canonically without installed schemas",
     source.Pins.push_back({ { 100u }, "value", "Value", PinDirection::Output,
         ValueType::Float, PinCardinality::Multiple, false, std::nullopt });
     source.Properties.emplace("asset", DocumentValue(textureID));
+    source.Properties.emplace("entity", DocumentValue(kairo::engine::Entity{ 73u }));
     source.Properties.emplace("enabled", DocumentValue(true));
     source.Properties.emplace("label", DocumentValue(std::string("line one\nline \"two\"")));
     source.Properties.emplace("layer", DocumentValue(std::int64_t{ -17 }));
