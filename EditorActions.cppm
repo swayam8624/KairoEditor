@@ -1,7 +1,9 @@
 module;
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <string_view>
 
 export module Kairo.Editor.Actions;
@@ -82,5 +84,29 @@ export namespace kairo::editor
     {
         static constexpr auto bindings = DefaultEditorActionBindings();
         return bindings.at(static_cast<std::size_t>(action));
+    }
+
+    /// Stable lowercase identifiers used by user keymap files and automation.
+    /// Display labels remain free to evolve without invalidating settings.
+    [[nodiscard]] constexpr std::string_view Key(EditorAction action)
+    {
+        static constexpr std::array keys{
+            "save", "save-all", "new-document", "close-document", "undo", "redo",
+            "duplicate", "delete-selection", "add-primitive", "focus-selection",
+            "select-tool", "translate-tool", "rotate-tool", "scale-tool", "toggle-play",
+            "graph-add-node", "graph-delete", "graph-duplicate", "graph-copy", "graph-paste",
+            "graph-frame-selection", "graph-frame-all"
+        };
+        return keys.at(static_cast<std::size_t>(action));
+    }
+
+    [[nodiscard]] constexpr std::optional<EditorAction> ParseEditorAction(std::string_view key) noexcept
+    {
+        for (std::size_t index = 0u; index < static_cast<std::size_t>(EditorAction::Count); ++index)
+        {
+            const auto action = static_cast<EditorAction>(index);
+            if (Key(action) == key) return action;
+        }
+        return std::nullopt;
     }
 }

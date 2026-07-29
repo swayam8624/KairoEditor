@@ -203,8 +203,8 @@ int main(int argc, char** argv)
         kairo::editor::ImGuiRuntime imgui(renderer, layoutFile);
         kairo::editor::ApplyKairoEditorTheme();
         const std::filesystem::path keymapSettings = kairo::editor::DefaultKeymapSettingsPath();
-        kairo::editor::KeymapProfile keymapProfile = kairo::editor::KeymapProfile::Kairo;
-        try { keymapProfile = kairo::editor::LoadKeymapSettings(keymapSettings); }
+        kairo::editor::EditorKeymapSettings keymap;
+        try { keymap = kairo::editor::LoadEditorKeymapSettings(keymapSettings); }
         catch (const std::exception& error)
         {
             std::cerr << "KairoEditor keymap settings warning: " << error.what()
@@ -212,7 +212,7 @@ int main(int argc, char** argv)
         }
         AIHost ai = CreateAIHost();
         kairo::editor::EditorShell shell(state, project, layoutPlan.ShouldRebuild(),
-            keymapProfile, keymapSettings, std::move(ai.Provider), std::move(ai.Model));
+            std::move(keymap), keymapSettings, std::move(ai.Provider), std::move(ai.Model));
         if (recovered.has_value()) shell.RestoreRecoveryDrafts(*recovered);
         if (options.ViewportShading.has_value()) shell.SetViewportShading(*options.ViewportShading);
         if (options.AuthoringSurface.has_value()) state.SetAuthoringSurface(*options.AuthoringSurface);

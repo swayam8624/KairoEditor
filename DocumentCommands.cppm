@@ -1,8 +1,10 @@
 module;
 
 #include <algorithm>
+#include <map>
 #include <memory>
 #include <optional>
+#include <set>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -151,6 +153,149 @@ export namespace kairo::editor
         AuthoringDocument* m_Document;
         std::vector<DocumentNode> m_Nodes;
         std::vector<DocumentConnection> m_Connections;
+    };
+
+    /// Portable, self-describing clipboard payload for one graph selection.
+    /// Only connections whose two endpoints belong to copied nodes are kept;
+    /// edges into the surrounding graph cannot be valid in another document.
+    struct DocumentSubgraph final
+    {
+        DocumentKind Kind = DocumentKind::Logic;
+        CanvasPosition Origin{};
+        std::vector<DocumentNode> Nodes;
+        std::vector<DocumentConnection> Connections;
+    };
+
+    /// Input: a non-empty node selection from one authoring document.
+    /// Output: deterministic node and internal-edge snapshot anchored at the
+    /// selection's minimum canvas coordinate. Unknown-plugin nodes remain
+    /// copyable because records are self-describing and no schema is required.
+    [[nodiscard]] inline DocumentSubgraph CaptureDocumentSubgraph(
+        const AuthoringDocument& document, std::vector<NodeID> nodes)
+    {
+        std::ranges::sort(nodes);
+        nodes.erase(std::unique(nodes.begin(), nodes.end()), nodes.end());
+        if (nodes.empty()) throw std::invalid_argument("Copy Nodes requires a non-empty selection.");
+        if (nodes.size() > MaximumDocumentNodes)
+            throw std::length_error("Copy Nodes exceeds the document node safety limit.");
+
+        DocumentSubgraph result;
+        result.Kind = document.Kind();
+        std::set<PinID> selectedPins;
+        result.Nodes.reserve(nodes.size());
+        for (const NodeID id : nodes)
+        {
+            const DocumentNode& node = document.Node(id);
+            result.Nodes.push_back(node);
+            for (const DocumentPin& pin : node.Pins) selectedPins.insert(pin.ID);
+        }
+        result.Origin = result.Nodes.front().Position;
+        for (const DocumentNode& node : result.Nodes)
+        {
+            result.Origin.X = std::min(result.Origin.X, node.Position.X);
+            result.Origin.Y = std::min(result.Origin.Y, node.Position.Y);
+        }
+        for (const DocumentConnection& connection : document.Connections())
+            if (selectedPins.contains(connection.Output) && selectedPins.contains(connection.Input))
+                result.Connections.push_back(connection);
+        return result;
+    }
+
+    /// Pastes a copied subgraph as one reversible operation. Fresh monotonic
+    /// node/pin IDs replace every source identity and all internal edges are
+    /// remapped. Execute and redo restore complete topology; a partial restore
+    /// is removed before an exception escapes.
+    class PasteDocumentSubgraphCommand final : public EditorCommand
+    {
+    public:
+        PasteDocumentSubgraphCommand(AuthoringDocument& document,
+            DocumentSubgraph subgraph, CanvasPosition anchor)
+            : m_Document(&document), m_Subgraph(std::move(subgraph)), m_Anchor(anchor)
+        {
+            ValidateCanvasPosition(m_Anchor);
+            if (m_Subgraph.Nodes.empty()) throw std::invalid_argument("Paste Nodes requires a non-empty subgraph.");
+            if (m_Subgraph.Kind != document.Kind())
+                throw std::invalid_argument("Cannot paste nodes into a different document domain.");
+            if (document.NodeCount() + m_Subgraph.Nodes.size() > MaximumDocumentNodes)
+                throw std::length_error("Paste Nodes exceeds the document node safety limit.");
+        }
+
+        [[nodiscard]] std::string_view Name() const noexcept override { return "Paste Nodes"; }
+        [[nodiscard]] const std::vector<NodeID>& CreatedNodes() const noexcept { return m_CreatedNodes; }
+
+        void Execute() override
+        {
+            if (m_Clones.empty()) PrepareClones();
+            RestoreClones();
+        }
+
+        void Undo() override
+        {
+            for (const NodeID id : m_CreatedNodes)
+                if (m_Document->Contains(id)) m_Document->RemoveNode(id);
+        }
+
+    private:
+        AuthoringDocument* m_Document;
+        DocumentSubgraph m_Subgraph;
+        CanvasPosition m_Anchor;
+        std::vector<DocumentNode> m_Clones;
+        std::vector<DocumentConnection> m_Connections;
+        std::vector<NodeID> m_CreatedNodes;
+
+        void PrepareClones()
+        {
+            std::map<PinID, PinID> pinMap;
+            std::vector<DocumentNode> clones;
+            std::vector<NodeID> createdNodes;
+            std::vector<DocumentConnection> connections;
+            clones.reserve(m_Subgraph.Nodes.size());
+            createdNodes.reserve(m_Subgraph.Nodes.size());
+            for (const DocumentNode& source : m_Subgraph.Nodes)
+            {
+                const DocumentNodeIdentity identity = m_Document->ReserveNodeIdentity(source.Pins.size());
+                DocumentNode clone = source;
+                clone.ID = identity.Node;
+                clone.Position.X = m_Anchor.X + (source.Position.X - m_Subgraph.Origin.X);
+                clone.Position.Y = m_Anchor.Y + (source.Position.Y - m_Subgraph.Origin.Y);
+                ValidateCanvasPosition(clone.Position);
+                for (std::size_t index = 0u; index < clone.Pins.size(); ++index)
+                {
+                    pinMap.emplace(clone.Pins[index].ID, identity.Pins[index]);
+                    clone.Pins[index].ID = identity.Pins[index];
+                }
+                createdNodes.push_back(clone.ID);
+                clones.push_back(std::move(clone));
+            }
+            connections.reserve(m_Subgraph.Connections.size());
+            for (const DocumentConnection& source : m_Subgraph.Connections)
+                connections.push_back({ pinMap.at(source.Output), pinMap.at(source.Input) });
+            m_Clones = std::move(clones);
+            m_CreatedNodes = std::move(createdNodes);
+            m_Connections = std::move(connections);
+        }
+
+        void RestoreClones()
+        {
+            std::vector<NodeID> restored;
+            restored.reserve(m_Clones.size());
+            try
+            {
+                for (const DocumentNode& clone : m_Clones)
+                {
+                    m_Document->RestoreNode(clone);
+                    restored.push_back(clone.ID);
+                }
+                for (const DocumentConnection& connection : m_Connections)
+                    m_Document->Connect(connection.Output, connection.Input);
+            }
+            catch (...)
+            {
+                for (auto iterator = restored.rbegin(); iterator != restored.rend(); ++iterator)
+                    if (m_Document->Contains(*iterator)) m_Document->RemoveNode(*iterator);
+                throw;
+            }
+        }
     };
 
     /// Adds one validated directed edge. All type and cardinality rules remain

@@ -72,6 +72,13 @@ creates persistent asset-backed cube, plane, UV sphere, and cylinder entities.
 These are honest blockout primitives, not a claim of Blender-style arbitrary
 topology editing. See [docs/EDITOR_CONTROLS.md](docs/EDITOR_CONTROLS.md).
 
+Editor shortcuts use a backend-neutral action router with Kairo, Blender,
+Unreal, and Unity compatibility profiles. User settings support deterministic
+versioned per-action overrides and explicit unbinding; ambiguous chords are
+rejected before they can make input order-dependent. Version 1 profile files
+remain readable. The complete format and controls are documented in
+[docs/EDITOR_CONTROLS.md](docs/EDITOR_CONTROLS.md).
+
 The native host also contains a narrow `KairoEditorRendererBridge` boundary.
 It validates typed EngineCore asset handles against a live `KairoAssets`
 registry, then resolves registered mesh IDs to renderer-owned GPU handles and
@@ -183,6 +190,14 @@ command execution does not advance or truncate history. The native Edit menu
 shows the next command name and supports `Cmd/Ctrl+Z` and
 `Cmd/Ctrl+Shift+Z`.
 
+`CommandTransaction` collects multiple commands without mutating authored data,
+then commits them as one history entry or cancels them without side effects.
+Composite execution is ordered and undo is reversed. A failed child execution
+rolls back the already-applied prefix; a failed child undo restores the
+already-undone suffix. If compensation also fails, the dedicated recovery error
+retains both exception pointers so the host can stop editing and validate the
+model instead of reporting a misleading successful rollback.
+
 Hierarchy and Inspector edits use concrete scene commands. Reflection-backed
 Inspector fields are discovered from `KairoReflection` metadata rather than
 duplicated widget definitions: the editor resolves the target component only
@@ -198,6 +213,13 @@ body binding, and collider binding, then restores that complete authored state
 on undo. Commands retain a `ProjectSession` reference, so a host must clear its
 history before replacing or closing that session; the native host currently
 opens one project for its process lifetime.
+
+Entity duplication is also one atomic hierarchy command. It allocates fresh
+stable IDs for the copied subtree, remaps parent references within that subtree,
+retains the root's external parent, and copies every persistent component, tag,
+layer, enabled state, and local transform. Undo removes only the duplicate;
+redo restores the same duplicate IDs and complete authored state instead of
+replaying a name-only entity creation followed by unjournaled UI mutations.
 
 ## AI command boundary
 
@@ -279,6 +301,13 @@ Inspector edits. Node create/delete, edge connect/disconnect, movement,
 properties, defaults, and rename operations retain stable IDs and complete
 incident topology. Continuous drags and value entry coalesce into one causal
 undo step.
+
+Graph copy, paste, and duplicate are implemented operations rather than routed
+UI placeholders. A copied selection is a bounded self-describing subgraph;
+paste assigns fresh monotonic node and pin IDs, remaps only internal edges, and
+publishes the entire result as one undoable command. Unknown-plugin nodes remain
+copyable because clipboard data preserves their authored records without
+requiring a currently registered schema.
 
 The compiler boundary validates the complete document and schema snapshot
 before invoking a domain backend. Logic, material, audio, animation, and

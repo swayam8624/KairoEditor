@@ -21,6 +21,7 @@ export import Kairo.Editor.ProjectDescriptor;
 export import Kairo.Editor.ProjectRecovery;
 export import Kairo.Editor.ProjectSession;
 export import Kairo.Editor.CommandHistory;
+export import Kairo.Editor.CommandTransaction;
 export import Kairo.Editor.Actions;
 export import Kairo.Editor.InputRouter;
 export import Kairo.Editor.KeymapSettings;

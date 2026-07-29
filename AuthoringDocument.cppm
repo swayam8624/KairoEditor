@@ -67,6 +67,16 @@ export namespace kairo::editor
         friend constexpr auto operator<=>(const DocumentConnection&, const DocumentConnection&) noexcept = default;
     };
 
+    /// Fresh document-local identities reserved for one self-describing node.
+    /// Reservation may leave an intentional ID gap if a higher-level command
+    /// later aborts; IDs are never recycled because stale graph references must
+    /// not silently resolve to unrelated nodes or pins.
+    struct DocumentNodeIdentity final
+    {
+        NodeID Node;
+        std::vector<PinID> Pins;
+    };
+
     struct ConnectionCheck final
     {
         bool Allowed = false;
@@ -160,6 +170,26 @@ export namespace kairo::editor
         [[nodiscard]] std::vector<DocumentConnection> Connections() const
         {
             return { m_Connections.begin(), m_Connections.end() };
+        }
+
+        /// Input: pin count for one copied/imported self-describing node.
+        /// Output: fresh monotonic node and pin IDs without adding topology.
+        /// Task: let transactional paste/import commands prepare a complete
+        /// remapped record before any authored data becomes observable.
+        [[nodiscard]] DocumentNodeIdentity ReserveNodeIdentity(std::size_t pinCount)
+        {
+            if (pinCount > 256u) throw std::length_error("A document node cannot reserve more than 256 pins.");
+            if (m_NextNode == 0u) throw std::overflow_error("Document exhausted its 64-bit node ID space.");
+            if (pinCount > RemainingIDs(m_NextPin))
+                throw std::overflow_error("Document exhausted its 64-bit pin ID space.");
+
+            DocumentNodeIdentity result{ NodeID{ m_NextNode }, {} };
+            result.Pins.reserve(pinCount);
+            for (std::size_t index = 0u; index < pinCount; ++index)
+                result.Pins.push_back(PinID{ m_NextPin + static_cast<std::uint64_t>(index) });
+            m_NextNode = AdvanceCursor(m_NextNode, result.Node.Value);
+            for (const PinID pin : result.Pins) m_NextPin = AdvanceCursor(m_NextPin, pin.Value);
+            return result;
         }
 
         /// Output: deterministic connection snapshot touching any pin owned by

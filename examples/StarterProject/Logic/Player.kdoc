@@ -2,3 +2,18 @@ kairo-document 1
 id 00000000-0000-4000-8000-000000000203
 kind logic
 name "Player Logic"
+node 1 kairo.logic.print 468.5 161.5
+pin 1 in "In" input flow single true no-default
+pin 2 message "Message" input string single false default string ""
+pin 3 then "Then" output flow multiple false no-default
+end-node
+node 2 kairo.logic.event-begin-play 103.5 118.5
+pin 4 then "Then" output flow multiple false no-default
+end-node
+node 3 kairo.logic.print 838.5 314.5
+pin 5 in "In" input flow single true no-default
+pin 6 message "Message" input string single false default string ""
+pin 7 then "Then" output flow multiple false no-default
+end-node
+connect 3 5
+connect 4 1

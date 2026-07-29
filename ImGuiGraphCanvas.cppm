@@ -136,6 +136,7 @@ export namespace kairo::editor
         std::optional<NodeDragState> m_NodeDrag;
         std::optional<MarqueeState> m_Marquee;
         std::optional<NodePaletteState> m_Palette;
+        std::optional<DocumentSubgraph> m_Clipboard;
         std::optional<std::string> m_Error;
         std::vector<EditorAction> m_PendingActions;
         bool m_Focused = false;
@@ -163,6 +164,47 @@ export namespace kairo::editor
                         view.Synchronize(document);
                     });
                 }
+                else if (action == EditorAction::GraphCopy && view.Selection().Size() != 0u)
+                {
+                    RunOperation([&]
+                    {
+                        m_Clipboard = CaptureDocumentSubgraph(
+                            project.Document(documentID), view.Selection().Snapshot());
+                    });
+                }
+                else if (action == EditorAction::GraphDuplicate && view.Selection().Size() != 0u)
+                {
+                    RunOperation([&]
+                    {
+                        auto& document = project.EditDocument(documentID);
+                        DocumentSubgraph copied = CaptureDocumentSubgraph(
+                            document, view.Selection().Snapshot());
+                        const CanvasPosition anchor{ copied.Origin.X + 32.0, copied.Origin.Y + 32.0 };
+                        auto command = std::make_unique<PasteDocumentSubgraphCommand>(
+                            document, std::move(copied), anchor);
+                        auto* pasted = command.get();
+                        project.DocumentHistory().Execute(std::move(command));
+                        SelectCreatedNodes(view, pasted->CreatedNodes());
+                        view.Synchronize(document);
+                    });
+                }
+                else if (action == EditorAction::GraphPaste && m_Clipboard.has_value())
+                {
+                    RunOperation([&]
+                    {
+                        auto& document = project.EditDocument(documentID);
+                        const GraphPoint screen = hovered ? GraphPoint{ mouse.x, mouse.y }
+                            : GraphPoint{ origin.x + size.x * 0.5, origin.y + size.y * 0.5 };
+                        const GraphPoint target = view.Viewport().ToDocument(
+                            screen, { origin.x, origin.y });
+                        auto command = std::make_unique<PasteDocumentSubgraphCommand>(
+                            document, *m_Clipboard, CanvasPosition{ target.x, target.y });
+                        auto* pasted = command.get();
+                        project.DocumentHistory().Execute(std::move(command));
+                        SelectCreatedNodes(view, pasted->CreatedNodes());
+                        view.Synchronize(document);
+                    });
+                }
                 else if ((action == EditorAction::GraphFrameAll ||
                     action == EditorAction::GraphFrameSelection) && !layouts.empty())
                 {
@@ -182,6 +224,14 @@ export namespace kairo::editor
                     view.Viewport().Frame(bounds, { size.x, size.y }, 56.0);
                 }
             }
+        }
+
+        static void SelectCreatedNodes(DocumentViewState& view,
+            const std::vector<NodeID>& nodes)
+        {
+            view.Selection().Clear();
+            for (const NodeID node : nodes)
+                view.Selection().Apply(node, GraphSelectionMode::Add);
         }
 
         void OpenPalette(kairo::assets::AssetID document, GraphPoint position)

@@ -87,19 +87,65 @@ TEST_CASE("Keymap profiles persist outside projects with strict versioned parsin
     "[KairoEditor][Input][Settings]")
 {
     CHECK(ParseKeymapProfile("blender") == KeymapProfile::Blender);
-    CHECK(ParseKeymapSettings(SerializeKeymapSettings(KeymapProfile::Unreal)) ==
-        KeymapProfile::Unreal);
+    const EditorKeymapSettings settings{
+        KeymapProfile::Blender,
+        {
+            { EditorAction::GraphAddNode, InputContext::Graph,
+                { { EditorKey::A, KeyModifiers::Alt }, { EditorKey::N, KeyModifiers::Shift } } },
+            { EditorAction::DeleteSelection, InputContext::Scene, {} }
+        }
+    };
+    const std::string serialized = SerializeKeymapSettings(settings);
+    CHECK(serialized ==
+        "kairo-keymap 2\n"
+        "profile blender\n"
+        "unbind scene delete-selection\n"
+        "override graph graph-add-node alt+a\n"
+        "override graph graph-add-node shift+n\n");
+    CHECK(ParseEditorKeymapSettings(serialized) == settings);
+    CHECK(ParseKeymapSettings("kairo-keymap 1\nprofile unreal\n") == KeymapProfile::Unreal);
+    CHECK(FormatInputChord(ParseInputChord("shortcut+shift+z")) == "shortcut+shift+z");
+    REQUIRE_THROWS_AS(ParseInputChord("shift+shift+a"), std::invalid_argument);
+    REQUIRE_THROWS_AS(ParseInputChord("shortcut+unknown"), std::invalid_argument);
+
+    EditorInputRouter customized(settings.Profile, settings.Overrides);
+    customized.SetContext(InputContext::Graph);
+    customized.BeginFrame();
+    CHECK(customized.Route({ { EditorKey::A, KeyModifiers::Alt } }));
+    CHECK(customized.Consume(EditorAction::GraphAddNode));
+    CHECK_FALSE(customized.Route({ { EditorKey::A, KeyModifiers::Shift } }));
+    customized.SetContext(InputContext::Scene);
+    customized.BeginFrame();
+    CHECK_FALSE(customized.Route({ { EditorKey::Delete } }));
+
+    EditorInputRouter profileTransition(KeymapProfile::Blender,
+        { { EditorAction::RotateTool, InputContext::Scene, { { EditorKey::W } } } });
+    REQUIRE_THROWS_AS(profileTransition.SetProfile(KeymapProfile::Unreal), std::invalid_argument);
+    CHECK(profileTransition.Profile() == KeymapProfile::Blender);
+
+    const std::vector conflicting{
+        KeymapOverride{ EditorAction::GraphDelete, InputContext::Graph,
+            { { EditorKey::A, KeyModifiers::Shift } } }
+    };
+    REQUIRE_THROWS_AS(BuildInputBindings(KeymapProfile::Kairo, conflicting), std::invalid_argument);
     REQUIRE_THROWS_AS(ParseKeymapProfile("unknown"), std::invalid_argument);
     REQUIRE_THROWS_AS(ParseKeymapSettings("profile unity\n"), std::invalid_argument);
     REQUIRE_THROWS_AS(ParseKeymapSettings(
         "kairo-keymap 1\nprofile unity\nextra value\n"), std::invalid_argument);
+    REQUIRE_THROWS_AS(ParseEditorKeymapSettings(
+        "kairo-keymap 2\nprofile kairo\noverride graph missing-action a\n"),
+        std::invalid_argument);
+    REQUIRE_THROWS_AS(ParseEditorKeymapSettings(
+        "kairo-keymap 2\nprofile kairo\nunbind text save\n"),
+        std::invalid_argument);
 
     const auto root = std::filesystem::temp_directory_path() /
         ("kairo-keymap-" + kairo::assets::GenerateAssetID().ToString());
     const auto path = root / "settings" / "keymap.settings";
     CHECK(LoadKeymapSettings(path) == KeymapProfile::Kairo);
-    SaveKeymapSettings(path, KeymapProfile::Unity);
-    CHECK(LoadKeymapSettings(path) == KeymapProfile::Unity);
+    SaveKeymapSettings(path, settings);
+    CHECK(LoadEditorKeymapSettings(path) == settings);
+    CHECK(LoadKeymapSettings(path) == KeymapProfile::Blender);
     CHECK_FALSE(std::filesystem::exists(path.string() + ".tmp"));
     std::filesystem::remove_all(root);
 }
@@ -604,6 +650,61 @@ TEST_CASE("Document commands preserve identity topology and merged edit intent",
     CHECK(document.Name() == "Command Graph");
 }
 
+TEST_CASE("Document subgraph paste remaps identities and restores internal topology",
+    "[KairoEditor][Document][Commands][Clipboard]")
+{
+    const auto documentID = kairo::assets::AssetID::Parse("00000000-0000-4000-8000-000000000507");
+    AuthoringDocument document(documentID, DocumentKind::Logic, "Clipboard Graph");
+    const NodeSchema add = MakeAddFloatSchema();
+    const NodeID first = document.AddNode(add, { 20.0, 30.0 });
+    const NodeID second = document.AddNode(add, { 320.0, 90.0 });
+    const NodeID outside = document.AddNode(add, { 700.0, 90.0 });
+    document.SetProperty(first, "clamp", DocumentValue(true));
+    document.SetPinDefault(document.Node(second).Pins[1].ID, DocumentValue(8.5));
+    document.Connect(document.Node(first).Pins[2].ID, document.Node(second).Pins[0].ID);
+    document.Connect(document.Node(second).Pins[2].ID, document.Node(outside).Pins[0].ID);
+
+    const DocumentSubgraph copied = CaptureDocumentSubgraph(document, { second, first, second });
+    CHECK(copied.Kind == DocumentKind::Logic);
+    CHECK(copied.Origin == CanvasPosition{ 20.0, 30.0 });
+    CHECK(copied.Nodes.size() == 2u);
+    CHECK(copied.Connections.size() == 1u);
+    REQUIRE_THROWS_AS(CaptureDocumentSubgraph(document, {}), std::invalid_argument);
+
+    CommandHistory history;
+    auto paste = std::make_unique<PasteDocumentSubgraphCommand>(
+        document, copied, CanvasPosition{ 1000.0, 500.0 });
+    auto* pasted = paste.get();
+    history.Execute(std::move(paste));
+    REQUIRE(pasted->CreatedNodes().size() == 2u);
+    const std::vector<NodeID> created = pasted->CreatedNodes();
+    CHECK(created[0] != first);
+    CHECK(created[1] != second);
+    CHECK(document.Node(created[0]).Position == CanvasPosition{ 1000.0, 500.0 });
+    CHECK(document.Node(created[1]).Position == CanvasPosition{ 1300.0, 560.0 });
+    CHECK(document.Node(created[0]).Properties.at("clamp") == DocumentValue(true));
+    REQUIRE(document.Node(created[1]).Pins[1].DefaultValue.has_value());
+    CHECK(*document.Node(created[1]).Pins[1].DefaultValue == DocumentValue(8.5));
+    CHECK(document.NodeCount() == 5u);
+    CHECK(document.ConnectionCount() == 3u);
+
+    const PinID pastedOutput = document.Node(created[0]).Pins[2].ID;
+    const PinID pastedInput = document.Node(created[1]).Pins[0].ID;
+    CHECK(document.IsConnected(pastedOutput));
+    CHECK(document.IsConnected(pastedInput));
+    history.Undo();
+    CHECK(document.NodeCount() == 3u);
+    CHECK(document.ConnectionCount() == 2u);
+    CHECK_FALSE(document.Contains(created[0]));
+    history.Redo();
+    CHECK(document.Contains(created[0]));
+    CHECK(document.Node(created[0]).Pins[2].ID == pastedOutput);
+    CHECK(document.ConnectionCount() == 3u);
+
+    AuthoringDocument material(documentID, DocumentKind::Material, "Material Clipboard");
+    REQUIRE_THROWS_AS(PasteDocumentSubgraphCommand(material, copied, {}), std::invalid_argument);
+}
+
 TEST_CASE("Project document workspace owns safe multi-document disk lifecycle",
     "[KairoEditor][Document][Project]")
 {
@@ -869,6 +970,70 @@ TEST_CASE("Command history preserves causal branches and bounded storage", "[Kai
     CHECK(history.RetainedCount() == retained);
     CHECK(value == 1);
     REQUIRE_THROWS_AS(CommandHistory(0u), std::invalid_argument);
+}
+
+TEST_CASE("Command transactions commit cancel and recover atomically",
+    "[KairoEditor][Commands][Transaction]")
+{
+    int value = 0;
+    CommandHistory history;
+
+    CommandTransaction transaction("Adjust Pair");
+    transaction.Emplace<IntegerCommand>(value, 2);
+    transaction.Emplace<IntegerCommand>(value, 3);
+    CHECK(transaction.IsOpen());
+    CHECK(transaction.CommandCount() == 2u);
+    CHECK(value == 0);
+    transaction.Commit(history);
+    CHECK_FALSE(transaction.IsOpen());
+    CHECK(value == 5);
+    CHECK(history.RetainedCount() == 1u);
+    CHECK(history.UndoName() == "Adjust Pair");
+    REQUIRE_THROWS_AS(transaction.Emplace<IntegerCommand>(value, 1), std::logic_error);
+    REQUIRE_THROWS_AS(transaction.Commit(history), std::logic_error);
+
+    history.Undo();
+    CHECK(value == 0);
+    CHECK(history.RedoName() == "Adjust Pair");
+    history.Redo();
+    CHECK(value == 5);
+
+    CommandTransaction cancelled("Cancelled Edit");
+    cancelled.Emplace<IntegerCommand>(value, 100);
+    cancelled.Cancel();
+    CHECK_FALSE(cancelled.IsOpen());
+    CHECK(value == 5);
+    CHECK(history.RetainedCount() == 1u);
+    REQUIRE_THROWS_AS(cancelled.Add(std::make_unique<IntegerCommand>(value, 1)), std::logic_error);
+
+    CommandTransaction failing("Failing Edit");
+    failing.Emplace<IntegerCommand>(value, 7);
+    failing.Emplace<IntegerCommand>(value, 11, true);
+    failing.Emplace<IntegerCommand>(value, 13);
+    REQUIRE_THROWS_AS(failing.Commit(history), std::runtime_error);
+    CHECK_FALSE(failing.IsOpen());
+    CHECK(value == 5);
+    CHECK(history.RetainedCount() == 1u);
+
+    CommandTransaction empty("Empty Edit");
+    REQUIRE_THROWS_AS(empty.Commit(history), std::logic_error);
+    CHECK(empty.IsOpen());
+    empty.Cancel();
+
+    int movedValue = 0;
+    CommandHistory movedHistory;
+    CommandTransaction source("Moved Edit");
+    source.Emplace<IntegerCommand>(movedValue, 4);
+    CommandTransaction destination(std::move(source));
+    CHECK_FALSE(source.IsOpen());
+    REQUIRE_THROWS_AS(source.Commit(movedHistory), std::logic_error);
+    destination.Commit(movedHistory);
+    CHECK(movedValue == 4);
+    REQUIRE(movedHistory.CanUndo());
+    movedHistory.Undo();
+    CHECK(movedValue == 0);
+
+    REQUIRE_THROWS_AS(CommandTransaction(""), std::invalid_argument);
 }
 
 TEST_CASE("Project descriptors round trip portable bootstrap state", "[KairoEditor][Project]")
@@ -1375,6 +1540,95 @@ TEST_CASE("Scene commands restore stable entities and merge Inspector edits", "[
     history.Redo();
     CHECK_FALSE(project.Scene().Contains(entity));
     CHECK_FALSE(project.Scene().Contains(child));
+
+    history.Clear();
+    project.Close(UnsavedChangesPolicy::Discard);
+    std::filesystem::remove_all(root);
+}
+
+TEST_CASE("Duplicate entity command preserves complete subtrees across undo and redo",
+    "[KairoEditor][Commands][Scene][Duplicate]")
+{
+    const auto root = std::filesystem::temp_directory_path() /
+        ("kairo-command-duplicate-" + kairo::assets::GenerateAssetID().ToString());
+    ProjectSession project;
+    project.CreateProject(root, "Duplicate Command Scene");
+
+    auto& scene = project.EditScene();
+    const auto externalParent = scene.CreateEntity("External Parent");
+    const auto source = scene.CreateEntity("Source");
+    scene.SetParent(source, externalParent);
+    scene.Transform(source).Local.Translation = { 1.0f, 2.0f, 3.0f };
+    scene.SetEnabled(source, false);
+    scene.SetLayer(source, 7u);
+    scene.AddTag(source, "gameplay");
+    const auto mesh = kairo::assets::AssetID::Parse("00000000-0000-4000-8000-000000000451");
+    const auto material = kairo::assets::AssetID::Parse("00000000-0000-4000-8000-000000000452");
+    scene.SetMeshRenderer(source, { { mesh }, { material }, false });
+    scene.SetCamera(source, { 0.8f, 0.2f, 800.0f, true });
+    scene.SetRigidBody(source, {
+        kairo::engine::RigidBodyMotion::Kinematic, 2.0f, 0.4f, 0.2f, 0.1f });
+    scene.SetCollider(source, {
+        .Shape = kairo::engine::ColliderShape::Sphere,
+        .Radius = 0.65f,
+        .Friction = 0.7f,
+        .Restitution = 0.25f,
+        .BelongsTo = 4u,
+        .CollidesWith = 11u,
+        .IsTrigger = true });
+    const auto child = scene.CreateEntity("Child");
+    scene.SetParent(child, source);
+    scene.Transform(child).Local.Translation = { 0.0f, 4.0f, 0.0f };
+    scene.SetLayer(child, 8u);
+    scene.AddTag(child, "attachment");
+
+    CommandHistory history;
+    auto duplicateCommand = std::make_unique<DuplicateEntityCommand>(project, source);
+    auto* duplicateResult = duplicateCommand.get();
+    history.Execute(std::move(duplicateCommand));
+    const auto duplicate = duplicateResult->DuplicatedRoot();
+    REQUIRE(duplicate != source);
+    REQUIRE(scene.Contains(duplicate));
+    CHECK(scene.Name(duplicate).Value == "Source Copy");
+    CHECK(scene.Parent(duplicate) == externalParent);
+    CHECK(scene.Transform(duplicate).Local == scene.Transform(source).Local);
+    CHECK_FALSE(scene.IsEnabled(duplicate));
+    CHECK(scene.Layer(duplicate) == 7u);
+    CHECK(scene.HasTag(duplicate, "gameplay"));
+    CHECK(scene.MeshRenderer(duplicate).MeshAsset.ID == mesh);
+    CHECK(scene.MeshRenderer(duplicate).MaterialAsset.ID == material);
+    CHECK_FALSE(scene.MeshRenderer(duplicate).Visible);
+    CHECK(scene.Camera(duplicate).FarPlane == 800.0f);
+    CHECK(scene.RigidBody(duplicate).Density == 2.0f);
+    CHECK(scene.Collider(duplicate).Radius == 0.65f);
+    CHECK(scene.Collider(duplicate).BelongsTo == 4u);
+    CHECK(scene.Collider(duplicate).CollidesWith == 11u);
+    CHECK(scene.Collider(duplicate).IsTrigger);
+
+    REQUIRE(scene.Children(duplicate).size() == 1u);
+    const auto duplicateChild = scene.Children(duplicate).front();
+    CHECK(duplicateChild != child);
+    CHECK(scene.Name(duplicateChild).Value == "Child");
+    CHECK(scene.Parent(duplicateChild) == duplicate);
+    CHECK(scene.Transform(duplicateChild).Local == scene.Transform(child).Local);
+    CHECK(scene.Layer(duplicateChild) == 8u);
+    CHECK(scene.HasTag(duplicateChild, "attachment"));
+    CHECK(history.UndoName() == "Duplicate Entity");
+
+    history.Undo();
+    CHECK_FALSE(scene.Contains(duplicate));
+    CHECK_FALSE(scene.Contains(duplicateChild));
+    CHECK(scene.Contains(source));
+    CHECK(scene.Contains(child));
+
+    history.Redo();
+    REQUIRE(scene.Contains(duplicate));
+    REQUIRE(scene.Contains(duplicateChild));
+    CHECK(scene.Parent(duplicate) == externalParent);
+    CHECK(scene.Parent(duplicateChild) == duplicate);
+    CHECK(scene.MeshRenderer(duplicate).MeshAsset.ID == mesh);
+    CHECK(scene.Collider(duplicate).IsTrigger);
+    CHECK(scene.HasTag(duplicateChild, "attachment"));
 
     history.Clear();
     project.Close(UnsavedChangesPolicy::Discard);

@@ -70,7 +70,7 @@ target_sources(KairoEditor PUBLIC FILE_SET CXX_MODULES BASE_DIRS ${CMAKE_CURRENT
     AuthoringDocument.cppm DocumentValidation.cppm DocumentSerialization.cppm DocumentCommands.cppm
     DocumentCompiler.cppm LogicDocumentCompiler.cppm ProjectLogicBuild.cppm ProjectDocuments.cppm GraphCanvas.cppm DocumentProjection.cppm
     AuthoringWorkspaceState.cppm
-    ProjectDescriptor.cppm ProjectRecovery.cppm ProjectSession.cppm CommandHistory.cppm EditorActions.cppm EditorInputRouter.cppm KeymapSettings.cppm EditorLayoutRecovery.cppm ViewportController.cppm PrimitiveTypes.cppm SceneCommands.cppm
+    ProjectDescriptor.cppm ProjectRecovery.cppm ProjectSession.cppm CommandHistory.cppm CommandTransaction.cppm EditorActions.cppm EditorInputRouter.cppm KeymapSettings.cppm EditorLayoutRecovery.cppm ViewportController.cppm PrimitiveTypes.cppm SceneCommands.cppm
     AIEditorTools.cppm AIEditorSession.cppm EditorState.cppm PanelState.cppm KairoEditor.cppm)
 target_link_libraries(KairoEditor PUBLIC KairoEngineCore KairoAI nlohmann_json::nlohmann_json)
 

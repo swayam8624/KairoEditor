@@ -5,6 +5,30 @@ KairoEditor uses one action vocabulary across macOS and other desktop systems:
 processed only when the relevant editor surface owns focus, so typing in a code
 or graph text field does not unexpectedly move or delete scene content.
 
+## Keymap profiles and overrides
+
+Choose the Kairo, Blender, Unreal, or Unity compatibility profile from
+**Edit > Keymap Profile**. The selection and custom overrides are stored in the
+OS user settings directory, never inside a game project. Existing version 1
+profile-only files load without migration loss; the next save writes version 2.
+
+Version 2 settings can replace every chord for an action/context pair or unbind
+that pair completely:
+
+```text
+kairo-keymap 2
+profile blender
+override graph graph-add-node alt+a
+override graph graph-add-node shift+n
+unbind scene delete-selection
+```
+
+Chord modifiers are `shortcut`, `shift`, and `alt`. Supported context and action
+names are stable engine identifiers. Loading rejects unknown identifiers,
+duplicate overrides, repeated modifiers, and chords that would resolve to two
+different actions in overlapping global/local contexts. **Reset Custom
+Bindings** removes overrides while retaining the selected profile.
+
 ## Global
 
 | Action | Shortcut |
@@ -40,9 +64,12 @@ aliases for move and scale.
 
 | Action | Shortcut / gesture |
 | --- | --- |
-| Add a node | `Space`, right click, or graph `+` |
+| Add a node | `Shift+A`, `Space`, right click, or graph `+` |
+| Delete selected nodes | `Backspace` or `Delete` |
+| Duplicate selected nodes | `Cmd+D` |
+| Copy / paste selected nodes | `Cmd+C` / `Cmd+V` |
+| Frame selection / all nodes | `F` / `Home` |
 | Pan / zoom | middle mouse drag / mouse wheel |
-| Frame all graph nodes | `F` |
 | Select nodes | click, modifier click, or marquee |
 | Connect pins | drag from an input or output pin |
 

@@ -242,28 +242,130 @@ export namespace kairo::editor
         return result;
     }
 
+    inline void ApplyEntitySnapshot(
+        kairo::engine::Scene& scene, const EntitySnapshot& snapshot)
+    {
+        scene.Transform(snapshot.ID).Local = snapshot.Transform;
+        scene.SetEnabled(snapshot.ID, snapshot.Enabled);
+        scene.SetLayer(snapshot.ID, snapshot.Layer);
+        for (const auto& tag : snapshot.Tags) scene.AddTag(snapshot.ID, tag);
+        if (snapshot.MeshRenderer.has_value()) scene.SetMeshRenderer(snapshot.ID, *snapshot.MeshRenderer);
+        if (snapshot.Camera.has_value()) scene.SetCamera(snapshot.ID, *snapshot.Camera);
+        if (snapshot.Logic.has_value()) scene.SetLogic(snapshot.ID, *snapshot.Logic);
+        if (snapshot.RigidBody.has_value()) scene.SetRigidBody(snapshot.ID, *snapshot.RigidBody);
+        if (snapshot.Collider.has_value()) scene.SetCollider(snapshot.ID, *snapshot.Collider);
+    }
+
     inline void RestoreEntitySubtree(
         kairo::engine::Scene& scene, const std::vector<EntitySnapshot>& snapshots)
     {
+        if (snapshots.empty()) throw std::invalid_argument("Cannot restore an empty entity subtree.");
+        std::vector<kairo::engine::Entity> created;
+        created.reserve(snapshots.size());
+
         // Allocate every stable ID before restoring relationships, allowing a
         // parent to appear after its child in future snapshot producers.
-        for (const auto& snapshot : snapshots)
-            (void)scene.CreateEntityWithID(snapshot.ID, snapshot.Name);
-        for (const auto& snapshot : snapshots)
+        try
         {
-            scene.Transform(snapshot.ID).Local = snapshot.Transform;
-            scene.SetEnabled(snapshot.ID, snapshot.Enabled);
-            scene.SetLayer(snapshot.ID, snapshot.Layer);
-            for (const auto& tag : snapshot.Tags) scene.AddTag(snapshot.ID, tag);
-            if (snapshot.MeshRenderer.has_value()) scene.SetMeshRenderer(snapshot.ID, *snapshot.MeshRenderer);
-            if (snapshot.Camera.has_value()) scene.SetCamera(snapshot.ID, *snapshot.Camera);
-            if (snapshot.Logic.has_value()) scene.SetLogic(snapshot.ID, *snapshot.Logic);
-            if (snapshot.RigidBody.has_value()) scene.SetRigidBody(snapshot.ID, *snapshot.RigidBody);
-            if (snapshot.Collider.has_value()) scene.SetCollider(snapshot.ID, *snapshot.Collider);
+            for (const auto& snapshot : snapshots)
+            {
+                (void)scene.CreateEntityWithID(snapshot.ID, snapshot.Name);
+                created.push_back(snapshot.ID);
+            }
+            for (const auto& snapshot : snapshots) ApplyEntitySnapshot(scene, snapshot);
+            for (const auto& snapshot : snapshots)
+                if (snapshot.Parent.has_value()) scene.SetParent(snapshot.ID, snapshot.Parent);
         }
-        for (const auto& snapshot : snapshots)
-            if (snapshot.Parent.has_value()) scene.SetParent(snapshot.ID, snapshot.Parent);
+        catch (...)
+        {
+            // Roll back in reverse creation order. Contains is required because
+            // destroying a parent can recursively remove an already-linked child.
+            for (auto iterator = created.rbegin(); iterator != created.rend(); ++iterator)
+                if (scene.Contains(*iterator)) scene.DestroyEntity(*iterator);
+            throw;
+        }
     }
+
+    /// Duplicates a complete hierarchy subtree as one reversible operation.
+    ///
+    /// Input: a live source root. Output: a new root with fresh stable IDs and
+    /// exact authored components, tags, layers, enabled state, transforms, and
+    /// internal hierarchy. The duplicate root retains the source root's external
+    /// parent, while every parent reference inside the copied subtree is remapped.
+    /// Task: keep duplicate, undo, and redo inside one command boundary so redo
+    /// cannot silently recreate a name-only entity after direct UI mutations.
+    class DuplicateEntityCommand final : public EditorCommand
+    {
+    public:
+        DuplicateEntityCommand(ProjectSession& project, kairo::engine::Entity source)
+            : m_Project(&project), m_Source(CaptureEntitySubtree(project.Scene(), source)) {}
+
+        [[nodiscard]] std::string_view Name() const noexcept override { return "Duplicate Entity"; }
+
+        [[nodiscard]] kairo::engine::Entity DuplicatedRoot() const
+        {
+            if (m_Duplicates.empty()) throw std::logic_error("Duplicate Entity has not executed yet.");
+            return m_Duplicates.front().ID;
+        }
+
+        void Execute() override
+        {
+            if (!m_Duplicates.empty())
+            {
+                RestoreEntitySubtree(m_Project->EditScene(), m_Duplicates);
+                return;
+            }
+
+            auto& scene = m_Project->EditScene();
+            std::vector<kairo::engine::Entity> created;
+            created.reserve(m_Source.size());
+            try
+            {
+                for (std::size_t index = 0u; index < m_Source.size(); ++index)
+                {
+                    const std::string name = index == 0u
+                        ? m_Source[index].Name + " Copy" : m_Source[index].Name;
+                    created.push_back(scene.CreateEntity(name));
+                }
+
+                m_Duplicates.reserve(m_Source.size());
+                for (std::size_t index = 0u; index < m_Source.size(); ++index)
+                {
+                    EntitySnapshot duplicate = m_Source[index];
+                    duplicate.ID = created[index];
+                    duplicate.Name = index == 0u ? duplicate.Name + " Copy" : duplicate.Name;
+                    if (duplicate.Parent.has_value())
+                    {
+                        for (std::size_t parentIndex = 0u; parentIndex < m_Source.size(); ++parentIndex)
+                        {
+                            if (m_Source[parentIndex].ID != *duplicate.Parent) continue;
+                            duplicate.Parent = created[parentIndex];
+                            break;
+                        }
+                    }
+                    m_Duplicates.push_back(std::move(duplicate));
+                }
+
+                for (const auto& snapshot : m_Duplicates) ApplyEntitySnapshot(scene, snapshot);
+                for (const auto& snapshot : m_Duplicates)
+                    if (snapshot.Parent.has_value()) scene.SetParent(snapshot.ID, snapshot.Parent);
+            }
+            catch (...)
+            {
+                m_Duplicates.clear();
+                for (auto iterator = created.rbegin(); iterator != created.rend(); ++iterator)
+                    if (scene.Contains(*iterator)) scene.DestroyEntity(*iterator);
+                throw;
+            }
+        }
+
+        void Undo() override { m_Project->EditScene().DestroyEntity(DuplicatedRoot()); }
+
+    private:
+        ProjectSession* m_Project;
+        std::vector<EntitySnapshot> m_Source;
+        std::vector<EntitySnapshot> m_Duplicates;
+    };
 
     /// Removes one hierarchy subtree while retaining all persistent components
     /// and relationships needed to restore exact authored state and stable IDs.

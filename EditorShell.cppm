@@ -45,11 +45,12 @@ export namespace kairo::editor
     {
     public:
         EditorShell(EditorState& state, ProjectSession& project, bool rebuildLayout = true,
-            KeymapProfile keymapProfile = KeymapProfile::Kairo,
+            EditorKeymapSettings keymapSettings = {},
             std::filesystem::path keymapSettingsPath = {},
             std::shared_ptr<kairo::ai::Provider> aiProvider = {}, std::string aiModel = {})
             : m_State(state), m_Project(project), m_GraphCanvas(m_Schemas),
-              m_InputRouter(keymapProfile), m_RebuildLayout(rebuildLayout),
+              m_InputRouter(keymapSettings.Profile, keymapSettings.Overrides),
+              m_RebuildLayout(rebuildLayout), m_KeymapSettings(std::move(keymapSettings)),
               m_KeymapSettingsPath(std::move(keymapSettingsPath))
         {
             if (static_cast<bool>(aiProvider) != !aiModel.empty())
@@ -197,12 +198,26 @@ export namespace kairo::editor
         static constexpr std::chrono::seconds AutosaveInterval{ 30 };
         std::chrono::steady_clock::time_point m_NextAutosave{};
         std::string m_RecoveryStatus;
+        EditorKeymapSettings m_KeymapSettings;
         std::filesystem::path m_KeymapSettingsPath;
 
         void SetKeymapProfile(KeymapProfile profile)
         {
+            EditorKeymapSettings candidate = m_KeymapSettings;
+            candidate.Profile = profile;
+            (void)BuildInputBindings(candidate.Profile, candidate.Overrides);
+            if (!m_KeymapSettingsPath.empty()) SaveKeymapSettings(m_KeymapSettingsPath, candidate);
             m_InputRouter.SetProfile(profile);
-            if (!m_KeymapSettingsPath.empty()) SaveKeymapSettings(m_KeymapSettingsPath, profile);
+            m_KeymapSettings = std::move(candidate);
+        }
+
+        void ResetKeymapOverrides()
+        {
+            EditorKeymapSettings candidate = m_KeymapSettings;
+            candidate.Overrides.clear();
+            if (!m_KeymapSettingsPath.empty()) SaveKeymapSettings(m_KeymapSettingsPath, candidate);
+            m_InputRouter.SetOverrides({});
+            m_KeymapSettings = std::move(candidate);
         }
 
         void DrawMainBar()
@@ -249,6 +264,12 @@ export namespace kairo::editor
                         const std::string label(Name(profile));
                         if (ImGui::MenuItem(label.c_str(), nullptr, selected))
                             RunCommand([this, profile] { SetKeymapProfile(profile); });
+                    }
+                    if (!m_KeymapSettings.Overrides.empty())
+                    {
+                        ImGui::Separator();
+                        if (ImGui::MenuItem("Reset Custom Bindings"))
+                            RunCommand([this] { ResetKeymapOverrides(); });
                     }
                     ImGui::EndMenu();
                 }
@@ -707,22 +728,12 @@ export namespace kairo::editor
             }
             if (selected.has_value() && m_InputRouter.Consume(EditorAction::Duplicate))
             {
-                const auto& source = m_Project.Scene();
-                auto command = std::make_unique<CreateEntityCommand>(m_Project,
-                    source.Name(*selected).Value + " Copy");
+                auto command = std::make_unique<DuplicateEntityCommand>(m_Project, *selected);
                 auto* duplicate = command.get();
-                RunCommand([this, &command, selected, duplicate]
+                RunCommand([this, &command, duplicate]
                 {
                     m_History.Execute(std::move(command));
-                    const auto created = duplicate->CreatedEntity();
-                    auto& scene = m_Project.EditScene();
-                    scene.Transform(created).Local = scene.Transform(*selected).Local;
-                    if (scene.HasMeshRenderer(*selected)) scene.SetMeshRenderer(created, scene.MeshRenderer(*selected));
-                    if (scene.HasCamera(*selected)) scene.SetCamera(created, scene.Camera(*selected));
-                    if (scene.HasLogic(*selected)) scene.SetLogic(created, scene.Logic(*selected));
-                    if (scene.HasRigidBody(*selected)) scene.SetRigidBody(created, scene.RigidBody(*selected));
-                    if (scene.HasCollider(*selected)) scene.SetCollider(created, scene.Collider(*selected));
-                    m_State.Select(created);
+                    m_State.Select(duplicate->DuplicatedRoot());
                 });
             }
         }
