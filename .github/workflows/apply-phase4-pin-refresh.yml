@@ -1,0 +1,37 @@
+name: Refresh Phase 4 standalone dependency pins
+
+on:
+  push:
+    branches:
+      - agent/phase4-production-workflows
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: agent/phase4-production-workflows
+      - name: Refresh pins and remove workflow
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('CMakeLists.txt')
+          text = path.read_text()
+          old = 'set(KAIRO_EDITOR_AI_REVISION 4de1a0c00830c3da92d2d6cc718d7ed27ff40d3a)'
+          new = 'set(KAIRO_EDITOR_AI_REVISION 34d6b79727ea0bf11a369244e03c32895da9bd14)'
+          if old not in text:
+              raise SystemExit('stale KairoAI revision was not found')
+          path.write_text(text.replace(old, new, 1))
+          Path('.github/workflows/apply-phase4-pin-refresh.yml').unlink()
+          PY
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add CMakeLists.txt .github/workflows/apply-phase4-pin-refresh.yml
+          git commit -m 'Refresh KairoEditor standalone dependency pins'
+          git push origin HEAD:agent/phase4-production-workflows
