@@ -36,3 +36,4 @@ Diagnostics are grouped by producer, sorted by severity and linked to project fi
 - Failed validation leaves the destination scene unchanged.
 - Recent projects and cloned templates survive process restart.
 - All services compile and test without Vulkan, GLFW or Dear ImGui.
+- Standalone CI resolves immutable current component revisions and runs with module-capable Clang/LLVM or MSVC toolchains.
