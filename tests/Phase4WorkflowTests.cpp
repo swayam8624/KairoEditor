@@ -1,7 +1,10 @@
 #include <cstddef>
 #include <filesystem>
 #include <fstream>
+#include <optional>
+#include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include <catch2/catch_test_macros.hpp>
@@ -64,8 +67,10 @@ TEST_CASE("Asset browser exposes import state, filtering and deletion blockers")
     CHECK(AssetDependencyClosure(registry, material).front().ID == texture);
 
     WriteText(root / "Textures/paint.tga", "source-v2");
-    CHECK(BuildAssetBrowserEntries(root, registry, imports).front().State ==
-        AssetBrowserState::SourceChanged);
+    const auto changedEntries = BuildAssetBrowserEntries(root, registry, imports,
+        { .Folder = "Textures", .Type = AssetType::Texture2D });
+    REQUIRE(changedEntries.size() == 1u);
+    CHECK(changedEntries.front().State == AssetBrowserState::SourceChanged);
     std::filesystem::remove_all(root);
 }
 
