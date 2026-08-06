@@ -47,7 +47,8 @@ jobs:
             -DKAIRO_EDITOR_BUILD_APP=OFF -DKAIRO_EDITOR_BUILD_TESTS=ON 2>&1 | tee configure.log
           status=${PIPESTATUS[0]}
           if [[ $status -ne 0 ]]; then
-            { echo '## Configure failure'; echo '```text'; tail -n 180 configure.log; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+            message=$(tail -n 80 configure.log); message=${message//'%'/'%25'}; message=${message//$'\r'/'%0D'}; message=${message//$'\n'/'%0A'}
+            echo "::error file=configure.log,title=Configure failure::$message"
           fi
           exit $status
       - name: Build
@@ -57,7 +58,8 @@ jobs:
           cmake --build build --parallel 2>&1 | tee build.log
           status=${PIPESTATUS[0]}
           if [[ $status -ne 0 ]]; then
-            { echo '## Build failure'; echo '```text'; tail -n 260 build.log; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+            message=$(tail -n 120 build.log); message=${message//'%'/'%25'}; message=${message//$'\r'/'%0D'}; message=${message//$'\n'/'%0A'}
+            echo "::error file=build.log,title=Build failure::$message"
           fi
           exit $status
       - name: Test
@@ -67,6 +69,7 @@ jobs:
           ctest --test-dir build --output-on-failure 2>&1 | tee test.log
           status=${PIPESTATUS[0]}
           if [[ $status -ne 0 ]]; then
-            { echo '## Test failure'; echo '```text'; tail -n 260 test.log; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+            message=$(tail -n 120 test.log); message=${message//'%'/'%25'}; message=${message//$'\r'/'%0D'}; message=${message//$'\n'/'%0A'}
+            echo "::error file=test.log,title=Test failure::$message"
           fi
           exit $status
