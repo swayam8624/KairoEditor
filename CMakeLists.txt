@@ -71,6 +71,7 @@ target_sources(KairoEditor PUBLIC FILE_SET CXX_MODULES BASE_DIRS ${CMAKE_CURRENT
     DocumentCompiler.cppm LogicDocumentCompiler.cppm ProjectLogicBuild.cppm ProjectDocuments.cppm GraphCanvas.cppm DocumentProjection.cppm
     AuthoringWorkspaceState.cppm
     ProjectDescriptor.cppm ProjectRecovery.cppm ProjectSession.cppm CommandHistory.cppm CommandTransaction.cppm EditorActions.cppm EditorInputRouter.cppm KeymapSettings.cppm EditorLayoutRecovery.cppm ViewportController.cppm PrimitiveTypes.cppm SceneCommands.cppm
+    AssetBrowserModel.cppm SceneSelection.cppm EditorDiagnostics.cppm SceneFragment.cppm ProjectLifecycle.cppm
     AIEditorTools.cppm AIEditorSession.cppm EditorState.cppm PanelState.cppm KairoEditor.cppm)
 target_link_libraries(KairoEditor PUBLIC KairoEngineCore KairoAI nlohmann_json::nlohmann_json)
 
@@ -173,8 +174,11 @@ if(KAIRO_EDITOR_BUILD_TESTS)
     FetchContent_MakeAvailable(Catch2)
     add_executable(KairoEditorTests tests/EditorTests.cpp)
     target_link_libraries(KairoEditorTests PRIVATE KairoEditor Catch2::Catch2WithMain)
+    add_executable(KairoEditorPhase4Tests tests/Phase4WorkflowTests.cpp)
+    target_link_libraries(KairoEditorPhase4Tests PRIVATE KairoEditor Catch2::Catch2WithMain)
     enable_testing()
     add_test(NAME KairoEditorTests COMMAND KairoEditorTests)
+    add_test(NAME KairoEditorPhase4Tests COMMAND KairoEditorPhase4Tests)
     # MSVC 19.44 ICEs in symbols.c while destroying the imported module types
     # used by this boundary harness. Keep the production modules and the main
     # editor suite covered on Windows, and automatically restore this focused
