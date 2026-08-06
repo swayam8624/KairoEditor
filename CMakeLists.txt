@@ -14,7 +14,7 @@ set(KAIRO_EDITOR_MONO_FONT_PATH "" CACHE FILEPATH "Optional monospace TTF font f
 # checkouts still take precedence for active workspace development.
 set(KAIRO_EDITOR_CORE_REVISION 10db0f120c158e3a34c4897c7eec4e519bf81cd2)
 set(KAIRO_EDITOR_RENDERER_REVISION d59d0c7293e379e64e8f9aef198ca302fa87558b)
-set(KAIRO_EDITOR_AI_REVISION 4de1a0c00830c3da92d2d6cc718d7ed27ff40d3a)
+set(KAIRO_EDITOR_AI_REVISION 34d6b79727ea0bf11a369244e03c32895da9bd14)
 set(KAIRO_EDITOR_JSON_REVISION 65ee68451d8eb2b5f3a30b410476ab83deb3289b)
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
@@ -71,6 +71,7 @@ target_sources(KairoEditor PUBLIC FILE_SET CXX_MODULES BASE_DIRS ${CMAKE_CURRENT
     DocumentCompiler.cppm LogicDocumentCompiler.cppm ProjectLogicBuild.cppm ProjectDocuments.cppm GraphCanvas.cppm DocumentProjection.cppm
     AuthoringWorkspaceState.cppm
     ProjectDescriptor.cppm ProjectRecovery.cppm ProjectSession.cppm CommandHistory.cppm CommandTransaction.cppm EditorActions.cppm EditorInputRouter.cppm KeymapSettings.cppm EditorLayoutRecovery.cppm ViewportController.cppm PrimitiveTypes.cppm SceneCommands.cppm
+    AssetBrowserModel.cppm SceneSelection.cppm EditorDiagnostics.cppm SceneFragment.cppm ProjectLifecycle.cppm
     AIEditorTools.cppm AIEditorSession.cppm EditorState.cppm PanelState.cppm KairoEditor.cppm)
 target_link_libraries(KairoEditor PUBLIC KairoEngineCore KairoAI nlohmann_json::nlohmann_json)
 
@@ -173,8 +174,11 @@ if(KAIRO_EDITOR_BUILD_TESTS)
     FetchContent_MakeAvailable(Catch2)
     add_executable(KairoEditorTests tests/EditorTests.cpp)
     target_link_libraries(KairoEditorTests PRIVATE KairoEditor Catch2::Catch2WithMain)
+    add_executable(KairoEditorPhase4Tests tests/Phase4WorkflowTests.cpp)
+    target_link_libraries(KairoEditorPhase4Tests PRIVATE KairoEditor Catch2::Catch2WithMain)
     enable_testing()
     add_test(NAME KairoEditorTests COMMAND KairoEditorTests)
+    add_test(NAME KairoEditorPhase4Tests COMMAND KairoEditorPhase4Tests)
     # MSVC 19.44 ICEs in symbols.c while destroying the imported module types
     # used by this boundary harness. Keep the production modules and the main
     # editor suite covered on Windows, and automatically restore this focused
