@@ -1,0 +1,72 @@
+name: KairoEditor Phase 4 CI
+
+on:
+  push:
+    branches:
+      - main
+      - agent/**
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Ubuntu Clang
+            os: ubuntu-24.04
+            compiler: clang
+          - name: macOS Clang
+            os: macos-14
+            compiler: clang
+          - name: Windows MSVC
+            os: windows-2022
+            compiler: msvc
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Ubuntu toolchain
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y clang ninja-build
+      - name: Install Ninja on macOS
+        if: runner.os == 'macOS'
+        run: brew install ninja
+      - name: Activate MSVC
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+      - name: Configure
+        shell: bash
+        run: |
+          set +e
+          if [[ "${{ matrix.compiler }}" == "clang" ]]; then export CC=clang; export CXX=clang++; fi
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            -DKAIRO_EDITOR_BUILD_APP=OFF -DKAIRO_EDITOR_BUILD_TESTS=ON 2>&1 | tee configure.log
+          status=${PIPESTATUS[0]}
+          if [[ $status -ne 0 ]]; then
+            { echo '## Configure failure'; echo '```text'; tail -n 180 configure.log; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          fi
+          exit $status
+      - name: Build
+        shell: bash
+        run: |
+          set +e
+          cmake --build build --parallel 2>&1 | tee build.log
+          status=${PIPESTATUS[0]}
+          if [[ $status -ne 0 ]]; then
+            { echo '## Build failure'; echo '```text'; tail -n 260 build.log; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          fi
+          exit $status
+      - name: Test
+        shell: bash
+        run: |
+          set +e
+          ctest --test-dir build --output-on-failure 2>&1 | tee test.log
+          status=${PIPESTATUS[0]}
+          if [[ $status -ne 0 ]]; then
+            { echo '## Test failure'; echo '```text'; tail -n 260 test.log; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          fi
+          exit $status
