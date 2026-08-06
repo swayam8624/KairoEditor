@@ -20,21 +20,21 @@ jobs:
           - name: Ubuntu Clang
             os: ubuntu-24.04
             compiler: clang
-          - name: macOS Clang
+          - name: macOS LLVM
             os: macos-14
-            compiler: clang
+            compiler: brew-llvm
           - name: Windows MSVC
             os: windows-2022
             compiler: msvc
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Install Ubuntu toolchain
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y clang ninja-build
-      - name: Install Ninja on macOS
+      - name: Install LLVM and Ninja on macOS
         if: runner.os == 'macOS'
-        run: brew install ninja
+        run: brew install llvm ninja
       - name: Activate MSVC
         if: runner.os == 'Windows'
         uses: ilammy/msvc-dev-cmd@v1
@@ -42,12 +42,19 @@ jobs:
         shell: bash
         run: |
           set +e
-          if [[ "${{ matrix.compiler }}" == "clang" ]]; then export CC=clang; export CXX=clang++; fi
+          if [[ "${{ matrix.compiler }}" == "clang" ]]; then
+            export CC=clang
+            export CXX=clang++
+          elif [[ "${{ matrix.compiler }}" == "brew-llvm" ]]; then
+            export PATH="$(brew --prefix llvm)/bin:$PATH"
+            export CC="$(brew --prefix llvm)/bin/clang"
+            export CXX="$(brew --prefix llvm)/bin/clang++"
+          fi
           cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
             -DKAIRO_EDITOR_BUILD_APP=OFF -DKAIRO_EDITOR_BUILD_TESTS=ON 2>&1 | tee configure.log
           status=${PIPESTATUS[0]}
           if [[ $status -ne 0 ]]; then
-            message=$(tail -n 80 configure.log); message=${message//'%'/'%25'}; message=${message//$'\r'/'%0D'}; message=${message//$'\n'/'%0A'}
+            message=$(tail -n 60 configure.log); message=${message//'%'/'%25'}; message=${message//$'\r'/'%0D'}; message=${message//$'\n'/'%0A'}
             echo "::error file=configure.log,title=Configure failure::$message"
           fi
           exit $status
@@ -58,8 +65,10 @@ jobs:
           cmake --build build --parallel 2>&1 | tee build.log
           status=${PIPESTATUS[0]}
           if [[ $status -ne 0 ]]; then
-            message=$(tail -n 120 build.log); message=${message//'%'/'%25'}; message=${message//$'\r'/'%0D'}; message=${message//$'\n'/'%0A'}
-            echo "::error file=build.log,title=Build failure::$message"
+            diagnostics=$(grep -Ei -C 3 '(^|[^a-z])(fatal error|error C[0-9]+|error:|FAILED:|undefined reference|unresolved external)' build.log | tail -n 80)
+            if [[ -z "$diagnostics" ]]; then diagnostics=$(tail -n 60 build.log); fi
+            diagnostics=${diagnostics//'%'/'%25'}; diagnostics=${diagnostics//$'\r'/'%0D'}; diagnostics=${diagnostics//$'\n'/'%0A'}
+            echo "::error file=build.log,title=Build failure::$diagnostics"
           fi
           exit $status
       - name: Test
@@ -69,7 +78,7 @@ jobs:
           ctest --test-dir build --output-on-failure 2>&1 | tee test.log
           status=${PIPESTATUS[0]}
           if [[ $status -ne 0 ]]; then
-            message=$(tail -n 120 test.log); message=${message//'%'/'%25'}; message=${message//$'\r'/'%0D'}; message=${message//$'\n'/'%0A'}
+            message=$(tail -n 80 test.log); message=${message//'%'/'%25'}; message=${message//$'\r'/'%0D'}; message=${message//$'\n'/'%0A'}
             echo "::error file=test.log,title=Test failure::$message"
           fi
           exit $status
