@@ -22,7 +22,7 @@ export namespace kairo::editor
         { return m_Active; }
         [[nodiscard]] bool Empty() const noexcept { return m_Selected.empty(); }
         [[nodiscard]] bool Contains(kairo::engine::Entity entity) const noexcept
-        { return std::ranges::binary_search(m_Selected, entity, {}, &kairo::engine::Entity::Value); }
+        { return std::ranges::binary_search(m_Selected, entity.Value, {}, &kairo::engine::Entity::Value); }
 
         void Clear() noexcept
         {
