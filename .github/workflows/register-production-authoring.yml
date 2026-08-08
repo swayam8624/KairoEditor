@@ -1,0 +1,61 @@
+name: Register production authoring
+
+on:
+  push:
+    branches:
+      - agent/complete-roadmap
+
+permissions:
+  contents: write
+
+jobs:
+  register:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: agent/complete-roadmap
+          fetch-depth: 0
+      - name: Register modules and direct dependencies
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          source = Path('ProductionAuthoring.cppm')
+          text = source.read_text()
+          if '#include <array>\n' not in text:
+              text = text.replace('#include <algorithm>\n', '#include <algorithm>\n#include <array>\n', 1)
+          if '#include <iterator>\n' not in text:
+              text = text.replace('#include <filesystem>\n', '#include <filesystem>\n#include <iterator>\n', 1)
+          source.write_text(text)
+
+          cmake = Path('CMakeLists.txt')
+          text = cmake.read_text()
+          marker = '    AssetBrowserModel.cppm SceneSelection.cppm EditorDiagnostics.cppm SceneFragment.cppm ProjectLifecycle.cppm\n'
+          if 'ProductionAuthoring.cppm' not in text:
+              if marker not in text: raise SystemExit('Editor module marker missing')
+              text = text.replace(marker, marker.rstrip('\n') + ' ProductionAuthoring.cppm\n', 1)
+          old = '    add_executable(KairoEditorTests tests/EditorTests.cpp)\n'
+          if 'tests/ProductionAuthoringTests.cpp' not in text:
+              if old not in text: raise SystemExit('Editor tests marker missing')
+              text = text.replace(old,
+                  '    add_executable(KairoEditorTests tests/EditorTests.cpp tests/ProductionAuthoringTests.cpp)\n', 1)
+          cmake.write_text(text)
+
+          umbrella = Path('KairoEditor.cppm')
+          text = umbrella.read_text()
+          if 'export import Kairo.Editor.ProductionAuthoring;' not in text:
+              marker = 'export import Kairo.Editor.ProjectLifecycle;\n'
+              if marker not in text: raise SystemExit('Editor umbrella marker missing')
+              text = text.replace(marker, marker + 'export import Kairo.Editor.ProductionAuthoring;\n', 1)
+          umbrella.write_text(text)
+
+          Path('.github/workflows/register-production-authoring.yml').unlink()
+          PY
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'Register production authoring workspaces'
+          git push origin HEAD:agent/complete-roadmap
