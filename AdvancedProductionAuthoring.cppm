@@ -104,6 +104,107 @@ export namespace kairo::editor
         [[nodiscard]] const std::set<kairo::assets::EditableEdgeKey>& SelectedEdges() const noexcept { return m_Edges; }
         [[nodiscard]] const std::set<kairo::assets::EditableFaceID>& SelectedFaces() const noexcept { return m_Faces; }
 
+        void TranslateSelectedVertices(std::array<double, 3u> delta)
+        {
+            if (m_Vertices.empty()) throw std::logic_error("Translate requires selected vertices.");
+            Checkpoint();
+            try
+            {
+                m_Document.Mesh.Translate(
+                    std::vector<kairo::assets::EditableVertexID>(m_Vertices.begin(), m_Vertices.end()), delta);
+                const auto report = m_Document.Mesh.Validate();
+                if (!report.Valid) throw std::runtime_error(report.Errors.front());
+                ResetSculptSession();
+            }
+            catch (...) { RollbackFailedEdit(); throw; }
+        }
+
+        [[nodiscard]] kairo::assets::EditableFaceID ExtrudeSelectedFace(std::array<double, 3u> offset)
+        {
+            RequireFaces(1u);
+            Checkpoint();
+            try
+            {
+                const auto created = m_Document.Mesh.ExtrudeFace(*m_Faces.begin(), offset);
+                ClearSelection(); m_Faces.insert(created);
+                FinishTopologyEdit();
+                return created;
+            }
+            catch (...) { RollbackFailedEdit(); throw; }
+        }
+
+        [[nodiscard]] kairo::assets::EditableFaceID InsetSelectedFace(double amount)
+        {
+            RequireFaces(1u);
+            Checkpoint();
+            try
+            {
+                const auto created = m_Document.Mesh.InsetFace(*m_Faces.begin(), amount);
+                ClearSelection(); m_Faces.insert(created);
+                FinishTopologyEdit();
+                return created;
+            }
+            catch (...) { RollbackFailedEdit(); throw; }
+        }
+
+        [[nodiscard]] kairo::assets::EditableFaceID BevelSelectedFace(double insetAmount, double depth)
+        {
+            RequireFaces(1u);
+            Checkpoint();
+            try
+            {
+                const auto created = kairo::assets::BevelFace(
+                    m_Document.Mesh, *m_Faces.begin(), insetAmount, depth);
+                ClearSelection(); m_Faces.insert(created);
+                FinishTopologyEdit();
+                return created;
+            }
+            catch (...) { RollbackFailedEdit(); throw; }
+        }
+
+        [[nodiscard]] kairo::assets::LoopCutResult LoopCutSelectedEdge(double t = 0.5)
+        {
+            RequireEdges(1u);
+            Checkpoint();
+            try
+            {
+                const auto result = kairo::assets::LoopCutQuadStrip(
+                    m_Document.Mesh, *m_Edges.begin(), t);
+                ClearSelection();
+                m_Vertices.insert(result.CutVertices.begin(), result.CutVertices.end());
+                FinishTopologyEdit();
+                return result;
+            }
+            catch (...) { RollbackFailedEdit(); throw; }
+        }
+
+        void MergeSelectedVertices()
+        {
+            if (m_Vertices.size() != 2u)
+                throw std::logic_error("Merge requires exactly two selected vertices.");
+            auto it = m_Vertices.begin();
+            const auto keep = *it++;
+            const auto remove = *it;
+            Checkpoint();
+            try
+            {
+                m_Document.Mesh.MergeVertices(keep, remove);
+                ClearSelection(); m_Vertices.insert(keep);
+                FinishTopologyEdit();
+            }
+            catch (...) { RollbackFailedEdit(); throw; }
+        }
+
+        [[nodiscard]] kairo::assets::EditableVertexNormalMap RecalculateNormals() const
+        { return kairo::assets::RecalculateSmoothNormals(m_Document.Mesh); }
+
+        [[nodiscard]] double SelectedFaceTexelDensity(std::uint32_t textureResolution) const
+        {
+            RequireFaces(1u);
+            return kairo::assets::EstimateUVTexelDensity(
+                m_Document.Mesh, m_Document.UVs, *m_Faces.begin(), textureResolution);
+        }
+
         [[nodiscard]] kairo::assets::EditableVertexID SplitSelectedEdge(double t = 0.5)
         {
             RequireEdges(1u);
