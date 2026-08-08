@@ -13,12 +13,15 @@ module;
 #include <cstring>
 #include <exception>
 #include <filesystem>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
 #include <utility>
+#include <variant>
+#include <vector>
 
 export module Kairo.Editor.ImGuiShell;
 
@@ -47,17 +50,36 @@ export namespace kairo::editor
         EditorShell(EditorState& state, ProjectSession& project, bool rebuildLayout = true,
             EditorKeymapSettings keymapSettings = {},
             std::filesystem::path keymapSettingsPath = {},
-            std::shared_ptr<kairo::ai::Provider> aiProvider = {}, std::string aiModel = {})
+            NavigationSettings navigationSettings = {},
+            std::filesystem::path navigationSettingsPath = {},
+            std::shared_ptr<kairo::ai::Provider> aiProvider = {}, std::string aiModel = {},
+            std::shared_ptr<OfflineRenderService> offlineRenderService = {},
+            const kairo::engine::NativeGameplayRegistry* nativeGameplayRegistry = nullptr)
             : m_State(state), m_Project(project), m_GraphCanvas(m_Schemas),
               m_InputRouter(keymapSettings.Profile, keymapSettings.Overrides),
               m_RebuildLayout(rebuildLayout), m_KeymapSettings(std::move(keymapSettings)),
-              m_KeymapSettingsPath(std::move(keymapSettingsPath))
+              m_KeymapSettingsPath(std::move(keymapSettingsPath)),
+              m_NavigationSettings(navigationSettings),
+              m_NavigationSettingsPath(std::move(navigationSettingsPath))
         {
+            ValidateNavigationSettings(m_NavigationSettings);
             if (static_cast<bool>(aiProvider) != !aiModel.empty())
                 throw std::invalid_argument("AI editor provider and model must be configured together.");
             if (aiProvider)
                 m_AISession = std::make_unique<AIEditorSession>(
                     m_Project, m_History, std::move(aiProvider), std::move(aiModel));
+            if (offlineRenderService)
+                m_OfflineRender = std::make_unique<OfflineRenderAuthoringController>(
+                    std::move(offlineRenderService));
+            if (nativeGameplayRegistry != nullptr)
+            {
+                m_NativeGameplay = std::make_unique<NativeGameplayAuthoringWorkspace>(
+                    m_Project.Scene(), *nativeGameplayRegistry);
+                m_NativeGameplayPath = m_Project.ProjectRoot() /
+                    kairo::engine::DefaultNativeGameplayManifestPath;
+                if (std::filesystem::is_regular_file(m_NativeGameplayPath))
+                    m_NativeGameplay->Load(m_NativeGameplayPath);
+            }
             kairo::engine::RegisterEngineCoreReflection(m_Reflection);
             m_NextAutosave = std::chrono::steady_clock::now() + AutosaveInterval;
             if (const auto active = m_Project.Documents().ActiveID(); active.has_value())
@@ -71,20 +93,33 @@ export namespace kairo::editor
 
         void Draw()
         {
+            m_ViewportFlyCursorCaptured = false;
             m_State.ValidateSelection();
             m_GraphCanvas.BeginFrame();
             RunAutosaveIfDue();
             if (m_AISession) (void)m_AISession->Poll();
+            if (m_OfflineRender)
+            {
+                const auto status = m_OfflineRender->State().Status();
+                if (status == OfflineRenderWorkspaceStatus::Queued ||
+                    status == OfflineRenderWorkspaceStatus::Running)
+                    RunCommand([this] { m_OfflineRender->Refresh(); });
+            }
             DrawMainBar();
             DrawStatusBar();
             const ImGuiID dockspace = ImGui::GetID("KairoEditorDockspace");
             BuildDefaultLayout(dockspace);
             ImGui::DockSpaceOverViewport(dockspace, nullptr, ImGuiDockNodeFlags_PassthruCentralNode);
             DrawVisiblePanels();
+            DrawCommandPalette();
             RouteAndDispatchInput();
             if (m_State.Mode() == EditorMode::Play && m_RuntimeScene.has_value())
                 RunCommand([this] { m_PhysicsPreview.Step(*m_RuntimeScene, ImGui::GetIO().DeltaTime); });
             DrawDocumentLifecyclePopups();
+            DrawProjectLifecyclePopups();
+            DrawNavigationPreferences();
+            DrawNavigationHelp();
+            DrawKeymapEditor();
             DrawErrorPopup();
         }
 
@@ -105,6 +140,16 @@ export namespace kairo::editor
         [[nodiscard]] kairo::renderer::ViewportShadingMode ViewportShading() const noexcept
         {
             return m_ViewportShading;
+        }
+
+        [[nodiscard]] bool ViewportCursorCaptured() const noexcept
+        {
+            return m_ViewportFlyCursorCaptured;
+        }
+
+        [[nodiscard]] std::uint64_t ViewportRenderLayers() const noexcept
+        {
+            return m_ViewportRenderLayers;
         }
 
         [[nodiscard]] kairo::renderer::DebugDrawList PhysicsDebugDraw() const
@@ -158,6 +203,13 @@ export namespace kairo::editor
             return std::exchange(m_ViewportPickRequest, std::nullopt);
         }
 
+        /// Output: a validated project descriptor requiring a host-level reload.
+        /// Task: prevent renderer asset handles from surviving a project switch.
+        [[nodiscard]] std::optional<std::filesystem::path> TakeProjectTransitionRequest() noexcept
+        {
+            return std::exchange(m_ProjectTransitionRequest, std::nullopt);
+        }
+
         /// Input: stable renderer object ID, where zero denotes background.
         /// Task: apply GPU picking only when the ID still belongs to this scene.
         void ApplyViewportPick(std::uint32_t objectID)
@@ -198,6 +250,7 @@ export namespace kairo::editor
         DocumentSchemaRegistry m_Schemas = CreateCoreDocumentSchemaRegistry();
         ImGuiGraphCanvas m_GraphCanvas;
         EditorInputRouter m_InputRouter;
+        DiagnosticStore m_Diagnostics;
         TransformGizmo m_TransformGizmo;
         TransformGizmoSpace m_GizmoSpace = TransformGizmoSpace::World;
         std::optional<kairo::foundation::math::Transformf> m_GizmoBefore;
@@ -206,6 +259,16 @@ export namespace kairo::editor
         PhysicsPreview m_PhysicsPreview;
         std::optional<kairo::engine::Scene> m_RuntimeScene;
         std::unique_ptr<AIEditorSession> m_AISession;
+        std::unique_ptr<OfflineRenderAuthoringController> m_OfflineRender;
+        std::unique_ptr<NativeGameplayAuthoringWorkspace> m_NativeGameplay;
+        std::filesystem::path m_NativeGameplayPath;
+        std::uint64_t m_NextOfflineRenderJob = 1u;
+        int m_OfflineRenderWidth = 1280;
+        int m_OfflineRenderHeight = 720;
+        int m_OfflineRenderPasses = 64;
+        std::array<char, 256> m_OfflineRenderOutput{ 'R', 'e', 'n', 'd', 'e', 'r', 's', '/',
+            'O', 'f', 'f', 'l', 'i', 'n', 'e', '.', 'p', 'p', 'm', '\0' };
+        int m_NativeGameplayType = 0;
         EditorAction m_ActiveTool = EditorAction::SelectTool;
         bool m_ViewportFocused = false;
         bool m_ShowPhysicsBroadphase = false;
@@ -217,6 +280,7 @@ export namespace kairo::editor
         std::array<char, 256> m_NewDocumentName{};
         std::array<char, 512> m_NewDocumentPath{};
         std::array<char, 4096> m_AIPrompt{};
+        std::array<char, 256> m_NewProjectName{};
         int m_NewDocumentKind = 0;
         bool m_RequestNewDocumentPopup = false;
         bool m_RequestCloseDocumentPopup = false;
@@ -232,6 +296,29 @@ export namespace kairo::editor
         std::string m_RecoveryStatus;
         EditorKeymapSettings m_KeymapSettings;
         std::filesystem::path m_KeymapSettingsPath;
+        NavigationSettings m_NavigationSettings;
+        std::filesystem::path m_NavigationSettingsPath;
+        bool m_ViewportNavigationActive = false;
+        bool m_ViewportNavigationCancelled = false;
+        bool m_ViewportFlyCursorCaptured = false;
+        std::uint64_t m_ViewportRenderLayers = kairo::engine::AllRenderLayers;
+        bool m_RequestNavigationPreferences = false;
+        bool m_RequestNavigationHelp = false;
+        bool m_RequestCommandPalette = false;
+        std::array<char, 256> m_CommandFilter{};
+        bool m_RequestKeymapEditor = false;
+        std::array<char, 96> m_KeymapChord{};
+        int m_KeymapAction = 0;
+        int m_KeymapContext = 0;
+        enum class ProjectOperation : std::uint8_t { None, Open, Create, Clone, Restore };
+        ProjectOperation m_ProjectOperation = ProjectOperation::None;
+        std::filesystem::path m_ProjectOperationPath;
+        std::string m_ProjectOperationName;
+        bool m_RequestNewProjectPopup = false;
+        bool m_RequestUnsavedProjectPopup = false;
+        std::optional<std::filesystem::path> m_ProjectTransitionRequest;
+        RecentProjects m_RecentProjects;
+        bool m_RecentProjectsLoaded = false;
 
         void SetKeymapProfile(KeymapProfile profile)
         {
@@ -257,6 +344,23 @@ export namespace kairo::editor
             if (!ImGui::BeginMainMenuBar()) return;
             if (ImGui::BeginMenu("File"))
             {
+                if (ImGui::MenuItem("New Project...")) m_RequestNewProjectPopup = true;
+                if (ImGui::MenuItem("Open Project...")) RunCommand([this]
+                {
+                    if (const auto path = ChooseProjectFile(); path.has_value())
+                        QueueProjectOperation(ProjectOperation::Open, *path);
+                });
+                if (ImGui::BeginMenu("Open Recent"))
+                {
+                    if (m_RecentProjects.Entries().empty()) ImGui::MenuItem("No recent projects", nullptr, false, false);
+                    for (const auto& path : m_RecentProjects.Entries())
+                        if (ImGui::MenuItem(path.generic_string().c_str()))
+                            QueueProjectOperation(ProjectOperation::Open, path);
+                    ImGui::EndMenu();
+                }
+                if (ImGui::MenuItem("Save Project As...", nullptr, false, m_Project.HasProject()))
+                    m_RequestNewProjectPopup = true, m_ProjectOperation = ProjectOperation::Clone;
+                ImGui::Separator();
                 if (ImGui::MenuItem("New Document...", "Cmd+N", false, m_Project.HasProject()))
                     RequestNewDocument();
                 ImGui::Separator();
@@ -273,6 +377,21 @@ export namespace kairo::editor
                     RunCommand([this] { SaveAllWithDrafts(); });
                 if (ImGui::MenuItem("Create Recovery Point", nullptr, false, m_Project.HasProject()))
                     RunCommand([this] { CreateRecoveryNow(); });
+                if (ImGui::BeginMenu("Restore Recovery Point", m_Project.HasProject()))
+                {
+                    std::vector<std::filesystem::path> snapshots;
+                    std::error_code error;
+                    const auto recoveryRoot = m_Project.ProjectRoot() / ".kairo" / "recovery";
+                    for (std::filesystem::directory_iterator iterator(recoveryRoot, error), end;
+                        !error && iterator != end; iterator.increment(error))
+                        if (iterator->is_directory()) snapshots.push_back(iterator->path());
+                    std::ranges::sort(snapshots, std::greater{});
+                    if (snapshots.empty()) ImGui::MenuItem("No recovery points", nullptr, false, false);
+                    for (const auto& snapshot : snapshots)
+                        if (ImGui::MenuItem(snapshot.filename().string().c_str()))
+                            QueueProjectOperation(ProjectOperation::Restore, snapshot);
+                    ImGui::EndMenu();
+                }
                 ImGui::EndMenu();
             }
             if (ImGui::BeginMenu("Edit"))
@@ -305,6 +424,12 @@ export namespace kairo::editor
                     }
                     ImGui::EndMenu();
                 }
+                if (ImGui::MenuItem("Navigation Preferences..."))
+                    m_RequestNavigationPreferences = true;
+                if (ImGui::MenuItem("Keyboard Shortcuts...")) m_RequestKeymapEditor = true;
+                ImGui::Separator();
+                if (ImGui::MenuItem("Command Palette...", "Cmd+Shift+P"))
+                    m_RequestCommandPalette = true;
                 ImGui::EndMenu();
             }
             if (ImGui::BeginMenu("View"))
@@ -315,6 +440,11 @@ export namespace kairo::editor
                     bool visible = m_State.Panels().IsVisible(panel);
                     if (ImGui::MenuItem(Name(panel).data(), nullptr, &visible)) m_State.Panels().SetVisible(panel, visible);
                 }
+                ImGui::EndMenu();
+            }
+            if (ImGui::BeginMenu("Help"))
+            {
+                if (ImGui::MenuItem("Navigation Controls")) m_RequestNavigationHelp = true;
                 ImGui::EndMenu();
             }
 
@@ -337,6 +467,120 @@ export namespace kairo::editor
             }
             ImGui::EndMainMenuBar();
 
+        }
+
+        void QueueProjectOperation(ProjectOperation operation, std::filesystem::path path,
+            std::string name = {})
+        {
+            m_ProjectOperation = operation;
+            m_ProjectOperationPath = std::move(path);
+            m_ProjectOperationName = std::move(name);
+            if (m_Project.HasUnsavedChanges() || m_AuthoringWorkspace.HasDirtyTextDrafts())
+                m_RequestUnsavedProjectPopup = true;
+            else ExecuteProjectOperation();
+        }
+
+        void ExecuteProjectOperation()
+        {
+            if (m_ProjectOperation == ProjectOperation::Open)
+                m_Project.OpenProject(m_ProjectOperationPath, UnsavedChangesPolicy::Discard);
+            else if (m_ProjectOperation == ProjectOperation::Create)
+                m_Project.CreateProject(m_ProjectOperationPath, m_ProjectOperationName,
+                    UnsavedChangesPolicy::Discard);
+            else if (m_ProjectOperation == ProjectOperation::Clone)
+            {
+                const auto descriptorName = m_Project.ProjectFile().filename();
+                CloneProjectDirectory(m_Project.ProjectFile(), m_ProjectOperationPath);
+                m_Project.OpenProject(m_ProjectOperationPath / descriptorName,
+                    UnsavedChangesPolicy::Discard);
+            }
+            else if (m_ProjectOperation == ProjectOperation::Restore)
+                m_Project.RestoreRecoveryPoint(m_ProjectOperationPath,
+                    UnsavedChangesPolicy::Discard);
+            else return;
+            m_RecentProjects.Touch(m_Project.ProjectFile());
+            const auto recentPath = DefaultRecentProjectsPath();
+            if (!recentPath.empty()) m_RecentProjects.Save(recentPath);
+            m_ProjectTransitionRequest = m_Project.ProjectFile();
+            m_ProjectOperation = ProjectOperation::None;
+        }
+
+        void DrawProjectLifecyclePopups()
+        {
+            if (!m_RecentProjectsLoaded)
+            {
+                m_RecentProjectsLoaded = true;
+                const auto recentPath = DefaultRecentProjectsPath();
+                if (!recentPath.empty())
+                {
+                    RunCommand([this, recentPath]
+                    {
+                        m_RecentProjects = RecentProjects::Load(recentPath);
+                        m_RecentProjects.PruneMissing();
+                    });
+                }
+            }
+            if (m_RequestNewProjectPopup)
+            {
+                if (m_ProjectOperation != ProjectOperation::Clone) m_ProjectOperation = ProjectOperation::Create;
+                const std::string initial = m_ProjectOperation == ProjectOperation::Clone
+                    ? m_Project.Descriptor().Name + " Copy" : "Untitled Project";
+                std::snprintf(m_NewProjectName.data(), m_NewProjectName.size(), "%s", initial.c_str());
+                ImGui::OpenPopup(m_ProjectOperation == ProjectOperation::Clone ? "Save Project As" : "New Project");
+                m_RequestNewProjectPopup = false;
+            }
+            const char* title = m_ProjectOperation == ProjectOperation::Clone ? "Save Project As" : "New Project";
+            if (ImGui::BeginPopupModal(title, nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+            {
+                ImGui::InputText("Name", m_NewProjectName.data(), m_NewProjectName.size());
+                if (ImGui::Button("Choose Parent Folder...")) RunCommand([this]
+                {
+                    if (const auto parent = ChooseProjectParentDirectory(); parent.has_value())
+                    {
+                        const std::string name(m_NewProjectName.data());
+                        if (name.empty() || name == "." || name == ".." || name.find('/') != std::string::npos)
+                            throw std::invalid_argument("Project name must be a non-empty folder name without '/'.");
+                        const auto operation = m_ProjectOperation;
+                        ImGui::CloseCurrentPopup();
+                        QueueProjectOperation(operation, *parent / name, name);
+                    }
+                });
+                ImGui::SameLine();
+                if (ImGui::Button("Cancel"))
+                {
+                    m_ProjectOperation = ProjectOperation::None;
+                    ImGui::CloseCurrentPopup();
+                }
+                ImGui::EndPopup();
+            }
+            if (m_RequestUnsavedProjectPopup)
+            {
+                ImGui::OpenPopup("Unsaved project changes");
+                m_RequestUnsavedProjectPopup = false;
+            }
+            if (ImGui::BeginPopupModal("Unsaved project changes", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+            {
+                ImGui::TextWrapped("Save changes before switching projects?");
+                if (ImGui::Button("Save and Continue")) RunCommand([this]
+                {
+                    SaveAllWithDrafts();
+                    ExecuteProjectOperation();
+                    ImGui::CloseCurrentPopup();
+                });
+                ImGui::SameLine();
+                if (ImGui::Button("Discard")) RunCommand([this]
+                {
+                    ExecuteProjectOperation();
+                    ImGui::CloseCurrentPopup();
+                });
+                ImGui::SameLine();
+                if (ImGui::Button("Cancel"))
+                {
+                    m_ProjectOperation = ProjectOperation::None;
+                    ImGui::CloseCurrentPopup();
+                }
+                ImGui::EndPopup();
+            }
         }
 
         void DrawPlayControls()
@@ -421,6 +665,8 @@ export namespace kairo::editor
             ImGui::DockBuilderDockWindow("Console", bottom);
             ImGui::DockBuilderDockWindow("Timeline", bottom);
             ImGui::DockBuilderDockWindow("Code", bottom);
+            ImGui::DockBuilderDockWindow("Render Results", bottom);
+            ImGui::DockBuilderDockWindow("Native Gameplay", right);
             ImGui::DockBuilderDockWindow("Viewport", center);
             ImGui::DockBuilderDockWindow("Graph", center);
             ImGui::DockBuilderFinish(dockspace);
@@ -655,6 +901,23 @@ export namespace kairo::editor
                 auto renderer = scene.MeshRenderer(entity);
                 if (ImGui::TreeNodeEx("Mesh Renderer", ImGuiTreeNodeFlags_DefaultOpen))
                 {
+                    const auto currentMesh = m_Project.Assets().Resolve(renderer.MeshAsset);
+                    if (ImGui::BeginCombo("Mesh", currentMesh.Path.generic_string().c_str()))
+                    {
+                        for (const auto& metadata : m_Project.Assets().Snapshot())
+                        {
+                            if (metadata.Type != kairo::assets::AssetType::Mesh) continue;
+                            const bool selected = metadata.ID == renderer.MeshAsset.ID;
+                            if (ImGui::Selectable(metadata.Path.generic_string().c_str(), selected))
+                            {
+                                renderer.MeshAsset = { metadata.ID };
+                                RunCommand([this, entity, renderer] { m_History.Execute(
+                                    std::make_unique<SetMeshRendererComponentCommand>(
+                                        m_Project, entity, renderer)); });
+                            }
+                        }
+                        ImGui::EndCombo();
+                    }
                     const auto current = m_Project.Assets().Resolve(renderer.MaterialAsset);
                     if (ImGui::BeginCombo("Material", current.Path.generic_string().c_str()))
                     {
@@ -673,6 +936,61 @@ export namespace kairo::editor
                         }
                         ImGui::EndCombo();
                     }
+                    ImGui::SeparatorText("Additional Material Slots");
+                    std::optional<std::size_t> removeMaterialSlot;
+                    for (std::size_t slot = 0u; slot < renderer.AdditionalMaterialSlots.size(); ++slot)
+                    {
+                        ImGui::PushID(static_cast<int>(slot));
+                        const auto slotMetadata = m_Project.Assets().Resolve(
+                            renderer.AdditionalMaterialSlots[slot]);
+                        if (ImGui::BeginCombo("Slot", slotMetadata.Path.generic_string().c_str()))
+                        {
+                            for (const auto& metadata : m_Project.Assets().Snapshot())
+                            {
+                                if (metadata.Type != kairo::assets::AssetType::Material) continue;
+                                const bool selected = metadata.ID ==
+                                    renderer.AdditionalMaterialSlots[slot].ID;
+                                if (ImGui::Selectable(metadata.Path.generic_string().c_str(), selected))
+                                {
+                                    renderer.AdditionalMaterialSlots[slot] = { metadata.ID };
+                                    RunCommand([this, entity, renderer] { m_History.Execute(
+                                        std::make_unique<SetMeshRendererComponentCommand>(
+                                            m_Project, entity, renderer)); });
+                                }
+                            }
+                            ImGui::EndCombo();
+                        }
+                        ImGui::SameLine();
+                        if (ImGui::SmallButton("Remove")) removeMaterialSlot = slot;
+                        ImGui::PopID();
+                    }
+                    if (removeMaterialSlot.has_value())
+                    {
+                        renderer.AdditionalMaterialSlots.erase(
+                            renderer.AdditionalMaterialSlots.begin() +
+                            static_cast<std::ptrdiff_t>(*removeMaterialSlot));
+                        RunCommand([this, entity, renderer] { m_History.Execute(
+                            std::make_unique<SetMeshRendererComponentCommand>(
+                                m_Project, entity, renderer)); });
+                    }
+                    std::optional<kairo::assets::MaterialAssetHandle> firstMaterial;
+                    for (const auto& metadata : m_Project.Assets().Snapshot())
+                        if (metadata.Type == kairo::assets::AssetType::Material)
+                        {
+                            firstMaterial = kairo::assets::MaterialAssetHandle{ metadata.ID };
+                            break;
+                        }
+                    const bool canAddMaterialSlot = firstMaterial.has_value() &&
+                        renderer.MaterialSlotCount() < kairo::engine::MaximumMaterialSlots;
+                    ImGui::BeginDisabled(!canAddMaterialSlot);
+                    if (ImGui::SmallButton("+ Add Material Slot") && firstMaterial.has_value())
+                    {
+                        renderer.AdditionalMaterialSlots.push_back(*firstMaterial);
+                        RunCommand([this, entity, renderer] { m_History.Execute(
+                            std::make_unique<SetMeshRendererComponentCommand>(
+                                m_Project, entity, renderer)); });
+                    }
+                    ImGui::EndDisabled();
                     bool visible = renderer.Visible;
                     bool cast = renderer.CastShadows;
                     bool receive = renderer.ReceiveShadows;
@@ -724,6 +1042,9 @@ export namespace kairo::editor
                     bool changed = ImGui::Checkbox("Visible##SceneInstance", &visible);
                     changed |= ImGui::Checkbox("Cast Shadows##SceneInstance", &cast);
                     changed |= ImGui::Checkbox("Receive Shadows##SceneInstance", &receive);
+                    changed |= ImGui::InputScalar("Render Layers##SceneInstance",
+                        ImGuiDataType_U64, &instance.RenderLayers, nullptr, nullptr,
+                        "%016llX", ImGuiInputTextFlags_CharsHexadecimal);
                     if (changed)
                     {
                         instance.Visible = visible;
@@ -799,6 +1120,7 @@ export namespace kairo::editor
                         const auto world = scene.WorldTransform(entity);
                         m_ViewportController.SetPose({ world.Translation,
                             world.Translation + world.Forward(), world.Up() });
+                        m_ViewportRenderLayers = camera.RenderLayers;
                     }
                     ImGui::SameLine();
                     if (ActionButton("Remove##Camera", UIButtonTone::Destructive))
@@ -1015,7 +1337,8 @@ export namespace kairo::editor
                         IM_COL32(230, 125, 125, 255), "Viewport texture unavailable");
                 }
                 const bool hovered = ImGui::IsItemHovered();
-                if (hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+                const bool navigationClick = ImGui::GetIO().KeyAlt;
+                if (hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left) && !navigationClick)
                 {
                     ImGui::SetWindowFocus();
                     if (m_ActiveTool == EditorAction::SelectTool && m_ViewportTexture != ImTextureID_Invalid)
@@ -1040,7 +1363,7 @@ export namespace kairo::editor
                     m_ActiveTool == EditorAction::TranslateTool ? "MOVE" :
                     m_ActiveTool == EditorAction::RotateTool ? "ROTATE" : "SCALE");
                 ImGui::GetWindowDrawList()->AddText({ overlay.x, overlay.y + 18.0f }, IM_COL32(135, 165, 184, 190),
-                    "MMB orbit  Shift+MMB pan  RMB+WASD fly");
+                    "Option+LMB orbit  Shift+Option+LMB pan  Ctrl+Option+LMB dolly  RMB+WASD fly");
                 const auto selected = m_State.SelectedEntity();
                 if (selected.has_value())
                 {
@@ -1225,19 +1548,44 @@ export namespace kairo::editor
 
         void HandleViewportNavigation(bool hovered)
         {
-            if (!hovered) return;
             const ImGuiIO& io = ImGui::GetIO();
+            const bool optionLeft = io.KeyAlt && ImGui::IsMouseDown(ImGuiMouseButton_Left);
             const bool rightMouse = ImGui::IsMouseDown(ImGuiMouseButton_Right);
+            const bool middleMouse = ImGui::IsMouseDown(ImGuiMouseButton_Middle);
+            const bool requested = optionLeft || rightMouse || middleMouse;
+            if (!requested)
+            {
+                m_ViewportNavigationActive = false;
+                m_ViewportNavigationCancelled = false;
+            }
+            if (hovered && requested && !m_ViewportNavigationCancelled)
+                m_ViewportNavigationActive = true;
+            if (ImGui::IsKeyPressed(ImGuiKey_Escape, false))
+            {
+                m_ViewportNavigationActive = false;
+                m_ViewportNavigationCancelled = true;
+            }
+            m_ViewportFlyCursorCaptured = m_ViewportNavigationActive && rightMouse;
+            if (!hovered && !m_ViewportNavigationActive) return;
             ViewportInput input;
             input.MouseDeltaX = io.MouseDelta.x;
             input.MouseDeltaY = io.MouseDelta.y;
-            input.WheelDelta = io.MouseWheel;
+            input.WheelDelta = hovered && m_NavigationSettings.ScrollBehavior == ViewportScrollBehavior::Dolly
+                ? io.MouseWheel : 0.0f;
             input.DeltaSeconds = io.DeltaTime;
-            input.Orbit = ImGui::IsMouseDown(ImGuiMouseButton_Middle) && !io.KeyShift;
-            input.Pan = ImGui::IsMouseDown(ImGuiMouseButton_Middle) && io.KeyShift;
+            input.Orbit = (middleMouse && !io.KeyShift) || (optionLeft && !io.KeyShift && !io.KeyCtrl);
+            input.Pan = (middleMouse && io.KeyShift) || (optionLeft && io.KeyShift);
+            input.Dolly = optionLeft && io.KeyCtrl && !io.KeyShift;
             input.Fly = rightMouse;
+            if (hovered && m_NavigationSettings.ScrollBehavior == ViewportScrollBehavior::Pan && io.MouseWheel != 0.0f)
+            {
+                input.Pan = true;
+                input.MouseDeltaX = io.MouseWheelH * 24.0f;
+                input.MouseDeltaY = io.MouseWheel * 24.0f;
+            }
             if (rightMouse)
             {
+                ImGui::SetMouseCursor(ImGuiMouseCursor_None);
                 input.MoveForward = (ImGui::IsKeyDown(ImGuiKey_W) ? 1.0f : 0.0f) -
                     (ImGui::IsKeyDown(ImGuiKey_S) ? 1.0f : 0.0f);
                 input.MoveRight = (ImGui::IsKeyDown(ImGuiKey_D) ? 1.0f : 0.0f) -
@@ -1245,8 +1593,166 @@ export namespace kairo::editor
                 input.MoveUp = (ImGui::IsKeyDown(ImGuiKey_E) ? 1.0f : 0.0f) -
                     (ImGui::IsKeyDown(ImGuiKey_Q) ? 1.0f : 0.0f);
             }
-            m_ViewportController.Update(input);
+            m_ViewportController.Update(input, m_NavigationSettings);
 
+        }
+
+        void PersistNavigationSettings()
+        {
+            ValidateNavigationSettings(m_NavigationSettings);
+            if (!m_NavigationSettingsPath.empty())
+                SaveNavigationSettings(m_NavigationSettingsPath, m_NavigationSettings);
+        }
+
+        void DrawNavigationPreferences()
+        {
+            if (m_RequestNavigationPreferences)
+            {
+                ImGui::OpenPopup("Navigation Preferences");
+                m_RequestNavigationPreferences = false;
+            }
+            if (!ImGui::BeginPopupModal("Navigation Preferences", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) return;
+            ImGui::TextUnformatted("Viewport");
+            ImGui::DragFloat("Orbit sensitivity", &m_NavigationSettings.OrbitSensitivity, 0.0001f, 0.0001f, 0.1f, "%.4f");
+            ImGui::DragFloat("Pan sensitivity", &m_NavigationSettings.PanSensitivity, 0.0001f, 0.0001f, 0.1f, "%.4f");
+            ImGui::DragFloat("Dolly sensitivity", &m_NavigationSettings.DollySensitivity, 0.0001f, 0.0001f, 0.2f, "%.4f");
+            ImGui::DragFloat("Fly speed", &m_NavigationSettings.FlySpeed, 0.05f, 0.05f, 50.0f, "%.2f");
+            ImGui::Checkbox("Invert orbit X", &m_NavigationSettings.InvertOrbitX);
+            ImGui::Checkbox("Invert orbit Y", &m_NavigationSettings.InvertOrbitY);
+            int scroll = m_NavigationSettings.ScrollBehavior == ViewportScrollBehavior::Dolly ? 0 : 1;
+            if (ImGui::Combo("Two-finger scroll", &scroll, "Dolly\0Pan\0"))
+                m_NavigationSettings.ScrollBehavior = scroll == 0
+                    ? ViewportScrollBehavior::Dolly : ViewportScrollBehavior::Pan;
+            ImGui::Separator();
+            if (ImGui::Button("Save")) RunCommand([this]
+            {
+                PersistNavigationSettings();
+                ImGui::CloseCurrentPopup();
+            });
+            ImGui::SameLine();
+            if (ImGui::Button("Reset")) m_NavigationSettings = {};
+            ImGui::SameLine();
+            if (ImGui::Button("Cancel")) ImGui::CloseCurrentPopup();
+            ImGui::EndPopup();
+        }
+
+        void DrawNavigationHelp()
+        {
+            if (m_RequestNavigationHelp)
+            {
+                ImGui::OpenPopup("Navigation Controls");
+                m_RequestNavigationHelp = false;
+            }
+            if (!ImGui::BeginPopupModal("Navigation Controls", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) return;
+            ImGui::TextUnformatted("3D viewport");
+            ImGui::BulletText("Option + left drag: orbit");
+            ImGui::BulletText("Shift + Option + left drag: pan");
+            ImGui::BulletText("Control + Option + left drag: dolly");
+            ImGui::BulletText("Right drag + W/A/S/D/Q/E: fly and look");
+            ImGui::BulletText("Wheel / two-finger scroll: configured pan or dolly");
+            ImGui::BulletText("F: frame selection; Escape: cancel navigation");
+            ImGui::Separator();
+            ImGui::TextUnformatted("2D canvases");
+            ImGui::BulletText("Space + left drag or middle drag: pan");
+            ImGui::BulletText("Wheel / pinch gesture: zoom at pointer");
+            if (ImGui::Button("Close")) ImGui::CloseCurrentPopup();
+            ImGui::EndPopup();
+        }
+
+        void DrawCommandPalette()
+        {
+            const ImGuiIO& io = ImGui::GetIO();
+            if ((io.KeySuper || io.KeyCtrl) && io.KeyShift && ImGui::IsKeyPressed(ImGuiKey_P, false))
+                m_RequestCommandPalette = true;
+            if (m_RequestCommandPalette)
+            {
+                m_CommandFilter.fill('\0');
+                ImGui::OpenPopup("Command Palette");
+                m_RequestCommandPalette = false;
+            }
+            if (!ImGui::BeginPopupModal("Command Palette", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) return;
+            ImGui::SetNextItemWidth(440.0f);
+            ImGui::InputTextWithHint("##command-search", "Search actions...",
+                m_CommandFilter.data(), m_CommandFilter.size());
+            const std::string filter = Lower(m_CommandFilter.data());
+            if (ImGui::BeginChild("##commands", { 440.0f, 300.0f }, ImGuiChildFlags_Borders))
+            {
+                for (const auto& binding : DefaultEditorActionBindings())
+                {
+                    if (!filter.empty() && Lower(binding.DisplayName).find(filter) == std::string::npos) continue;
+                    const std::string label = std::string(binding.DisplayName) + "\t" +
+                        std::string(binding.Shortcut);
+                    if (ImGui::Selectable(label.c_str()))
+                    {
+                        m_InputRouter.Trigger(binding.Action);
+                        ImGui::CloseCurrentPopup();
+                    }
+                }
+            }
+            ImGui::EndChild();
+            if (ImGui::Button("Close")) ImGui::CloseCurrentPopup();
+            ImGui::EndPopup();
+        }
+
+        void ApplyKeymapEdit(bool unbind)
+        {
+            const auto action = static_cast<EditorAction>(m_KeymapAction);
+            constexpr std::array contexts{ InputContext::Global, InputContext::Scene,
+                InputContext::Graph, InputContext::Modeling, InputContext::Code, InputContext::Play };
+            const auto context = contexts.at(static_cast<std::size_t>(m_KeymapContext));
+            EditorKeymapSettings candidate = m_KeymapSettings;
+            std::erase_if(candidate.Overrides, [&](const KeymapOverride& value)
+            { return value.Action == action && value.Context == context; });
+            KeymapOverride replacement{ action, context, {} };
+            if (!unbind) replacement.Chords.push_back(ParseInputChord(m_KeymapChord.data()));
+            candidate.Overrides.push_back(std::move(replacement));
+            (void)BuildInputBindings(candidate.Profile, candidate.Overrides);
+            if (!m_KeymapSettingsPath.empty()) SaveKeymapSettings(m_KeymapSettingsPath, candidate);
+            m_InputRouter.SetOverrides(candidate.Overrides);
+            m_KeymapSettings = std::move(candidate);
+        }
+
+        void DrawKeymapEditor()
+        {
+            if (m_RequestKeymapEditor)
+            {
+                m_KeymapChord.fill('\0');
+                ImGui::OpenPopup("Keyboard Shortcuts");
+                m_RequestKeymapEditor = false;
+            }
+            if (!ImGui::BeginPopupModal("Keyboard Shortcuts", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) return;
+            ImGui::Text("Profile: %s", std::string(Name(m_KeymapSettings.Profile)).c_str());
+            if (ImGui::BeginChild("##effective-bindings", { 620.0f, 260.0f }, ImGuiChildFlags_Borders))
+                for (const auto& binding : m_InputRouter.Bindings())
+                    ImGui::BulletText("%-18s  %-8s  %s", BindingFor(binding.Action).DisplayName.data(),
+                        Name(binding.Context).data(), FormatInputChord(binding.Chord).c_str());
+            ImGui::EndChild();
+            constexpr auto actions = DefaultEditorActionBindings();
+            if (ImGui::BeginCombo("Action", actions.at(static_cast<std::size_t>(m_KeymapAction)).DisplayName.data()))
+            {
+                for (std::size_t index = 0u; index < actions.size(); ++index)
+                    if (ImGui::Selectable(actions[index].DisplayName.data(), m_KeymapAction == static_cast<int>(index)))
+                        m_KeymapAction = static_cast<int>(index);
+                ImGui::EndCombo();
+            }
+            constexpr std::array contexts{ InputContext::Global, InputContext::Scene,
+                InputContext::Graph, InputContext::Modeling, InputContext::Code, InputContext::Play };
+            if (ImGui::BeginCombo("Context", Name(contexts.at(static_cast<std::size_t>(m_KeymapContext))).data()))
+            {
+                for (std::size_t index = 0u; index < contexts.size(); ++index)
+                    if (ImGui::Selectable(Name(contexts[index]).data(), m_KeymapContext == static_cast<int>(index)))
+                        m_KeymapContext = static_cast<int>(index);
+                ImGui::EndCombo();
+            }
+            ImGui::InputTextWithHint("Chord", "shortcut+shift+p", m_KeymapChord.data(), m_KeymapChord.size());
+            if (ImGui::Button("Replace Binding")) RunCommand([this] { ApplyKeymapEdit(false); });
+            ImGui::SameLine();
+            if (ImGui::Button("Unbind")) RunCommand([this] { ApplyKeymapEdit(true); });
+            ImGui::SameLine();
+            if (ImGui::Button("Reset All")) RunCommand([this] { ResetKeymapOverrides(); });
+            ImGui::SameLine();
+            if (ImGui::Button("Close")) ImGui::CloseCurrentPopup();
+            ImGui::EndPopup();
         }
 
         [[nodiscard]] bool DrawTransformGizmo(ImVec2 viewportMin, ImVec2 viewportSize)
@@ -1340,12 +1846,203 @@ export namespace kairo::editor
                     if (ActionButton("New Document", UIButtonTone::Primary)) RequestNewDocument();
                 }
             }
-            else if (panel == Panel::Console) ImGui::TextDisabled("No engine messages.");
+            else if (panel == Panel::Console)
+            {
+                const auto& diagnostics = m_Diagnostics.Snapshot();
+                if (diagnostics.empty()) ImGui::TextDisabled("No diagnostics.");
+                for (std::size_t index = 0u; index < diagnostics.size(); ++index)
+                {
+                    const auto& diagnostic = diagnostics[index];
+                    const ImVec4 color = diagnostic.Severity == DiagnosticSeverity::Error
+                        ? ImVec4{ 0.95f, 0.35f, 0.35f, 1.0f }
+                        : diagnostic.Severity == DiagnosticSeverity::Warning
+                        ? ImVec4{ 0.95f, 0.72f, 0.25f, 1.0f }
+                        : ImVec4{ 0.55f, 0.75f, 0.95f, 1.0f };
+                    ImGui::PushID(static_cast<int>(index));
+                    ImGui::TextColored(color, "%s", diagnostic.Code.c_str());
+                    ImGui::SameLine();
+                    if (ImGui::Selectable(diagnostic.Message.c_str(), false,
+                        ImGuiSelectableFlags_SpanAllColumns)) NavigateDiagnostic(diagnostic.Target);
+                    ImGui::PopID();
+                }
+            }
             else if (panel == Panel::PhysicsDebug) DrawPhysicsDebug();
             else if (panel == Panel::ContentBrowser) DrawContentBrowser();
+            else if (panel == Panel::RenderResults) DrawOfflineRenderResults();
+            else if (panel == Panel::NativeGameplay) DrawNativeGameplay();
             else if (panel == Panel::AIAssistant) DrawAIAssistant();
             else ImGui::TextDisabled("No active document for this workspace.");
             ImGui::End();
+        }
+
+        void DrawOfflineRenderResults()
+        {
+            if (!m_OfflineRender)
+            {
+                ImGui::TextDisabled("Offline renderer unavailable in this build.");
+                return;
+            }
+
+            ImGui::SetNextItemWidth(110.0f);
+            ImGui::InputInt("Width", &m_OfflineRenderWidth, 64, 256);
+            ImGui::SetNextItemWidth(110.0f);
+            ImGui::InputInt("Height", &m_OfflineRenderHeight, 64, 256);
+            ImGui::SetNextItemWidth(110.0f);
+            ImGui::InputInt("Passes", &m_OfflineRenderPasses, 1, 16);
+            ImGui::InputText("Project output", m_OfflineRenderOutput.data(),
+                m_OfflineRenderOutput.size());
+
+            const auto status = m_OfflineRender->State().Status();
+            const bool active = status == OfflineRenderWorkspaceStatus::Queued ||
+                status == OfflineRenderWorkspaceStatus::Running;
+            if (ActionButton("Render", UIButtonTone::Primary, !active))
+                RunCommand([this]
+                {
+                    OfflineRenderRequest request;
+                    request.JobID = m_NextOfflineRenderJob++;
+                    request.Width = static_cast<std::uint32_t>(m_OfflineRenderWidth);
+                    request.Height = static_cast<std::uint32_t>(m_OfflineRenderHeight);
+                    request.Passes = static_cast<std::uint32_t>(m_OfflineRenderPasses);
+                    request.ProjectRoot = m_Project.ProjectRoot();
+                    request.RelativeOutput = m_OfflineRenderOutput.data();
+                    m_OfflineRender->Submit(std::move(request));
+                });
+            if (active)
+            {
+                ImGui::SameLine();
+                if (ActionButton("Cancel", UIButtonTone::Destructive))
+                    RunCommand([this] { m_OfflineRender->Cancel(); });
+            }
+
+            const auto& state = m_OfflineRender->State();
+            const char* statusName = "Idle";
+            switch (state.Status())
+            {
+                case OfflineRenderWorkspaceStatus::Idle: statusName = "Idle"; break;
+                case OfflineRenderWorkspaceStatus::Queued: statusName = "Queued"; break;
+                case OfflineRenderWorkspaceStatus::Running: statusName = "Rendering"; break;
+                case OfflineRenderWorkspaceStatus::Completed: statusName = "Completed"; break;
+                case OfflineRenderWorkspaceStatus::Cancelled: statusName = "Cancelled"; break;
+                case OfflineRenderWorkspaceStatus::Failed: statusName = "Failed"; break;
+            }
+            const float progress = static_cast<float>(state.Progress());
+            ImGui::ProgressBar(progress, { -1.0f, 0.0f }, statusName);
+            if (state.Output().has_value())
+            {
+                ImGui::SeparatorText("Latest result");
+                ImGui::TextWrapped("%s", state.Output()->generic_string().c_str());
+                ImGui::TextDisabled("Metadata: %s.kairo-render",
+                    state.Output()->generic_string().c_str());
+            }
+            for (const auto& diagnostic : state.Diagnostics())
+                ImGui::TextWrapped("%s", diagnostic.c_str());
+        }
+
+        void PersistNativeGameplay()
+        {
+            if (!m_NativeGameplay) return;
+            m_NativeGameplay->Save(m_NativeGameplayPath);
+        }
+
+        void DrawNativeGameplay()
+        {
+            if (!m_NativeGameplay)
+            {
+                ImGui::TextDisabled("Native gameplay registry unavailable in this host.");
+                return;
+            }
+            const auto selected = m_State.SelectedEntity();
+            if (!selected.has_value())
+            {
+                ImGui::TextDisabled("Select an entity to author native gameplay.");
+                return;
+            }
+
+            const auto types = m_NativeGameplay->AvailableTypes();
+            if (!types.empty())
+            {
+                m_NativeGameplayType = std::clamp(m_NativeGameplayType, 0,
+                    static_cast<int>(types.size() - 1u));
+                if (ImGui::BeginCombo("Type", types[static_cast<std::size_t>(m_NativeGameplayType)].TypeName.c_str()))
+                {
+                    for (std::size_t index = 0u; index < types.size(); ++index)
+                        if (ImGui::Selectable(types[index].TypeName.c_str(),
+                            static_cast<int>(index) == m_NativeGameplayType))
+                            m_NativeGameplayType = static_cast<int>(index);
+                    ImGui::EndCombo();
+                }
+                if (ActionButton("Attach", UIButtonTone::Primary))
+                    RunCommand([this, entity = *selected, type =
+                        types[static_cast<std::size_t>(m_NativeGameplayType)].TypeName]
+                    {
+                        m_NativeGameplay->Attach(entity, type);
+                        PersistNativeGameplay();
+                    });
+            }
+            else ImGui::TextDisabled("No native gameplay types are linked into this Editor host.");
+
+            for (const auto& section : m_NativeGameplay->Inspect(*selected))
+            {
+                ImGui::PushID(section.TypeName.c_str());
+                if (ImGui::CollapsingHeader(section.TypeName.c_str(), ImGuiTreeNodeFlags_DefaultOpen))
+                {
+                    bool enabled = section.Enabled;
+                    if (ImGui::Checkbox("Enabled", &enabled)) RunCommand([this, entity = *selected,
+                        type = section.TypeName, enabled]
+                    {
+                        m_NativeGameplay->SetEnabled(entity, type, enabled);
+                        PersistNativeGameplay();
+                    });
+                    for (const auto& property : section.Properties)
+                    {
+                        if (!property.Exposed) continue;
+                        kairo::engine::NativeGameplayValue value = property.Value;
+                        bool changed = false;
+                        if (auto* flag = std::get_if<bool>(&value))
+                            changed = ImGui::Checkbox(property.Name.c_str(), flag);
+                        else if (auto* number = std::get_if<double>(&value))
+                        {
+                            const double minimum = property.Minimum.value_or(0.0);
+                            const double maximum = property.Maximum.value_or(0.0);
+                            changed = ImGui::InputScalar(property.Name.c_str(), ImGuiDataType_Double,
+                                number, nullptr, nullptr, "%.6f",
+                                property.Minimum.has_value() && property.Maximum.has_value()
+                                    ? ImGuiInputTextFlags_CharsDecimal : 0);
+                            if (changed && property.Minimum.has_value() && property.Maximum.has_value())
+                                *number = std::clamp(*number, minimum, maximum);
+                        }
+                        else if (auto* vector = std::get_if<kairo::foundation::math::Vec3d>(&value))
+                            changed = ImGui::InputScalarN(property.Name.c_str(), ImGuiDataType_Double,
+                                &vector->x, 3);
+                        else if (auto* entity = std::get_if<kairo::engine::Entity>(&value))
+                        {
+                            std::uint32_t id = entity->Value;
+                            changed = ImGui::InputScalar(property.Name.c_str(), ImGuiDataType_U32, &id);
+                            if (changed) *entity = kairo::engine::Entity{ id };
+                        }
+                        else if (auto* text = std::get_if<std::string>(&value))
+                        {
+                            std::array<char, 256> buffer{};
+                            std::snprintf(buffer.data(), buffer.size(), "%s", text->c_str());
+                            changed = ImGui::InputText(property.Name.c_str(), buffer.data(), buffer.size());
+                            if (changed) *text = buffer.data();
+                        }
+                        if (changed) RunCommand([this, entity = *selected, type = section.TypeName,
+                            name = property.Name, value = std::move(value)]() mutable
+                        {
+                            m_NativeGameplay->SetProperty(entity, type, std::move(name), std::move(value));
+                            PersistNativeGameplay();
+                        });
+                    }
+                    if (ActionButton("Remove", UIButtonTone::Destructive))
+                        RunCommand([this, entity = *selected, type = section.TypeName]
+                        {
+                            m_NativeGameplay->Remove(entity, type);
+                            PersistNativeGameplay();
+                        });
+                }
+                ImGui::PopID();
+            }
         }
 
         void DrawAIAssistant()
@@ -1825,6 +2522,28 @@ export namespace kairo::editor
             return result;
         }
 
+        void NavigateDiagnostic(const DiagnosticTarget& target)
+        {
+            if (const auto* entity = std::get_if<EntityDiagnosticTarget>(&target))
+            {
+                if (m_Project.Scene().Contains(entity->Entity)) m_State.Select(entity->Entity);
+            }
+            else if (const auto* asset = std::get_if<AssetDiagnosticTarget>(&target))
+            {
+                const auto metadata = m_Project.Assets().Find(asset->Asset);
+                if (metadata.has_value() && metadata->Type == kairo::assets::AssetType::Document)
+                    OpenDocument(metadata->Path);
+            }
+            else if (const auto* graph = std::get_if<GraphDiagnosticTarget>(&target))
+            {
+                if (m_Project.Documents().Contains(graph->Document))
+                {
+                    m_Project.ActivateDocument(graph->Document);
+                    m_State.SwitchWorkspace(Workspace::Logic);
+                }
+            }
+        }
+
         template<class Command>
         void RunCommand(Command&& command) noexcept
         {
@@ -1832,6 +2551,9 @@ export namespace kairo::editor
             catch (const std::exception& error)
             {
                 m_LastError = error.what();
+                m_Diagnostics.ReplaceProducer("editor", { {
+                    "editor", "EDITOR_OPERATION", DiagnosticSeverity::Error,
+                    m_LastError, std::monostate{} } });
                 m_RequestErrorPopup = true;
             }
         }

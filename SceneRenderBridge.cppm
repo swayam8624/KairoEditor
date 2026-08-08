@@ -328,18 +328,22 @@ export namespace kairo::editor
     ///
     /// Coordinate convention: EngineCore and KairoRenderer share KairoMath's
     /// right-handed TRS representation, so no axis or handedness conversion is
-    /// performed. Material slots remain authored scene data until the renderer
-    /// material registry lands; the current forward pass uses a neutral tint.
+    /// performed. The layer mask is the active viewport/camera culling mask;
+    /// zero is rejected rather than silently producing an empty view.
     /// Degeneracy: missing assets and singular transforms fail before the
     /// renderer records GPU commands.
     [[nodiscard]] inline kairo::renderer::RenderScene BuildRenderScene(
         const kairo::engine::Scene& scene,
-        const RenderAssetBindings& assets)
+        const RenderAssetBindings& assets,
+        std::uint64_t renderLayers = kairo::engine::AllRenderLayers)
     {
+        if (renderLayers == 0u)
+            throw std::invalid_argument("Render extraction requires a non-empty layer mask.");
         kairo::renderer::RenderScene result;
         for (const kairo::engine::Entity entity : scene.RenderableEntities())
         {
             const auto& meshRenderer = scene.MeshRenderer(entity);
+            if ((meshRenderer.RenderLayers & renderLayers) == 0u) continue;
             result.Add({ .Mesh = assets.ResolveMesh(meshRenderer.MeshAsset),
                 .Model = kairo::foundation::math::ToMatrix4(scene.WorldTransform(entity)),
                 .Material = assets.ResolveMaterial(meshRenderer.MaterialForSlot(0u)),
@@ -350,6 +354,7 @@ export namespace kairo::editor
         for (const kairo::engine::Entity entity : scene.SceneInstanceEntities())
         {
             const auto& instance = scene.SceneInstance(entity);
+            if ((instance.RenderLayers & renderLayers) == 0u) continue;
             const auto instanceWorld =
                 kairo::foundation::math::ToMatrix4(scene.WorldTransform(entity));
             for (const auto& primitive : assets.ResolveScene(instance.SceneAsset))
@@ -361,14 +366,18 @@ export namespace kairo::editor
                     .ReceiveShadows = instance.ReceiveShadows });
         }
         for (const kairo::engine::Entity entity : scene.LightEntities())
-            result.AddLight(MakeRenderLight(scene.Light(entity), scene.WorldTransform(entity)));
+            if ((scene.Light(entity).RenderLayers & renderLayers) != 0u)
+                result.AddLight(MakeRenderLight(scene.Light(entity), scene.WorldTransform(entity)));
         if (const auto active = scene.ActiveEnvironment(); active.has_value())
         {
             const auto& source = scene.Environment(*active);
             kairo::renderer::RenderEnvironment environment;
             environment.BackgroundColor = source.BackgroundColor;
             environment.AmbientIntensity = source.AmbientIntensity * source.EnvironmentIntensity;
+            environment.EnvironmentIntensity = source.EnvironmentIntensity;
             environment.ExposureEV100 = source.ExposureEV100;
+            if (source.EnvironmentTexture.has_value())
+                environment.EnvironmentTexture = assets.ResolveTexture(*source.EnvironmentTexture);
             result.SetEnvironment(environment);
         }
         return result;

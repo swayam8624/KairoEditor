@@ -1,5 +1,7 @@
 # Editor Controls
 
+Phase completion is tracked in [EDITOR_PHASE_CHECKLIST.md](EDITOR_PHASE_CHECKLIST.md).
+
 KairoEditor uses one action vocabulary across macOS and other desktop systems:
 `Cmd` means `Cmd` on macOS and `Ctrl` elsewhere. Shortcuts are intentionally
 processed only when the relevant editor surface owns focus, so typing in a code
@@ -49,10 +51,10 @@ Bindings** removes overrides while retaining the selected profile.
 | Delete selected entity | `Delete` or `X` |
 | Duplicate selected entity | `Cmd+D` |
 | Frame selected entity | `F` |
-| Orbit | middle mouse drag |
-| Pan | `Shift` + middle mouse drag |
-| Zoom | mouse wheel |
-| Fly navigation | hold right mouse, then `W`/`A`/`S`/`D`; `Q`/`E` descend/ascend |
+| Orbit | `Option` + left drag, or middle mouse drag |
+| Pan | `Shift+Option` + left drag, or `Shift` + middle mouse drag |
+| Dolly / zoom | `Control+Option` + left drag, or two-finger scroll / wheel |
+| Fly navigation | right drag to look; `W`/`A`/`S`/`D` move and `Q`/`E` descend/ascend |
 | Transform selected entity | choose a transform tool, then left-drag inside the viewport |
 
 `R` is the scale-tool binding used by the current Unreal-style toolbar. `E`
@@ -69,7 +71,7 @@ aliases for move and scale.
 | Duplicate selected nodes | `Cmd+D` |
 | Copy / paste selected nodes | `Cmd+C` / `Cmd+V` |
 | Frame selection / all nodes | `F` / `Home` |
-| Pan / zoom | middle mouse drag / mouse wheel |
+| Pan / zoom | `Space` + left drag or middle drag / pointer-centered wheel or pinch |
 | Select nodes | click, modifier click, or marquee |
 | Connect pins | drag from an input or output pin |
 

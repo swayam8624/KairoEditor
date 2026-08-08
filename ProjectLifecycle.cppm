@@ -2,6 +2,7 @@ module;
 
 #include <algorithm>
 #include <cstddef>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
@@ -18,6 +19,22 @@ import Kairo.Editor.ProjectDescriptor;
 
 export namespace kairo::editor
 {
+    [[nodiscard]] inline std::filesystem::path DefaultRecentProjectsPath()
+    {
+#if defined(_WIN32)
+        if (const char* root = std::getenv("APPDATA")) return std::filesystem::path(root) / "Kairo" / "recent-projects";
+#elif defined(__APPLE__)
+        if (const char* root = std::getenv("HOME"))
+            return std::filesystem::path(root) / "Library" / "Application Support" / "Kairo" / "recent-projects";
+#else
+        if (const char* root = std::getenv("XDG_CONFIG_HOME"))
+            return std::filesystem::path(root) / "kairo" / "recent-projects";
+        if (const char* root = std::getenv("HOME"))
+            return std::filesystem::path(root) / ".config" / "kairo" / "recent-projects";
+#endif
+        return {};
+    }
+
     class RecentProjects final
     {
     public:

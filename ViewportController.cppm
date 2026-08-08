@@ -8,6 +8,7 @@ module;
 export module Kairo.Editor.ViewportController;
 
 import Kairo.Foundation.Math;
+import Kairo.Editor.NavigationSettings;
 
 export namespace kairo::editor
 {
@@ -35,6 +36,7 @@ export namespace kairo::editor
         float DeltaSeconds = 0.0f;
         bool Orbit = false;
         bool Pan = false;
+        bool Dolly = false;
         bool Fly = false;
     };
 
@@ -116,29 +118,37 @@ export namespace kairo::editor
             m_Distance = std::clamp(distance, 0.15f, 5000.0f);
         }
 
-        void Update(const ViewportInput& input)
+        void Update(const ViewportInput& input, const NavigationSettings& settings = {})
         {
+            ValidateNavigationSettings(settings);
             if (!std::isfinite(input.MouseDeltaX) || !std::isfinite(input.MouseDeltaY) ||
                 !std::isfinite(input.WheelDelta) || !std::isfinite(input.DeltaSeconds) ||
                 input.DeltaSeconds < 0.0f)
                 throw std::invalid_argument("Viewport input must be finite with non-negative delta time.");
             using namespace kairo::foundation::math;
-            if (input.Orbit)
+            if (input.Orbit || input.Fly)
             {
-                m_Yaw -= input.MouseDeltaX * 0.008f;
-                m_Pitch = std::clamp(m_Pitch - input.MouseDeltaY * 0.008f, -1.52f, 1.52f);
+                const float xDirection = settings.InvertOrbitX ? -1.0f : 1.0f;
+                const float yDirection = settings.InvertOrbitY ? -1.0f : 1.0f;
+                m_Yaw -= input.MouseDeltaX * settings.OrbitSensitivity * xDirection;
+                m_Pitch = std::clamp(m_Pitch - input.MouseDeltaY * settings.OrbitSensitivity * yDirection,
+                    -1.52f, 1.52f);
             }
             const ViewportCameraPose pose = Pose();
             const Vec3f forward = SafeNormalize(pose.Target - pose.Position, Vec3f::Forward());
             const Vec3f right = SafeNormalize(Cross(forward, pose.Up), Vec3f::Right());
             const Vec3f up = SafeNormalize(Cross(right, forward), Vec3f::Up());
             if (input.Pan)
-                m_Target += (-right * input.MouseDeltaX + up * input.MouseDeltaY) * (m_Distance * 0.0022f);
+                m_Target += (-right * input.MouseDeltaX + up * input.MouseDeltaY) *
+                    (m_Distance * settings.PanSensitivity);
+            if (input.Dolly)
+                m_Distance = std::clamp(m_Distance * std::exp(input.MouseDeltaY * settings.DollySensitivity),
+                    0.15f, 5000.0f);
             if (input.WheelDelta != 0.0f)
                 m_Distance = std::clamp(m_Distance * std::exp(-input.WheelDelta * 0.13f), 0.15f, 5000.0f);
             if (input.Fly)
             {
-                const float speed = std::max(1.0f, m_Distance) * 1.8f * input.DeltaSeconds;
+                const float speed = std::max(1.0f, m_Distance) * settings.FlySpeed * input.DeltaSeconds;
                 const Vec3f translation = (forward * input.MoveForward + right * input.MoveRight + up * input.MoveUp) * speed;
                 m_Target += translation;
             }

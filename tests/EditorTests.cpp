@@ -66,6 +66,14 @@ TEST_CASE("Editor actions and viewport navigation provide deterministic authorin
     CHECK(orbit.Position != initial.Position);
     viewport.Update({ .WheelDelta = 2.0f });
     CHECK(viewport.Distance() < 5.0f);
+    const auto beforeDolly = viewport.Distance();
+    viewport.Update({ .MouseDeltaY = -10.0f, .Dolly = true });
+    CHECK(viewport.Distance() < beforeDolly);
+    const auto beforeFly = viewport.Pose();
+    viewport.Update({ .MouseDeltaX = 12.0f, .MoveForward = 1.0f,
+        .DeltaSeconds = 0.25f, .Fly = true });
+    CHECK(viewport.Pose().Target != beforeFly.Target);
+    CHECK(viewport.Pose().Position != beforeFly.Position);
     viewport.Focus({ 2.0f, 1.0f, -3.0f }, 7.0f);
     CHECK(viewport.Pose().Target == kairo::foundation::math::Vec3f{ 2.0f, 1.0f, -3.0f });
     viewport.SnapToAxis(ViewportAxis::Right);
@@ -73,6 +81,25 @@ TEST_CASE("Editor actions and viewport navigation provide deterministic authorin
     viewport.SnapToAxis(ViewportAxis::Top);
     CHECK(viewport.Pose().Position.y > viewport.Pose().Target.y);
     REQUIRE_THROWS_AS(viewport.Focus({ 0.0f, 0.0f, 0.0f }, 0.0f), std::invalid_argument);
+}
+
+TEST_CASE("Navigation settings persist strict trackpad and fly preferences",
+    "[KairoEditor][Input][Settings]")
+{
+    NavigationSettings settings;
+    settings.OrbitSensitivity = 0.0125f;
+    settings.PanSensitivity = 0.003f;
+    settings.DollySensitivity = 0.02f;
+    settings.FlySpeed = 3.5f;
+    settings.InvertOrbitY = true;
+    settings.ScrollBehavior = ViewportScrollBehavior::Pan;
+    const auto source = SerializeNavigationSettings(settings);
+    const auto parsed = ParseNavigationSettings(source);
+    CHECK(parsed == settings);
+    REQUIRE_THROWS_AS(ParseNavigationSettings(
+        "kairo-navigation 1\nfly-speed 0\n"), std::invalid_argument);
+    REQUIRE_THROWS_AS(ParseNavigationSettings(
+        "kairo-navigation 2\n"), std::invalid_argument);
 }
 
 TEST_CASE("Builtin primitive identities are stable persistent asset references", "[KairoEditor][Primitives]")

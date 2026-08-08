@@ -3,6 +3,7 @@ module;
 #include <algorithm>
 #include <cstddef>
 #include <filesystem>
+#include <functional>
 #include <map>
 #include <optional>
 #include <stdexcept>
@@ -21,6 +22,26 @@ import Kairo.EngineCore.Scene;
 
 export namespace kairo::editor
 {
+    using NativeGameplayRegistration =
+        std::function<void(kairo::engine::NativeGameplayRegistry&)>;
+
+    /// Output: the process-wide registry populated by linked game modules.
+    /// Task: give the native Editor and Player equivalent explicit registration
+    /// boundaries without loading type names from untrusted project text.
+    [[nodiscard]] inline kairo::engine::NativeGameplayRegistry&
+    EditorNativeGameplayRegistry() noexcept
+    {
+        static kairo::engine::NativeGameplayRegistry registry;
+        return registry;
+    }
+
+    inline void RegisterEditorNativeGameplay(NativeGameplayRegistration registration)
+    {
+        if (!registration)
+            throw std::invalid_argument("Editor native gameplay registration callback cannot be empty.");
+        registration(EditorNativeGameplayRegistry());
+    }
+
     struct NativeGameplayInspectorProperty final
     {
         std::string Name;

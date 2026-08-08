@@ -34,7 +34,8 @@ export namespace kairo::editor
             {
             case Workspace::Scene:
                 Show({ Panel::Hierarchy, Panel::Inspector, Panel::Viewport, Panel::ContentBrowser,
-                    Panel::Console, Panel::AIAssistant }); break;
+                    Panel::Console, Panel::RenderResults, Panel::NativeGameplay,
+                    Panel::AIAssistant }); break;
             case Workspace::World:
                 Show({ Panel::Hierarchy, Panel::Inspector, Panel::Viewport, Panel::ContentBrowser, Panel::WorldTools }); break;
             case Workspace::Logic:

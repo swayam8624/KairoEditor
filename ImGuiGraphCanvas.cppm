@@ -75,7 +75,7 @@ export namespace kairo::editor
             std::vector<GraphNodeLayout> layouts = BuildLayouts(document);
             GraphSpatialIndex index;
             index.Rebuild(document, layouts);
-            HandleNavigation(view.Viewport(), layouts, hovered, focused, origin, size, mouse);
+            const bool navigating = HandleNavigation(view.Viewport(), layouts, hovered, focused, origin, size, mouse);
             const bool addAtPointer = hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Right);
             if (addAtCenter || addAtPointer)
             {
@@ -88,7 +88,7 @@ export namespace kairo::editor
             DrawConnections(*draw, document, index, view.Viewport(), origin);
             DrawNodes(*draw, document, index, view.Selection(), view.Viewport(), origin, size);
             HandleQueuedActions(project, view, documentID, layouts, origin, size, mouse, hovered);
-            HandleInteraction(project, view, documentID, index, hovered, origin, mouse);
+            HandleInteraction(project, view, documentID, index, hovered && !navigating, origin, mouse);
             DrawGestureOverlay(*draw, project.Document(documentID), view, index, origin, mouse);
             DrawPalette(project, view, documentID);
 
@@ -329,12 +329,17 @@ export namespace kairo::editor
             return layouts;
         }
 
-        static void HandleNavigation(GraphViewport& viewport,
+        [[nodiscard]] static bool HandleNavigation(GraphViewport& viewport,
             const std::vector<GraphNodeLayout>& layouts, bool hovered, bool focused,
             ImVec2 origin, ImVec2 size, ImVec2 mouse)
         {
             const auto point = [](ImVec2 value) { return GraphPoint{ value.x, value.y }; };
-            if (hovered && ImGui::IsMouseDragging(ImGuiMouseButton_Middle, 0.0f))
+            const bool spacePan = ImGui::IsKeyDown(ImGuiKey_Space) &&
+                ImGui::IsMouseDown(ImGuiMouseButton_Left);
+            const bool middlePan = ImGui::IsMouseDown(ImGuiMouseButton_Middle);
+            const bool panning = (hovered || ImGui::IsAnyItemActive()) && (spacePan || middlePan);
+            if (panning && (ImGui::IsMouseDragging(ImGuiMouseButton_Middle, 0.0f) ||
+                ImGui::IsMouseDragging(ImGuiMouseButton_Left, 0.0f)))
             {
                 const ImVec2 delta = ImGui::GetIO().MouseDelta;
                 viewport.PanByScreenDelta({ delta.x, delta.y });
@@ -344,6 +349,7 @@ export namespace kairo::editor
                     point(mouse), point(origin));
 
             (void)focused;
+            return panning;
         }
 
         static void DrawGrid(ImDrawList& draw, const GraphViewport& viewport,

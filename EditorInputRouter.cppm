@@ -286,6 +286,15 @@ export namespace kairo::editor
             return m_Triggered.test(static_cast<std::size_t>(action));
         }
 
+        /// Task: let menus and the command palette enter the same semantic
+        /// dispatch path as keyboard input without manufacturing a raw key.
+        void Trigger(EditorAction action)
+        {
+            if (action >= EditorAction::Count)
+                throw std::invalid_argument("Cannot trigger an invalid editor action.");
+            m_Triggered.set(static_cast<std::size_t>(action));
+        }
+
     private:
         KeymapProfile m_Profile;
         InputContext m_Context = InputContext::Global;

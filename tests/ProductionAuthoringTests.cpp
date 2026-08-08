@@ -3,6 +3,8 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+import Kairo.Assets.EditableMesh;
+import Kairo.Assets.Sculpting;
 import Kairo.Editor.ProductionAuthoring;
 
 TEST_CASE("Modeling workspace supports edit selection operations and undo")

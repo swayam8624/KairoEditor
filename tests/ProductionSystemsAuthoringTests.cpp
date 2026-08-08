@@ -4,6 +4,8 @@
 #include <catch2/catch_test_macros.hpp>
 
 import Kairo.Editor.ProductionSystemsAuthoring;
+import Kairo.EngineCore.ProductionRuntime;
+import Kairo.EngineCore.ProductionSystemsManifest;
 
 TEST_CASE("production systems authoring shares Core workload budgets")
 {

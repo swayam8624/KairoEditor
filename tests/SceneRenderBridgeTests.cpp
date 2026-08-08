@@ -16,6 +16,7 @@ namespace
     const auto MeshID = kairo::assets::AssetID::Parse("00000000-0000-4000-8000-000000000201");
     const auto MaterialID = kairo::assets::AssetID::Parse("00000000-0000-4000-8000-000000000202");
     const auto SceneID = kairo::assets::AssetID::Parse("00000000-0000-4000-8000-000000000203");
+    const auto TextureID = kairo::assets::AssetID::Parse("00000000-0000-4000-8000-000000000204");
 
     void RegisterRenderAssets(kairo::assets::AssetRegistry& registry)
     {
@@ -26,6 +27,9 @@ namespace
         registry.Insert({ SceneID, kairo::assets::AssetType::Scene,
             kairo::assets::AssetOrigin::SourceFile, "Scenes/model.glb",
             "kairo.gltf.scene", 1u, {} });
+        registry.Insert({ TextureID, kairo::assets::AssetType::Texture2D,
+            kairo::assets::AssetOrigin::SourceFile, "Textures/studio.hdr",
+            "kairo.texture.stb", 1u, {} });
     }
 }
 
@@ -54,6 +58,7 @@ TEST_CASE("Imported scene instances expand shared primitive bindings with instan
     CHECK(extracted.Draws()[0].ObjectID == entity.Value);
     CHECK_FALSE(extracted.Draws()[0].CastShadows);
     CHECK(extracted.Draws()[1].Mesh == 42u);
+    CHECK(BuildRenderScene(scene, assets, 2u).Draws().empty());
 }
 
 TEST_CASE("Engine scenes extract visible renderer draws in entity order", "[KairoEditor][RenderBridge]")
@@ -65,6 +70,8 @@ TEST_CASE("Engine scenes extract visible renderer draws in entity order", "[Kair
     scene.SetMeshRenderer(first, { { MeshID }, { MaterialID }, true });
     scene.SetMeshRenderer(hidden, { { MeshID }, { MaterialID }, false });
     scene.SetMeshRenderer(second, { { MeshID }, { MaterialID }, true });
+    scene.MeshRenderer(first).RenderLayers = 0x1u;
+    scene.MeshRenderer(second).RenderLayers = 0x2u;
     scene.Transform(first).Local.Translation = { -2.0f, 0.0f, 0.0f };
     scene.Transform(second).Local.Translation = { 3.0f, 0.0f, 0.0f };
     scene.Transform(second).Local.Scale = { 0.5f, 2.0f, 0.5f };
@@ -89,6 +96,10 @@ TEST_CASE("Engine scenes extract visible renderer draws in entity order", "[Kair
     CHECK(renderScene.Draws()[1].ObjectID == second.Value);
     CHECK(renderScene.Draws()[1].Model(0u, 3u) == 1.0f);
     CHECK(renderScene.Draws()[1].Model(1u, 1u) == 2.0f);
+    const auto firstLayer = BuildRenderScene(scene, assets, 0x1u);
+    REQUIRE(firstLayer.Draws().size() == 1u);
+    CHECK(firstLayer.Draws()[0].ObjectID == first.Value);
+    REQUIRE_THROWS_AS(BuildRenderScene(scene, assets, 0u), std::invalid_argument);
 }
 
 TEST_CASE("Engine scenes extract authored lights environments and shadow policy",
@@ -101,6 +112,7 @@ TEST_CASE("Engine scenes extract authored lights environments and shadow policy"
     light.Unit = kairo::engine::PhotometricUnit::Candela;
     light.Intensity = 800.0f;
     light.Shadows = kairo::engine::ShadowPolicy::Disabled;
+    light.RenderLayers = 0x4u;
     scene.SetLight(lightEntity, light);
     scene.Transform(lightEntity).Local.Translation = { 2.0f, 3.0f, 4.0f };
     const auto environmentEntity = scene.CreateEntity("World");
@@ -109,10 +121,13 @@ TEST_CASE("Engine scenes extract authored lights environments and shadow policy"
     environment.AmbientIntensity = 0.25f;
     environment.EnvironmentIntensity = 2.0f;
     environment.ExposureEV100 = 1.5f;
+    environment.EnvironmentTexture = kairo::assets::TextureAssetHandle{ TextureID };
     scene.SetEnvironment(environmentEntity, environment);
 
     kairo::assets::AssetRegistry registry;
+    RegisterRenderAssets(registry);
     RenderAssetBindings bindings(registry);
+    bindings.BindTexture({ TextureID }, 91u);
     const auto extracted = BuildRenderScene(scene, bindings);
     REQUIRE(extracted.Lights().size() == 1u);
     CHECK(extracted.Lights()[0].Type == kairo::renderer::RenderLightType::Spot);
@@ -121,6 +136,9 @@ TEST_CASE("Engine scenes extract authored lights environments and shadow policy"
     CHECK(extracted.Environment().BackgroundColor.y == 0.2f);
     CHECK(extracted.Environment().AmbientIntensity == 0.5f);
     CHECK(extracted.Environment().ExposureEV100 == 1.5f);
+    CHECK(extracted.Environment().EnvironmentIntensity == 2.0f);
+    CHECK(extracted.Environment().EnvironmentTexture == 91u);
+    CHECK(BuildRenderScene(scene, bindings, 0x2u).Lights().empty());
 }
 
 TEST_CASE("Render asset bindings reject ambiguous and missing assets", "[KairoEditor][RenderBridge]")

@@ -103,6 +103,24 @@ image URIs, and expands one persistent `SceneInstanceComponent` into renderer
 draws. The hierarchy remains one authoring object with one stable scene asset
 identity; Vulkan mesh and texture handles stay host-owned and transient.
 
+The Scene workspace also includes a **Render Results** surface backed by the
+shared EngineCore-to-KairoRayTracer snapshot bridge. It submits the authoritative
+open scene asynchronously, reports conversion diagnostics and pass progress,
+supports cancellation, and writes both the image and render metadata beneath a
+validated project-relative output path. The native host resolves the same cooked
+meshes, imported glTF primitives, scalar PBR materials, base-color textures, and
+environment textures used by the live viewport; it does not author or maintain a
+second ray-tracer scene file.
+
+Linked game modules can expose reflected native C++ gameplay types to the
+**Native Gameplay** surface. Add their CMake targets through
+`KAIRO_EDITOR_NATIVE_GAMEPLAY_TARGETS` and register their factories and metadata
+with `RegisterEditorNativeGameplay`. The Editor persists selected-entity
+attachments and typed field overrides in `Config/NativeGameplay.knative`, the
+same manifest consumed by KairoPlayer's linked native gameplay registry. Native
+binary replacement is restart-required; authored manifest data remains portable
+and validated when the matching module is linked again.
+
 ## Project sessions
 
 The editor opens versioned `.kproject` descriptors instead of constructing a

@@ -9,6 +9,8 @@ import Kairo.Assets;
 import Kairo.Editor.AdvancedProductionAuthoring;
 import Kairo.Editor.NativeGameplayAuthoring;
 import Kairo.Editor.OfflineRenderAuthoring;
+import Kairo.Editor.ProductionAuthoring;
+import Kairo.Editor.ShippingAuthoring;
 import Kairo.EngineCore;
 
 namespace
@@ -144,6 +146,23 @@ TEST_CASE("native gameplay inspector authors typed reflected overrides and persi
     std::filesystem::remove_all(root);
 }
 
+TEST_CASE("editor native gameplay host registry accepts linked module registration")
+{
+    using namespace kairo::editor;
+    const std::string typeName = "Tests.EditorLinkedCounter";
+    if (!EditorNativeGameplayRegistry().Contains(typeName))
+        RegisterEditorNativeGameplay([&](kairo::engine::NativeGameplayRegistry& registry)
+        {
+            kairo::engine::NativeGameplayTypeInfo type;
+            type.TypeName = typeName;
+            registry.Register(std::move(type), []
+            {
+                return std::make_unique<EditorNativeSystem>();
+            });
+        });
+    CHECK(EditorNativeGameplayRegistry().Contains(typeName));
+}
+
 TEST_CASE("offline render controller tracks async service progress completion and cancellation")
 {
     using namespace kairo::editor;
@@ -177,4 +196,28 @@ TEST_CASE("offline render controller tracks async service progress completion an
     controller.Submit(second);
     controller.Cancel();
     CHECK(controller.State().Status() == OfflineRenderWorkspaceStatus::Cancelled);
+}
+
+TEST_CASE("shipping authoring previews audio UI and canonical save state through runtime contracts")
+{
+    using namespace kairo::editor;
+    using namespace kairo::engine;
+    RuntimeAudioAuthoringWorkspace audio;
+    audio.AddBus({"Music",0.25,false});
+    AudioVoice voice; voice.Bus="Music"; voice.DurationSeconds=2.0; voice.Loop=true;
+    CHECK(audio.Audition(voice)!=0u);
+    CHECK(audio.Preview(0.5).BusLevels.at("Music")==0.25);
+
+    RuntimeUIAuthoringWorkspace ui;
+    ui.SetTranslation("en","start","Start"); ui.SetTranslation("en","start-label","Start game");
+    RuntimeWidget button; button.ID="start"; button.Kind=RuntimeWidgetKind::Button;
+    button.TextKey="start"; button.AccessibleLabelKey="start-label"; button.Action="game.start"; button.Focusable=true;
+    ui.AddWidget(button);
+    auto preview=ui.Preview();
+    CHECK(preview.Text("start","en")=="Start");
+    CHECK(preview.Activate("start")=="game.start");
+
+    RuntimeStateAuthoringWorkspace state; state.SetTick(2u); state.Set("level",std::int64_t{3});
+    RuntimeStateSnapshot baseline{1u,{{"level",std::int64_t{2}}}};
+    CHECK(ApplyRuntimeStateDelta(baseline,state.Diff(baseline))==state.State());
 }

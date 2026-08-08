@@ -218,6 +218,7 @@ export namespace kairo::editor
 
         [[nodiscard]] OfflineRenderWorkspaceStatus Status() const noexcept { return m_Status; }
         [[nodiscard]] std::uint64_t JobID() const noexcept { return m_JobID; }
+        [[nodiscard]] std::uint32_t CompletedPasses() const noexcept { return m_CompletedPasses; }
         [[nodiscard]] double Progress() const noexcept
         { return m_TotalPasses == 0u ? 0.0 : static_cast<double>(m_CompletedPasses)/m_TotalPasses; }
         [[nodiscard]] const std::vector<std::string>& Diagnostics() const noexcept { return m_Diagnostics; }

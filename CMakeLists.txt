@@ -9,6 +9,8 @@ option(KAIRO_EDITOR_BUILD_APP "Build the Vulkan Dear ImGui editor application" $
 option(KAIRO_EDITOR_BUILD_AI_CLOUD_PROVIDER "Build the optional cloud provider for the editor host" OFF)
 set(KAIRO_EDITOR_UI_FONT_PATH "" CACHE FILEPATH "Optional UI TTF font for the native editor")
 set(KAIRO_EDITOR_MONO_FONT_PATH "" CACHE FILEPATH "Optional monospace TTF font for the native editor")
+set(KAIRO_EDITOR_NATIVE_GAMEPLAY_TARGETS "" CACHE STRING
+    "Semicolon-separated CMake targets that register project native gameplay types with KairoEditor")
 
 # Immutable standalone fallback revisions. Local source directories and sibling
 # checkouts still take precedence for active workspace development.
@@ -72,8 +74,8 @@ target_sources(KairoEditor PUBLIC FILE_SET CXX_MODULES BASE_DIRS ${CMAKE_CURRENT
     AuthoringDocument.cppm DocumentValidation.cppm DocumentSerialization.cppm DocumentCommands.cppm
     DocumentCompiler.cppm LogicDocumentCompiler.cppm ProjectLogicBuild.cppm ProjectDocuments.cppm GraphCanvas.cppm DocumentProjection.cppm
     AuthoringWorkspaceState.cppm
-    ProjectDescriptor.cppm ProjectRecovery.cppm ProjectSession.cppm CommandHistory.cppm CommandTransaction.cppm EditorActions.cppm EditorInputRouter.cppm KeymapSettings.cppm EditorLayoutRecovery.cppm ViewportController.cppm PrimitiveTypes.cppm SceneCommands.cppm
-    AssetBrowserModel.cppm SceneSelection.cppm EditorDiagnostics.cppm SceneFragment.cppm ProjectLifecycle.cppm ProductionAuthoring.cppm AdvancedProductionAuthoring.cppm NativeGameplayAuthoring.cppm OfflineRenderAuthoring.cppm MaterialPreviewAuthoring.cppm ProductionSystemsAuthoring.cppm
+    ProjectDescriptor.cppm ProjectRecovery.cppm ProjectSession.cppm ProjectLifecycle.cppm NativeDialogs.cppm CommandHistory.cppm CommandTransaction.cppm EditorActions.cppm EditorInputRouter.cppm KeymapSettings.cppm NavigationSettings.cppm EditorLayoutRecovery.cppm ViewportController.cppm PrimitiveTypes.cppm SceneCommands.cppm
+    AssetBrowserModel.cppm SceneSelection.cppm EditorDiagnostics.cppm SceneFragment.cppm ProductionAuthoring.cppm AdvancedProductionAuthoring.cppm NativeGameplayAuthoring.cppm OfflineRenderAuthoring.cppm MaterialPreviewAuthoring.cppm ProductionSystemsAuthoring.cppm ShippingAuthoring.cppm
     AIEditorTools.cppm AIEditorSession.cppm EditorState.cppm PanelState.cppm KairoEditor.cppm)
 # KairoEditor directly imports Kairo.Assets.* modules in its production
 # authoring surface. Declare that dependency explicitly so CMake can build the
@@ -168,6 +170,13 @@ if(KAIRO_EDITOR_BUILD_APP)
 
     add_executable(KairoEditorApp examples/editor_main.cpp)
     target_link_libraries(KairoEditorApp PRIVATE KairoEditorImGui KairoEditorRendererBridge)
+    foreach(native_target IN LISTS KAIRO_EDITOR_NATIVE_GAMEPLAY_TARGETS)
+        if(NOT TARGET ${native_target})
+            message(FATAL_ERROR
+                "KAIRO_EDITOR_NATIVE_GAMEPLAY_TARGETS names missing target '${native_target}'.")
+        endif()
+        target_link_libraries(KairoEditorApp PRIVATE ${native_target})
+    endforeach()
     if(TARGET KairoAICloud)
         target_link_libraries(KairoEditorApp PRIVATE KairoAICloud)
         target_compile_definitions(KairoEditorApp PRIVATE KAIRO_EDITOR_HAS_AI_CLOUD=1)
