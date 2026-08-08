@@ -61,6 +61,10 @@ if(NOT TARGET KairoEngineCore)
     endif()
 endif()
 
+if(NOT TARGET KairoAssets)
+    message(FATAL_ERROR "KairoEditor directly imports Kairo.Assets modules and requires the KairoAssets target provided by KairoEngineCore or the umbrella workspace.")
+endif()
+
 add_library(KairoEditor)
 target_sources(KairoEditor PUBLIC FILE_SET CXX_MODULES BASE_DIRS ${CMAKE_CURRENT_SOURCE_DIR} FILES
     EditorTypes.cppm TextValidation.cppm TextFormat.cppm ProjectPaths.cppm DocumentTypes.cppm DocumentSchema.cppm
@@ -71,7 +75,11 @@ target_sources(KairoEditor PUBLIC FILE_SET CXX_MODULES BASE_DIRS ${CMAKE_CURRENT
     ProjectDescriptor.cppm ProjectRecovery.cppm ProjectSession.cppm CommandHistory.cppm CommandTransaction.cppm EditorActions.cppm EditorInputRouter.cppm KeymapSettings.cppm EditorLayoutRecovery.cppm ViewportController.cppm PrimitiveTypes.cppm SceneCommands.cppm
     AssetBrowserModel.cppm SceneSelection.cppm EditorDiagnostics.cppm SceneFragment.cppm ProjectLifecycle.cppm ProductionAuthoring.cppm AdvancedProductionAuthoring.cppm NativeGameplayAuthoring.cppm OfflineRenderAuthoring.cppm MaterialPreviewAuthoring.cppm ProductionSystemsAuthoring.cppm
     AIEditorTools.cppm AIEditorSession.cppm EditorState.cppm PanelState.cppm KairoEditor.cppm)
-target_link_libraries(KairoEditor PUBLIC KairoEngineCore KairoAI nlohmann_json::nlohmann_json)
+# KairoEditor directly imports Kairo.Assets.* modules in its production
+# authoring surface. Declare that dependency explicitly so CMake can build the
+# C++ module import DAG correctly instead of relying on KairoEngineCore's
+# transitive usage requirements.
+target_link_libraries(KairoEditor PUBLIC KairoEngineCore KairoAssets KairoAI nlohmann_json::nlohmann_json)
 
 add_executable(KairoProjectCompiler examples/project_compiler_main.cpp)
 target_link_libraries(KairoProjectCompiler PRIVATE KairoEditor)
