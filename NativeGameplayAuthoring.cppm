@@ -9,6 +9,7 @@ module;
 #include <string>
 #include <string_view>
 #include <utility>
+#include <variant>
 #include <vector>
 
 export module Kairo.Editor.NativeGameplayAuthoring;
