@@ -10,6 +10,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 
 import Kairo.Editor;
 import Kairo.AI;
@@ -183,6 +184,50 @@ int main(int argc, char** argv)
         kairo::assets::ImportDatabase meshImports;
         const kairo::assets::DerivedDataCache derivedCache(
             project.ProjectRoot() / ".kairo" / "derived-data");
+        std::unordered_map<kairo::assets::AssetID, kairo::assets::MaterialArtifactData,
+            kairo::assets::AssetIDHash> materialArtifacts;
+        std::unordered_map<kairo::assets::AssetID, kairo::assets::TextureImportSettings,
+            kairo::assets::AssetIDHash> textureSettings;
+        const auto requireTexture = [&](const std::optional<kairo::assets::TextureAssetHandle>& texture,
+            kairo::assets::TextureColorSpace colorSpace, bool normalMap)
+        {
+            if (!texture.has_value()) return;
+            kairo::assets::TextureImportSettings settings;
+            settings.ColorSpace = colorSpace;
+            settings.NormalMap = normalMap;
+            const auto [found, inserted] = textureSettings.emplace(texture->ID, settings);
+            if (!inserted && (found->second.ColorSpace != settings.ColorSpace ||
+                found->second.NormalMap != settings.NormalMap))
+                throw std::invalid_argument("One texture asset is referenced with incompatible color/data semantics: " +
+                    texture->ID.ToString());
+        };
+        for (const auto& asset : project.Assets().Snapshot())
+        {
+            if (asset.Type != kairo::assets::AssetType::Material ||
+                asset.Origin == kairo::assets::AssetOrigin::Builtin) continue;
+            auto material = kairo::editor::LoadRenderMaterial(
+                project.ProjectRoot(), { asset.ID }, project.Assets());
+            requireTexture(material.Textures.BaseColor, kairo::assets::TextureColorSpace::SRGB, false);
+            requireTexture(material.Textures.Normal, kairo::assets::TextureColorSpace::Linear, true);
+            requireTexture(material.Textures.MetallicRoughness, kairo::assets::TextureColorSpace::Linear, false);
+            requireTexture(material.Textures.Emissive, kairo::assets::TextureColorSpace::SRGB, false);
+            requireTexture(material.Textures.Occlusion, kairo::assets::TextureColorSpace::Linear, false);
+            materialArtifacts.emplace(asset.ID, std::move(material));
+        }
+        for (const auto& [id, settings] : textureSettings)
+        {
+            const auto texture = kairo::editor::ImportRenderTexture(project.ProjectRoot(), { id },
+                settings, project.Assets(), meshImports, derivedCache);
+            renderAssets.BindTexture({ id }, renderer.CreateTexture(texture));
+        }
+        for (const auto& [id, artifact] : materialArtifacts)
+        {
+            renderAssets.BindMaterial({ id }, kairo::renderer::MakePBRMaterial(artifact,
+                [&renderAssets](kairo::assets::TextureAssetHandle texture)
+                {
+                    return renderAssets.ResolveTexture(texture);
+                }));
+        }
         for (const auto& asset : project.Assets().Snapshot())
         {
             if (asset.Type != kairo::assets::AssetType::Mesh) continue;
@@ -196,6 +241,47 @@ int main(int argc, char** argv)
             {
                 renderAssets.BindMesh({ asset.ID }, renderer.CreateMesh(*builtin));
             }
+        }
+        for (const auto& asset : project.Assets().Snapshot())
+        {
+            if (asset.Type != kairo::assets::AssetType::Scene ||
+                asset.Origin != kairo::assets::AssetOrigin::SourceFile) continue;
+            const auto resolveGltfTexture = [&](std::string_view uri,
+                kairo::assets::TextureSemantic semantic)
+            {
+                const auto path = (asset.Path.parent_path() /
+                    std::filesystem::path(uri)).lexically_normal();
+                const auto metadata = project.Assets().FindByPath(path);
+                if (!metadata.has_value() ||
+                    metadata->Type != kairo::assets::AssetType::Texture2D)
+                    throw std::invalid_argument(
+                        "glTF image URI is not registered as a project texture asset: " +
+                        path.generic_string());
+                if (const auto existing = textureSettings.find(metadata->ID);
+                    existing != textureSettings.end())
+                    return renderAssets.ResolveTexture({ metadata->ID });
+                kairo::assets::TextureImportSettings settings;
+                settings.ColorSpace = semantic == kairo::assets::TextureSemantic::Color
+                    ? kairo::assets::TextureColorSpace::SRGB
+                    : kairo::assets::TextureColorSpace::Linear;
+                settings.NormalMap = semantic == kairo::assets::TextureSemantic::Normal;
+                const auto texture = kairo::editor::ImportRenderTexture(
+                    project.ProjectRoot(), { metadata->ID }, settings,
+                    project.Assets(), meshImports, derivedCache);
+                textureSettings.emplace(metadata->ID, settings);
+                const auto handle = renderer.CreateTexture(texture);
+                renderAssets.BindTexture({ metadata->ID }, handle);
+                return handle;
+            };
+            const auto imported = kairo::editor::ImportRenderGltfScene(
+                project.ProjectRoot(), { asset.ID }, project.Assets(), meshImports,
+                derivedCache, resolveGltfTexture);
+            std::vector<kairo::editor::RenderAssetBindings::ScenePrimitive> primitives;
+            primitives.reserve(imported.Primitives.size());
+            for (const auto& primitive : imported.Primitives)
+                primitives.push_back({ renderer.CreateMesh(primitive.Geometry),
+                    primitive.Material, primitive.LocalToAsset });
+            renderAssets.BindScene({ asset.ID }, std::move(primitives));
         }
         const std::filesystem::path layoutFile = options.PersistLayout
             ? project.ProjectRoot() / ".kairo" / "editor-layout.ini" : std::filesystem::path{};

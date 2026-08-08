@@ -61,6 +61,24 @@ export namespace kairo::editor
 
         [[nodiscard]] float Distance() const noexcept { return m_Distance; }
 
+        /// Input: finite camera position/target with non-zero separation.
+        /// Output: the controller reproduces that authored view on the next
+        /// Pose call. Camera roll is intentionally discarded because the orbit
+        /// controller is world-Y-up; the source scene transform is unchanged.
+        void SetPose(const ViewportCameraPose& pose)
+        {
+            using namespace kairo::foundation::math;
+            const Vec3f offset = pose.Position - pose.Target;
+            const float distance = offset.Length();
+            if (!std::isfinite(distance) || distance <= 0.0f)
+                throw std::invalid_argument("Viewport pose requires distinct finite position and target points.");
+            const Vec3f direction = offset / distance;
+            m_Target = pose.Target;
+            m_Distance = std::clamp(distance, 0.15f, 5000.0f);
+            m_Yaw = std::atan2(direction.x, direction.z);
+            m_Pitch = std::asin(std::clamp(direction.y, -1.0f, 1.0f));
+        }
+
         /// Input: one canonical world axis view.
         /// Task: snap orientation while preserving focus target and distance.
         void SnapToAxis(ViewportAxis axis) noexcept

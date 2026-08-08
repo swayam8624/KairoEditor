@@ -222,6 +222,13 @@ if(KAIRO_EDITOR_BUILD_TESTS)
             --frames 3 --no-layout-persistence --viewport-mode lighting
             --screenshot ${CMAKE_CURRENT_BINARY_DIR}/artifacts/editor-lighting.ppm)
         set_tests_properties(KairoEditorViewportLightingScreenshot PROPERTIES TIMEOUT 20 SKIP_RETURN_CODE 77)
+        if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../Samples/SharedContentShowcase/Project.kproject")
+            add_test(NAME KairoEditorSharedContentSmoke COMMAND KairoEditorApp
+                --project ${CMAKE_CURRENT_SOURCE_DIR}/../Samples/SharedContentShowcase/Project.kproject
+                --frames 3 --no-layout-persistence
+                --screenshot ${CMAKE_CURRENT_BINARY_DIR}/artifacts/shared-content-editor.ppm)
+            set_tests_properties(KairoEditorSharedContentSmoke PROPERTIES TIMEOUT 20 SKIP_RETURN_CODE 77)
+        endif()
         add_test(NAME KairoEditorCodeSurfaceSmoke COMMAND KairoEditorApp
             --project ${CMAKE_CURRENT_SOURCE_DIR}/examples/StarterProject/Project.kproject
             --document Logic/Player.kdoc --authoring code

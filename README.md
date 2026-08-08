@@ -32,6 +32,9 @@ The current foundation provides a tested, backend-neutral editor state model:
   physics bindings, with component invariants checked before a command commits
 - action-based keyboard routing that protects code and graph text input
 - renderer-backed orbit/fly navigation, transform tools, framing, and primitive creation
+- undoable camera, directional/point/spot/area-light, environment, imported-scene,
+  material-slot, shadow, exposure, fog, tone-map, and render-layer authoring
+- camera view-through plus selected camera/light viewport debug visualization
 - isolated Play-mode KairoPhysicsEngine preview with box colliders and debug draw
 
 The visual direction is viewport-first and production-dense: low-chrome dark
@@ -93,6 +96,12 @@ persistent UUID, not geometry hidden in the editor or renderer. Unknown
 importers, missing files, corrupt cache entries, invalid topology, and
 line/column-located OBJ errors abort loading rather than producing partial GPU
 state. The import bridge test exercises both cache-miss and cache-hit paths.
+
+The same bridge imports registered glTF/GLB scene assets, composes their node
+hierarchies, preserves per-primitive PBR materials, resolves registered external
+image URIs, and expands one persistent `SceneInstanceComponent` into renderer
+draws. The hierarchy remains one authoring object with one stable scene asset
+identity; Vulkan mesh and texture handles stay host-owned and transient.
 
 ## Project sessions
 

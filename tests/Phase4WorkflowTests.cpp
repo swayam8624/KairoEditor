@@ -16,6 +16,9 @@ import Kairo.Editor.ProjectDescriptor;
 import Kairo.Editor.ProjectLifecycle;
 import Kairo.Editor.SceneFragment;
 import Kairo.Editor.SceneSelection;
+import Kairo.Editor.SceneCommands;
+import Kairo.Editor.ProjectSession;
+import Kairo.Editor.CommandHistory;
 import Kairo.EngineCore;
 
 namespace
@@ -167,5 +170,62 @@ TEST_CASE("Project lifecycle clones templates and persists bounded recents")
     const RecentProjects restored = RecentProjects::Load(recentFile);
     REQUIRE(restored.Entries().size() == 2u);
     CHECK(restored.Entries().front().filename() == "Project.kproject");
+    std::filesystem::remove_all(root);
+}
+
+TEST_CASE("Rendering component commands add edit remove and undo complete values")
+{
+    using namespace kairo::editor;
+    using namespace kairo::engine;
+    const auto root = TemporaryRoot("render-components");
+    ProjectSession project;
+    project.CreateProject(root, "Rendering Components");
+    const Entity entity = project.EditScene().CreateEntity("Rendering");
+    CommandHistory history;
+
+    CameraComponent camera;
+    camera.Primary = true;
+    camera.VerticalFovRadians = 0.8f;
+    history.Execute(std::make_unique<SetCameraComponentCommand>(project, entity, camera));
+    REQUIRE(project.Scene().HasCamera(entity));
+    CHECK(project.Scene().Camera(entity).Primary);
+    history.Undo();
+    CHECK_FALSE(project.Scene().HasCamera(entity));
+    history.Redo();
+    CHECK(project.Scene().Camera(entity).VerticalFovRadians == 0.8f);
+
+    LightComponent light;
+    light.Type = LightType::Point;
+    light.Unit = PhotometricUnit::Candela;
+    light.Intensity = 650.0f;
+    history.Execute(std::make_unique<SetLightComponentCommand>(project, entity, light));
+    REQUIRE(project.Scene().HasLight(entity));
+    CHECK(project.Scene().Light(entity).Intensity == 650.0f);
+
+    EnvironmentComponent environment;
+    environment.Priority = 7;
+    environment.ExposureEV100 = 1.25f;
+    history.Execute(std::make_unique<SetEnvironmentComponentCommand>(
+        project, entity, environment));
+    REQUIRE(project.Scene().HasEnvironment(entity));
+    history.Execute(std::make_unique<SetEnvironmentComponentCommand>(
+        project, entity, std::nullopt));
+    CHECK_FALSE(project.Scene().HasEnvironment(entity));
+    history.Undo();
+    CHECK(project.Scene().Environment(entity).Priority == 7);
+
+    const auto importedID = kairo::assets::AssetID::Parse(
+        "00000000-0000-4000-8000-000000000299");
+    SceneInstanceComponent instance;
+    instance.SceneAsset = { importedID };
+    instance.CastShadows = false;
+    history.Execute(std::make_unique<SetSceneInstanceComponentCommand>(
+        project, entity, instance));
+    REQUIRE(project.Scene().HasSceneInstance(entity));
+    CHECK_FALSE(project.Scene().SceneInstance(entity).CastShadows);
+    history.Undo();
+    CHECK_FALSE(project.Scene().HasSceneInstance(entity));
+    history.Redo();
+    CHECK(project.Scene().SceneInstance(entity).SceneAsset.ID == importedID);
     std::filesystem::remove_all(root);
 }

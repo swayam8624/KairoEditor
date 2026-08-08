@@ -109,8 +109,40 @@ export namespace kairo::editor
 
         [[nodiscard]] kairo::renderer::DebugDrawList PhysicsDebugDraw() const
         {
-            return m_PhysicsPreview.Active() ? m_PhysicsPreview.DebugDraw(m_ShowPhysicsBroadphase)
+            auto debug = m_PhysicsPreview.Active()
+                ? m_PhysicsPreview.DebugDraw(m_ShowPhysicsBroadphase)
                 : kairo::renderer::DebugDrawList{};
+            const auto selected = m_State.SelectedEntity();
+            if (!selected.has_value() || !m_Project.Scene().Contains(*selected)) return debug;
+            const auto& scene = m_Project.Scene();
+            const auto world = scene.WorldTransform(*selected);
+            if (scene.HasCamera(*selected))
+            {
+                debug.AddAxes(world.Translation, 0.35f);
+                debug.AddLine(world.Translation,
+                    world.Translation + world.Forward() * 1.5f,
+                    { 0.35f, 0.8f, 1.0f, 1.0f });
+            }
+            if (scene.HasLight(*selected))
+            {
+                const auto& light = scene.Light(*selected);
+                constexpr kairo::renderer::DebugColor color{ 1.0f, 0.78f, 0.18f, 1.0f };
+                if (light.Type == kairo::engine::LightType::Point)
+                    debug.AddWireSphere(world.Translation, std::min(light.Range, 2.0f), 20u, color);
+                else if (light.Type == kairo::engine::LightType::RectangleArea)
+                    debug.AddOBB(world.Translation,
+                        { light.AreaWidth * 0.5f, light.AreaHeight * 0.5f, 0.01f },
+                        world.Rotation, color);
+                else
+                {
+                    debug.AddLine(world.Translation,
+                        world.Translation + world.Forward() * 1.5f, color);
+                    if (light.Type == kairo::engine::LightType::Spot)
+                        debug.AddWireSphere(world.Translation + world.Forward(),
+                            std::tan(light.OuterConeRadians), 16u, color);
+                }
+            }
+            return debug;
         }
 
         void SetViewportTexture(ImTextureID texture) noexcept { m_ViewportTexture = texture; }
@@ -413,14 +445,9 @@ export namespace kairo::editor
         void DrawHierarchy()
         {
             if (!ImGui::Begin("Hierarchy")) { ImGui::End(); return; }
-            if (ActionButton("+ Entity", UIButtonTone::Primary))
-            {
-                auto command = std::make_unique<CreateEntityCommand>(m_Project, "Entity");
-                auto* created = command.get();
-                RunCommand([this, &command] { m_History.Execute(std::move(command)); });
-                if (command == nullptr) m_State.Select(created->CreatedEntity());
-            }
-            if (ImGui::IsItemHovered()) ImGui::SetTooltip("Create entity");
+            if (ActionButton("+ Add", UIButtonTone::Primary)) ImGui::OpenPopup("Add Scene Object");
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip("Add scene object (Shift+A)");
+            DrawAddSceneObjectPopup();
             ImGui::SameLine();
             const auto selectedEntity = m_State.SelectedEntity();
             if (ActionButton("- Entity", UIButtonTone::Destructive, selectedEntity.has_value()) && selectedEntity.has_value())
@@ -450,7 +477,11 @@ export namespace kairo::editor
                 ImGuiTreeNodeFlags_OpenOnDoubleClick | ImGuiTreeNodeFlags_SpanAvailWidth;
             if (selected) flags |= ImGuiTreeNodeFlags_Selected;
             if (leaf) flags |= ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
-            const std::string label = scene.Name(entity).Value + "##" + std::to_string(entity.Value);
+            const char* marker = scene.HasCamera(entity) ? "[C] " : scene.HasLight(entity) ? "[L] " :
+                scene.HasEnvironment(entity) ? "[W] " : scene.HasSceneInstance(entity) ? "[S] " :
+                scene.HasMeshRenderer(entity) ? "[M] " : "[ ] ";
+            const std::string label = std::string(marker) + scene.Name(entity).Value +
+                "##" + std::to_string(entity.Value);
             const bool open = ImGui::TreeNodeEx(label.c_str(), flags);
             if (ImGui::IsItemClicked() && !ImGui::IsItemToggledOpen()) m_State.Select(entity);
             if (ImGui::BeginDragDropSource())
@@ -520,6 +551,7 @@ export namespace kairo::editor
                 });
             }
             ImGui::TextDisabled("Rotation is stored as a normalized quaternion.");
+            DrawRenderingComponentEditors(*selected);
             SectionHeader("Gameplay Logic");
             const char* logicPreview = "None";
             std::string logicPath;
@@ -573,6 +605,354 @@ export namespace kairo::editor
             }
             ImGui::TextDisabled(physicsEnabled ? "Dynamic box collider on Play" : "Uses local scale for runtime box bounds");
             ImGui::End();
+        }
+
+        void DrawRenderingComponentEditors(kairo::engine::Entity entity)
+        {
+            const auto& scene = m_Project.Scene();
+            SectionHeader("Rendering");
+            if (ImGui::Button("Add Component", { -1.0f, 0.0f }))
+                ImGui::OpenPopup("Add Rendering Component");
+            if (ImGui::BeginPopup("Add Rendering Component"))
+            {
+                if (!scene.HasCamera(entity) && ImGui::MenuItem("Camera"))
+                    RunCommand([this, entity] { m_History.Execute(
+                        std::make_unique<SetCameraComponentCommand>(m_Project, entity,
+                            kairo::engine::CameraComponent{})); });
+                if (!scene.HasLight(entity) && ImGui::MenuItem("Light"))
+                    RunCommand([this, entity] { m_History.Execute(
+                        std::make_unique<SetLightComponentCommand>(m_Project, entity,
+                            kairo::engine::LightComponent{})); });
+                if (!scene.HasEnvironment(entity) && ImGui::MenuItem("Environment"))
+                    RunCommand([this, entity] { m_History.Execute(
+                        std::make_unique<SetEnvironmentComponentCommand>(m_Project, entity,
+                            kairo::engine::EnvironmentComponent{})); });
+                if (!scene.HasSceneInstance(entity))
+                {
+                    std::optional<kairo::assets::SceneAssetHandle> firstScene;
+                    for (const auto& metadata : m_Project.Assets().Snapshot())
+                        if (metadata.Type == kairo::assets::AssetType::Scene)
+                        {
+                            firstScene = kairo::assets::SceneAssetHandle{ metadata.ID };
+                            break;
+                        }
+                    ImGui::BeginDisabled(!firstScene.has_value());
+                    if (ImGui::MenuItem("Imported Scene") && firstScene.has_value())
+                    {
+                        kairo::engine::SceneInstanceComponent component;
+                        component.SceneAsset = *firstScene;
+                        RunCommand([this, entity, component] { m_History.Execute(
+                            std::make_unique<SetSceneInstanceComponentCommand>(
+                                m_Project, entity, component)); });
+                    }
+                    ImGui::EndDisabled();
+                }
+                ImGui::EndPopup();
+            }
+
+            if (scene.HasMeshRenderer(entity))
+            {
+                auto renderer = scene.MeshRenderer(entity);
+                if (ImGui::TreeNodeEx("Mesh Renderer", ImGuiTreeNodeFlags_DefaultOpen))
+                {
+                    const auto current = m_Project.Assets().Resolve(renderer.MaterialAsset);
+                    if (ImGui::BeginCombo("Material", current.Path.generic_string().c_str()))
+                    {
+                        for (const auto& metadata : m_Project.Assets().Snapshot())
+                        {
+                            if (metadata.Type != kairo::assets::AssetType::Material) continue;
+                            const bool selected = metadata.ID == renderer.MaterialAsset.ID;
+                            const std::string label = metadata.Path.generic_string();
+                            if (ImGui::Selectable(label.c_str(), selected))
+                            {
+                                renderer.MaterialAsset = { metadata.ID };
+                                RunCommand([this, entity, renderer] { m_History.Execute(
+                                    std::make_unique<SetMeshRendererComponentCommand>(
+                                        m_Project, entity, renderer)); });
+                            }
+                        }
+                        ImGui::EndCombo();
+                    }
+                    bool visible = renderer.Visible;
+                    bool cast = renderer.CastShadows;
+                    bool receive = renderer.ReceiveShadows;
+                    bool changed = ImGui::Checkbox("Visible", &visible);
+                    changed |= ImGui::Checkbox("Cast Shadows", &cast);
+                    changed |= ImGui::Checkbox("Receive Shadows", &receive);
+                    changed |= ImGui::InputScalar("Render Layers", ImGuiDataType_U64,
+                        &renderer.RenderLayers, nullptr, nullptr, "%016llX",
+                        ImGuiInputTextFlags_CharsHexadecimal);
+                    if (changed)
+                    {
+                        renderer.Visible = visible;
+                        renderer.CastShadows = cast;
+                        renderer.ReceiveShadows = receive;
+                        RunCommand([this, entity, renderer] { m_History.Execute(
+                            std::make_unique<SetMeshRendererComponentCommand>(
+                                m_Project, entity, renderer)); });
+                    }
+                    ImGui::TreePop();
+                }
+            }
+
+            if (scene.HasSceneInstance(entity))
+            {
+                auto instance = scene.SceneInstance(entity);
+                if (ImGui::TreeNodeEx("Imported Scene", ImGuiTreeNodeFlags_DefaultOpen))
+                {
+                    const auto current = m_Project.Assets().Resolve(instance.SceneAsset);
+                    if (ImGui::BeginCombo("Scene Asset", current.Path.generic_string().c_str()))
+                    {
+                        for (const auto& metadata : m_Project.Assets().Snapshot())
+                        {
+                            if (metadata.Type != kairo::assets::AssetType::Scene) continue;
+                            const bool selected = metadata.ID == instance.SceneAsset.ID;
+                            const std::string label = metadata.Path.generic_string();
+                            if (ImGui::Selectable(label.c_str(), selected))
+                            {
+                                instance.SceneAsset = { metadata.ID };
+                                RunCommand([this, entity, instance] { m_History.Execute(
+                                    std::make_unique<SetSceneInstanceComponentCommand>(
+                                        m_Project, entity, instance)); });
+                            }
+                        }
+                        ImGui::EndCombo();
+                    }
+                    bool visible = instance.Visible;
+                    bool cast = instance.CastShadows;
+                    bool receive = instance.ReceiveShadows;
+                    bool changed = ImGui::Checkbox("Visible##SceneInstance", &visible);
+                    changed |= ImGui::Checkbox("Cast Shadows##SceneInstance", &cast);
+                    changed |= ImGui::Checkbox("Receive Shadows##SceneInstance", &receive);
+                    if (changed)
+                    {
+                        instance.Visible = visible;
+                        instance.CastShadows = cast;
+                        instance.ReceiveShadows = receive;
+                        RunCommand([this, entity, instance] { m_History.Execute(
+                            std::make_unique<SetSceneInstanceComponentCommand>(
+                                m_Project, entity, instance)); });
+                    }
+                    if (ActionButton("Remove##SceneInstance", UIButtonTone::Destructive))
+                        RunCommand([this, entity] { m_History.Execute(
+                            std::make_unique<SetSceneInstanceComponentCommand>(
+                                m_Project, entity, std::nullopt)); });
+                    ImGui::TreePop();
+                }
+            }
+
+            if (scene.HasCamera(entity))
+            {
+                auto camera = scene.Camera(entity);
+                if (ImGui::TreeNodeEx("Camera", ImGuiTreeNodeFlags_DefaultOpen))
+                {
+                    bool changed = false;
+                    int projection = static_cast<int>(camera.Projection);
+                    const char* projections[] = { "Perspective", "Orthographic" };
+                    if (ImGui::Combo("Projection", &projection, projections, 2))
+                    {
+                        camera.Projection = static_cast<kairo::engine::CameraProjection>(projection);
+                        changed = true;
+                    }
+                    constexpr float RadiansToDegrees = 57.2957795131f;
+                    constexpr float DegreesToRadians = 0.01745329252f;
+                    float fovDegrees = camera.VerticalFovRadians * RadiansToDegrees;
+                    if (camera.Projection == kairo::engine::CameraProjection::Perspective &&
+                        ImGui::SliderFloat("Vertical FOV", &fovDegrees, 1.0f, 179.0f, "%.1f deg"))
+                    {
+                        camera.VerticalFovRadians = fovDegrees * DegreesToRadians;
+                        changed = true;
+                    }
+                    if (camera.Projection == kairo::engine::CameraProjection::Orthographic)
+                        changed |= ImGui::DragFloat("Orthographic Size", &camera.OrthographicSize,
+                            0.05f, 0.01f, 10000.0f, "%.3f", ImGuiSliderFlags_AlwaysClamp);
+                    changed |= ImGui::DragFloat("Near", &camera.NearPlane, 0.01f,
+                        0.001f, 1000.0f, "%.3f", ImGuiSliderFlags_AlwaysClamp);
+                    changed |= ImGui::DragFloat("Far", &camera.FarPlane, 1.0f,
+                        0.01f, 100000.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
+                    changed |= ImGui::DragFloat("Exposure EV100", &camera.ExposureEV100, 0.1f);
+                    int clearMode = static_cast<int>(camera.ClearMode);
+                    const char* clearModes[] = { "Environment", "Solid Color", "Depth Only", "Nothing" };
+                    if (ImGui::Combo("Clear Mode", &clearMode, clearModes, 4))
+                    {
+                        camera.ClearMode = static_cast<kairo::engine::CameraClearMode>(clearMode);
+                        changed = true;
+                    }
+                    if (camera.ClearMode == kairo::engine::CameraClearMode::SolidColor)
+                        changed |= ImGui::ColorEdit4("Clear Color", &camera.ClearColor.x,
+                            ImGuiColorEditFlags_Float | ImGuiColorEditFlags_HDR);
+                    changed |= ImGui::InputScalar("Render Layers", ImGuiDataType_U64,
+                        &camera.RenderLayers, nullptr, nullptr, "%016llX",
+                        ImGuiInputTextFlags_CharsHexadecimal);
+                    const auto primary = scene.PrimaryCamera();
+                    const bool anotherPrimary = primary.has_value() && *primary != entity;
+                    ImGui::BeginDisabled(anotherPrimary);
+                    changed |= ImGui::Checkbox("Primary", &camera.Primary);
+                    ImGui::EndDisabled();
+                    if (anotherPrimary && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+                        ImGui::SetTooltip("Another active camera is primary.");
+                    if (changed) RunCommand([this, entity, camera] { m_History.Execute(
+                        std::make_unique<SetCameraComponentCommand>(m_Project, entity, camera)); });
+
+                    if (ImGui::Button("View Through Camera"))
+                    {
+                        const auto world = scene.WorldTransform(entity);
+                        m_ViewportController.SetPose({ world.Translation,
+                            world.Translation + world.Forward(), world.Up() });
+                    }
+                    ImGui::SameLine();
+                    if (ActionButton("Remove##Camera", UIButtonTone::Destructive))
+                        RunCommand([this, entity] { m_History.Execute(
+                            std::make_unique<SetCameraComponentCommand>(
+                                m_Project, entity, std::nullopt)); });
+                    ImGui::TreePop();
+                }
+            }
+
+            if (scene.HasLight(entity))
+            {
+                auto light = scene.Light(entity);
+                if (ImGui::TreeNodeEx("Light", ImGuiTreeNodeFlags_DefaultOpen))
+                {
+                    bool changed = false;
+                    int type = static_cast<int>(light.Type);
+                    const char* types[] = { "Directional", "Point", "Spot", "Rectangle Area" };
+                    if (ImGui::Combo("Type", &type, types, 4))
+                    {
+                        light.Type = static_cast<kairo::engine::LightType>(type);
+                        light.Unit = light.Type == kairo::engine::LightType::Directional
+                            ? kairo::engine::PhotometricUnit::Lux
+                            : light.Type == kairo::engine::LightType::RectangleArea
+                            ? kairo::engine::PhotometricUnit::Nit
+                            : kairo::engine::PhotometricUnit::Candela;
+                        changed = true;
+                    }
+                    changed |= ImGui::ColorEdit3("Color", &light.Color.x,
+                        ImGuiColorEditFlags_Float | ImGuiColorEditFlags_HDR);
+                    changed |= ImGui::DragFloat("Intensity", &light.Intensity, 5.0f,
+                        0.0f, 1'000'000.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
+                    if (light.Type != kairo::engine::LightType::Directional)
+                        changed |= ImGui::DragFloat("Range", &light.Range, 0.1f,
+                            0.01f, 100000.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
+                    if (light.Type == kairo::engine::LightType::Spot)
+                    {
+                        changed |= ImGui::SliderFloat("Inner Cone", &light.InnerConeRadians,
+                            0.0f, light.OuterConeRadians, "%.3f rad");
+                        changed |= ImGui::SliderFloat("Outer Cone", &light.OuterConeRadians,
+                            std::max(light.InnerConeRadians, 0.001f), 1.569f, "%.3f rad");
+                    }
+                    if (light.Type == kairo::engine::LightType::RectangleArea)
+                    {
+                        changed |= ImGui::DragFloat("Area Width", &light.AreaWidth,
+                            0.05f, 0.01f, 10000.0f, "%.3f", ImGuiSliderFlags_AlwaysClamp);
+                        changed |= ImGui::DragFloat("Area Height", &light.AreaHeight,
+                            0.05f, 0.01f, 10000.0f, "%.3f", ImGuiSliderFlags_AlwaysClamp);
+                    }
+                    int shadows = static_cast<int>(light.Shadows);
+                    const char* shadowModes[] = { "Disabled", "Hard", "Soft" };
+                    if (ImGui::Combo("Shadows", &shadows, shadowModes, 3))
+                    {
+                        light.Shadows = static_cast<kairo::engine::ShadowPolicy>(shadows);
+                        changed = true;
+                    }
+                    if (light.Shadows != kairo::engine::ShadowPolicy::Disabled)
+                    {
+                        changed |= ImGui::DragFloat("Shadow Bias", &light.ShadowBias,
+                            0.0001f, 0.0f, 1.0f, "%.5f", ImGuiSliderFlags_AlwaysClamp);
+                        changed |= ImGui::DragFloat("Normal Bias", &light.ShadowNormalBias,
+                            0.0001f, 0.0f, 1.0f, "%.5f", ImGuiSliderFlags_AlwaysClamp);
+                    }
+                    changed |= ImGui::InputScalar("Render Layers", ImGuiDataType_U64,
+                        &light.RenderLayers, nullptr, nullptr, "%016llX",
+                        ImGuiInputTextFlags_CharsHexadecimal);
+                    if (changed) RunCommand([this, entity, light] { m_History.Execute(
+                        std::make_unique<SetLightComponentCommand>(m_Project, entity, light)); });
+                    if (ActionButton("Remove##Light", UIButtonTone::Destructive))
+                        RunCommand([this, entity] { m_History.Execute(
+                            std::make_unique<SetLightComponentCommand>(
+                                m_Project, entity, std::nullopt)); });
+                    ImGui::TreePop();
+                }
+            }
+
+            if (scene.HasEnvironment(entity))
+            {
+                auto environment = scene.Environment(entity);
+                if (ImGui::TreeNodeEx("Environment", ImGuiTreeNodeFlags_DefaultOpen))
+                {
+                    bool changed = ImGui::Checkbox("Enabled", &environment.Enabled);
+                    changed |= ImGui::InputInt("Priority", &environment.Priority);
+                    changed |= ImGui::ColorEdit3("Background", &environment.BackgroundColor.x,
+                        ImGuiColorEditFlags_Float | ImGuiColorEditFlags_HDR);
+                    changed |= ImGui::DragFloat("Ambient", &environment.AmbientIntensity,
+                        0.01f, 0.0f, 1000.0f, "%.3f", ImGuiSliderFlags_AlwaysClamp);
+                    changed |= ImGui::DragFloat("Environment Strength",
+                        &environment.EnvironmentIntensity, 0.01f, 0.0f, 1000.0f,
+                        "%.3f", ImGuiSliderFlags_AlwaysClamp);
+                    changed |= ImGui::DragFloat("Exposure", &environment.ExposureEV100, 0.1f);
+                    const std::string environmentTexture = environment.EnvironmentTexture.has_value()
+                        ? m_Project.Assets().Resolve(*environment.EnvironmentTexture).Path.generic_string()
+                        : "None";
+                    if (ImGui::BeginCombo("Environment Texture", environmentTexture.c_str()))
+                    {
+                        if (ImGui::Selectable("None", !environment.EnvironmentTexture.has_value()))
+                        {
+                            environment.EnvironmentTexture.reset();
+                            changed = true;
+                        }
+                        for (const auto& metadata : m_Project.Assets().Snapshot())
+                        {
+                            if (metadata.Type != kairo::assets::AssetType::Texture2D) continue;
+                            const bool selected = environment.EnvironmentTexture.has_value() &&
+                                environment.EnvironmentTexture->ID == metadata.ID;
+                            if (ImGui::Selectable(metadata.Path.generic_string().c_str(), selected))
+                            {
+                                environment.EnvironmentTexture =
+                                    kairo::assets::TextureAssetHandle{ metadata.ID };
+                                changed = true;
+                            }
+                        }
+                        ImGui::EndCombo();
+                    }
+                    int fog = static_cast<int>(environment.Fog);
+                    const char* fogModes[] = { "Disabled", "Linear", "Exponential" };
+                    if (ImGui::Combo("Fog", &fog, fogModes, 3))
+                    {
+                        environment.Fog = static_cast<kairo::engine::FogMode>(fog);
+                        changed = true;
+                    }
+                    if (environment.Fog != kairo::engine::FogMode::Disabled)
+                    {
+                        changed |= ImGui::ColorEdit3("Fog Color", &environment.FogColor.x,
+                            ImGuiColorEditFlags_Float | ImGuiColorEditFlags_HDR);
+                        if (environment.Fog == kairo::engine::FogMode::Linear)
+                        {
+                            changed |= ImGui::DragFloat("Fog Near", &environment.FogNear,
+                                0.1f, 0.0f, environment.FogFar, "%.2f");
+                            changed |= ImGui::DragFloat("Fog Far", &environment.FogFar,
+                                0.1f, std::max(environment.FogNear + 0.001f, 0.001f),
+                                100000.0f, "%.2f");
+                        }
+                        else changed |= ImGui::DragFloat("Fog Density", &environment.FogDensity,
+                            0.001f, 0.0f, 1000.0f, "%.4f", ImGuiSliderFlags_AlwaysClamp);
+                    }
+                    int toneMap = static_cast<int>(environment.ToneMap);
+                    const char* toneMaps[] = { "None", "Reinhard", "ACES" };
+                    if (ImGui::Combo("Tone Mapping", &toneMap, toneMaps, 3))
+                    {
+                        environment.ToneMap = static_cast<kairo::engine::ToneMapping>(toneMap);
+                        changed = true;
+                    }
+                    if (changed) RunCommand([this, entity, environment] { m_History.Execute(
+                        std::make_unique<SetEnvironmentComponentCommand>(
+                            m_Project, entity, environment)); });
+                    if (ActionButton("Remove##Environment", UIButtonTone::Destructive))
+                        RunCommand([this, entity] { m_History.Execute(
+                            std::make_unique<SetEnvironmentComponentCommand>(
+                                m_Project, entity, std::nullopt)); });
+                    ImGui::TreePop();
+                }
+            }
         }
 
         void DrawViewport()
@@ -683,18 +1063,48 @@ export namespace kairo::editor
 
         void OpenAddPrimitivePopup()
         {
-            ImGui::OpenPopup("Add Scene Primitive");
+            ImGui::OpenPopup("Add Scene Object");
         }
 
         void DrawPrimitivePopup()
         {
-            if (!ImGui::BeginPopup("Add Scene Primitive")) return;
+            DrawAddSceneObjectPopup();
+        }
+
+        void DrawAddSceneObjectPopup()
+        {
+            if (!ImGui::BeginPopup("Add Scene Object")) return;
+            if (ImGui::MenuItem("Empty Entity")) CreateSceneObject(SceneObjectKind::Empty);
+            if (ImGui::MenuItem("Camera")) CreateSceneObject(SceneObjectKind::Camera);
+            if (ImGui::BeginMenu("Light"))
+            {
+                if (ImGui::MenuItem("Directional")) CreateSceneObject(SceneObjectKind::DirectionalLight);
+                if (ImGui::MenuItem("Point")) CreateSceneObject(SceneObjectKind::PointLight);
+                if (ImGui::MenuItem("Spot")) CreateSceneObject(SceneObjectKind::SpotLight);
+                if (ImGui::MenuItem("Rectangle Area")) CreateSceneObject(SceneObjectKind::RectangleAreaLight);
+                ImGui::EndMenu();
+            }
+            if (ImGui::MenuItem("Environment")) CreateSceneObject(SceneObjectKind::Environment);
+            ImGui::Separator();
             for (const PrimitiveKind kind : { PrimitiveKind::Cube, PrimitiveKind::Plane,
                 PrimitiveKind::UVSphere, PrimitiveKind::Cylinder })
             {
                 if (ImGui::MenuItem(Name(kind).data())) CreatePrimitive(kind);
             }
             ImGui::EndPopup();
+        }
+
+        void CreateSceneObject(SceneObjectKind kind)
+        {
+            auto command = std::make_unique<CreateSceneObjectCommand>(m_Project, kind);
+            auto* created = command.get();
+            RunCommand([this, &command] { m_History.Execute(std::move(command)); });
+            if (command == nullptr)
+            {
+                m_State.Select(created->CreatedEntity());
+                m_ViewportController.Focus(
+                    m_Project.Scene().Transform(created->CreatedEntity()).Local.Translation);
+            }
         }
 
         void CreatePrimitive(PrimitiveKind kind)

@@ -8,6 +8,7 @@ module;
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -23,6 +24,114 @@ import Kairo.Reflection;
 
 export namespace kairo::editor
 {
+    enum class SceneObjectKind : std::uint8_t
+    {
+        Empty,
+        Camera,
+        DirectionalLight,
+        PointLight,
+        SpotLight,
+        RectangleAreaLight,
+        Environment
+    };
+
+    /// Creates a commonly authored scene object as one undoable transaction.
+    /// The entity identity and complete default component survive redo.
+    class CreateSceneObjectCommand final : public EditorCommand
+    {
+    public:
+        CreateSceneObjectCommand(ProjectSession& project, SceneObjectKind kind)
+            : m_Project(&project), m_Kind(kind) {}
+
+        [[nodiscard]] std::string_view Name() const noexcept override
+        {
+            return "Create Scene Object";
+        }
+
+        [[nodiscard]] kairo::engine::Entity CreatedEntity() const
+        {
+            if (!m_Entity.has_value())
+                throw std::logic_error("Create Scene Object has not executed yet.");
+            return *m_Entity;
+        }
+
+        void Execute() override
+        {
+            auto& scene = m_Project->EditScene();
+            const std::string name = DefaultName();
+            const auto entity = m_Entity.has_value()
+                ? scene.CreateEntityWithID(*m_Entity, name)
+                : scene.CreateEntity(name);
+            if (!m_Entity.has_value()) m_Entity = entity;
+            switch (m_Kind)
+            {
+                case SceneObjectKind::Empty: break;
+                case SceneObjectKind::Camera:
+                {
+                    kairo::engine::CameraComponent camera;
+                    camera.Primary = !scene.PrimaryCamera().has_value();
+                    scene.SetCamera(entity, camera);
+                    break;
+                }
+                case SceneObjectKind::DirectionalLight:
+                    scene.SetLight(entity, {});
+                    break;
+                case SceneObjectKind::PointLight:
+                {
+                    kairo::engine::LightComponent light;
+                    light.Type = kairo::engine::LightType::Point;
+                    light.Unit = kairo::engine::PhotometricUnit::Candela;
+                    light.Intensity = 1'000.0f;
+                    scene.SetLight(entity, light);
+                    break;
+                }
+                case SceneObjectKind::SpotLight:
+                {
+                    kairo::engine::LightComponent light;
+                    light.Type = kairo::engine::LightType::Spot;
+                    light.Unit = kairo::engine::PhotometricUnit::Candela;
+                    light.Intensity = 1'500.0f;
+                    scene.SetLight(entity, light);
+                    break;
+                }
+                case SceneObjectKind::RectangleAreaLight:
+                {
+                    kairo::engine::LightComponent light;
+                    light.Type = kairo::engine::LightType::RectangleArea;
+                    light.Unit = kairo::engine::PhotometricUnit::Nit;
+                    light.Intensity = 500.0f;
+                    scene.SetLight(entity, light);
+                    break;
+                }
+                case SceneObjectKind::Environment:
+                    scene.SetEnvironment(entity, {});
+                    break;
+            }
+        }
+
+        void Undo() override { m_Project->EditScene().DestroyEntity(CreatedEntity()); }
+
+    private:
+        [[nodiscard]] std::string DefaultName() const
+        {
+            switch (m_Kind)
+            {
+                case SceneObjectKind::Empty: return "Entity";
+                case SceneObjectKind::Camera: return "Camera";
+                case SceneObjectKind::DirectionalLight: return "Directional Light";
+                case SceneObjectKind::PointLight: return "Point Light";
+                case SceneObjectKind::SpotLight: return "Spot Light";
+                case SceneObjectKind::RectangleAreaLight: return "Rectangle Area Light";
+                case SceneObjectKind::Environment: return "World Environment";
+            }
+            throw std::logic_error("Scene object kind is invalid.");
+        }
+
+        ProjectSession* m_Project;
+        SceneObjectKind m_Kind;
+        std::optional<kairo::engine::Entity> m_Entity;
+    };
+
     /// Creates one scene entity and preserves its allocated identity across
     /// undo/redo. CreatedEntity is valid after the first successful Execute.
     class CreateEntityCommand final : public EditorCommand
@@ -193,6 +302,117 @@ export namespace kairo::editor
         std::optional<kairo::engine::LogicComponent> m_Before;
     };
 
+    /// Atomic add, replace, or remove command for renderer-neutral scene
+    /// components. Input and output are complete component values so undo never
+    /// observes a half-edited camera, light, or environment descriptor.
+    /// Degeneracy: EngineCore validation runs before assignment and leaves the
+    /// prior scene value intact when an edited descriptor is invalid.
+    template<typename Component>
+    requires (std::is_same_v<Component, kairo::engine::CameraComponent> ||
+        std::is_same_v<Component, kairo::engine::LightComponent> ||
+        std::is_same_v<Component, kairo::engine::EnvironmentComponent> ||
+        std::is_same_v<Component, kairo::engine::SceneInstanceComponent>)
+    class SetSceneComponentCommand final : public EditorCommand
+    {
+    public:
+        SetSceneComponentCommand(ProjectSession& project, kairo::engine::Entity entity,
+            std::optional<Component> after)
+            : m_Project(&project), m_Entity(entity), m_Before(Capture(project.Scene(), entity)),
+              m_After(std::move(after)) {}
+
+        [[nodiscard]] std::string_view Name() const noexcept override
+        {
+            if constexpr (std::is_same_v<Component, kairo::engine::CameraComponent>)
+                return m_After.has_value() ? "Set Camera" : "Remove Camera";
+            if constexpr (std::is_same_v<Component, kairo::engine::LightComponent>)
+                return m_After.has_value() ? "Set Light" : "Remove Light";
+            if constexpr (std::is_same_v<Component, kairo::engine::SceneInstanceComponent>)
+                return m_After.has_value() ? "Set Scene Instance" : "Remove Scene Instance";
+            return m_After.has_value() ? "Set Environment" : "Remove Environment";
+        }
+
+        void Execute() override { Apply(m_Project->EditScene(), m_Entity, m_After); }
+        void Undo() override { Apply(m_Project->EditScene(), m_Entity, m_Before); }
+
+    private:
+        [[nodiscard]] static std::optional<Component> Capture(
+            const kairo::engine::Scene& scene, kairo::engine::Entity entity)
+        {
+            if constexpr (std::is_same_v<Component, kairo::engine::CameraComponent>)
+                return scene.HasCamera(entity) ? std::optional(scene.Camera(entity)) : std::nullopt;
+            else if constexpr (std::is_same_v<Component, kairo::engine::LightComponent>)
+                return scene.HasLight(entity) ? std::optional(scene.Light(entity)) : std::nullopt;
+            else if constexpr (std::is_same_v<Component, kairo::engine::SceneInstanceComponent>)
+                return scene.HasSceneInstance(entity)
+                    ? std::optional(scene.SceneInstance(entity)) : std::nullopt;
+            else
+                return scene.HasEnvironment(entity) ? std::optional(scene.Environment(entity)) : std::nullopt;
+        }
+
+        static void Apply(kairo::engine::Scene& scene, kairo::engine::Entity entity,
+            const std::optional<Component>& component)
+        {
+            if constexpr (std::is_same_v<Component, kairo::engine::CameraComponent>)
+            {
+                if (component.has_value()) scene.SetCamera(entity, *component);
+                else (void)scene.RemoveCamera(entity);
+            }
+            else if constexpr (std::is_same_v<Component, kairo::engine::LightComponent>)
+            {
+                if (component.has_value()) scene.SetLight(entity, *component);
+                else (void)scene.RemoveLight(entity);
+            }
+            else if constexpr (std::is_same_v<Component, kairo::engine::SceneInstanceComponent>)
+            {
+                if (component.has_value()) scene.SetSceneInstance(entity, *component);
+                else (void)scene.RemoveSceneInstance(entity);
+            }
+            else
+            {
+                if (component.has_value()) scene.SetEnvironment(entity, *component);
+                else (void)scene.RemoveEnvironment(entity);
+            }
+        }
+
+        ProjectSession* m_Project;
+        kairo::engine::Entity m_Entity;
+        std::optional<Component> m_Before;
+        std::optional<Component> m_After;
+    };
+
+    using SetCameraComponentCommand =
+        SetSceneComponentCommand<kairo::engine::CameraComponent>;
+    using SetLightComponentCommand =
+        SetSceneComponentCommand<kairo::engine::LightComponent>;
+    using SetEnvironmentComponentCommand =
+        SetSceneComponentCommand<kairo::engine::EnvironmentComponent>;
+    using SetSceneInstanceComponentCommand =
+        SetSceneComponentCommand<kairo::engine::SceneInstanceComponent>;
+
+    /// Replaces a complete mesh renderer so asset assignment, visibility,
+    /// layers, and shadow policy form one undoable authoring operation.
+    class SetMeshRendererComponentCommand final : public EditorCommand
+    {
+    public:
+        SetMeshRendererComponentCommand(ProjectSession& project,
+            kairo::engine::Entity entity, kairo::engine::MeshRendererComponent after)
+            : m_Project(&project), m_Entity(entity),
+              m_Before(project.Scene().MeshRenderer(entity)), m_After(std::move(after)) {}
+
+        [[nodiscard]] std::string_view Name() const noexcept override
+        {
+            return "Set Mesh Renderer";
+        }
+        void Execute() override { m_Project->EditScene().SetMeshRenderer(m_Entity, m_After); }
+        void Undo() override { m_Project->EditScene().SetMeshRenderer(m_Entity, m_Before); }
+
+    private:
+        ProjectSession* m_Project;
+        kairo::engine::Entity m_Entity;
+        kairo::engine::MeshRendererComponent m_Before;
+        kairo::engine::MeshRendererComponent m_After;
+    };
+
     /// A complete entity snapshot for the component types EngineCore currently
     /// exposes. Opaque physics bindings are retained as authored references;
     /// this command never reaches into or snapshots an external runtime world.
@@ -206,6 +426,7 @@ export namespace kairo::editor
         std::uint32_t Layer = 0u;
         std::vector<std::string> Tags;
         std::optional<kairo::engine::MeshRendererComponent> MeshRenderer;
+        std::optional<kairo::engine::SceneInstanceComponent> SceneInstance;
         std::optional<kairo::engine::CameraComponent> Camera;
         std::optional<kairo::engine::LightComponent> Light;
         std::optional<kairo::engine::EnvironmentComponent> Environment;
@@ -226,6 +447,7 @@ export namespace kairo::editor
         result.Layer = scene.Layer(entity);
         result.Tags = scene.Tags(entity);
         if (scene.HasMeshRenderer(entity)) result.MeshRenderer = scene.MeshRenderer(entity);
+        if (scene.HasSceneInstance(entity)) result.SceneInstance = scene.SceneInstance(entity);
         if (scene.HasCamera(entity)) result.Camera = scene.Camera(entity);
         if (scene.HasLight(entity)) result.Light = scene.Light(entity);
         if (scene.HasEnvironment(entity)) result.Environment = scene.Environment(entity);
@@ -259,6 +481,8 @@ export namespace kairo::editor
         scene.SetLayer(snapshot.ID, snapshot.Layer);
         for (const auto& tag : snapshot.Tags) scene.AddTag(snapshot.ID, tag);
         if (snapshot.MeshRenderer.has_value()) scene.SetMeshRenderer(snapshot.ID, *snapshot.MeshRenderer);
+        if (snapshot.SceneInstance.has_value())
+            scene.SetSceneInstance(snapshot.ID, *snapshot.SceneInstance);
         if (snapshot.Camera.has_value()) scene.SetCamera(snapshot.ID, *snapshot.Camera);
         if (snapshot.Light.has_value()) scene.SetLight(snapshot.ID, *snapshot.Light);
         if (snapshot.Environment.has_value()) scene.SetEnvironment(snapshot.ID, *snapshot.Environment);
