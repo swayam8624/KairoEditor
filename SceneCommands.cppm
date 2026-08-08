@@ -207,6 +207,8 @@ export namespace kairo::editor
         std::vector<std::string> Tags;
         std::optional<kairo::engine::MeshRendererComponent> MeshRenderer;
         std::optional<kairo::engine::CameraComponent> Camera;
+        std::optional<kairo::engine::LightComponent> Light;
+        std::optional<kairo::engine::EnvironmentComponent> Environment;
         std::optional<kairo::engine::LogicComponent> Logic;
         std::optional<kairo::engine::RigidBodyComponent> RigidBody;
         std::optional<kairo::engine::ColliderComponent> Collider;
@@ -215,11 +217,18 @@ export namespace kairo::editor
     [[nodiscard]] inline EntitySnapshot CaptureEntity(
         const kairo::engine::Scene& scene, kairo::engine::Entity entity)
     {
-        EntitySnapshot result{ entity, scene.Name(entity).Value, scene.Transform(entity).Local,
-            scene.Parent(entity), scene.IsEnabled(entity), scene.Layer(entity), scene.Tags(entity),
-            std::nullopt, std::nullopt, std::nullopt, std::nullopt, std::nullopt };
+        EntitySnapshot result;
+        result.ID = entity;
+        result.Name = scene.Name(entity).Value;
+        result.Transform = scene.Transform(entity).Local;
+        result.Parent = scene.Parent(entity);
+        result.Enabled = scene.IsEnabled(entity);
+        result.Layer = scene.Layer(entity);
+        result.Tags = scene.Tags(entity);
         if (scene.HasMeshRenderer(entity)) result.MeshRenderer = scene.MeshRenderer(entity);
         if (scene.HasCamera(entity)) result.Camera = scene.Camera(entity);
+        if (scene.HasLight(entity)) result.Light = scene.Light(entity);
+        if (scene.HasEnvironment(entity)) result.Environment = scene.Environment(entity);
         if (scene.HasLogic(entity)) result.Logic = scene.Logic(entity);
         if (scene.HasRigidBody(entity)) result.RigidBody = scene.RigidBody(entity);
         if (scene.HasCollider(entity)) result.Collider = scene.Collider(entity);
@@ -251,6 +260,8 @@ export namespace kairo::editor
         for (const auto& tag : snapshot.Tags) scene.AddTag(snapshot.ID, tag);
         if (snapshot.MeshRenderer.has_value()) scene.SetMeshRenderer(snapshot.ID, *snapshot.MeshRenderer);
         if (snapshot.Camera.has_value()) scene.SetCamera(snapshot.ID, *snapshot.Camera);
+        if (snapshot.Light.has_value()) scene.SetLight(snapshot.ID, *snapshot.Light);
+        if (snapshot.Environment.has_value()) scene.SetEnvironment(snapshot.ID, *snapshot.Environment);
         if (snapshot.Logic.has_value()) scene.SetLogic(snapshot.ID, *snapshot.Logic);
         if (snapshot.RigidBody.has_value()) scene.SetRigidBody(snapshot.ID, *snapshot.RigidBody);
         if (snapshot.Collider.has_value()) scene.SetCollider(snapshot.ID, *snapshot.Collider);
@@ -334,6 +345,11 @@ export namespace kairo::editor
                     EntitySnapshot duplicate = m_Source[index];
                     duplicate.ID = created[index];
                     duplicate.Name = index == 0u ? duplicate.Name + " Copy" : duplicate.Name;
+                    // A scene has exactly one primary camera. Duplicating one
+                    // keeps its complete lens/clear settings but leaves the
+                    // authored source as primary until the user explicitly
+                    // promotes the copy.
+                    if (duplicate.Camera.has_value()) duplicate.Camera->Primary = false;
                     if (duplicate.Parent.has_value())
                     {
                         for (std::size_t parentIndex = 0u; parentIndex < m_Source.size(); ++parentIndex)

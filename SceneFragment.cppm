@@ -31,6 +31,8 @@ export namespace kairo::editor
         std::vector<std::string> Tags;
         std::optional<kairo::engine::MeshRendererComponent> MeshRenderer;
         std::optional<kairo::engine::CameraComponent> Camera;
+        std::optional<kairo::engine::LightComponent> Light;
+        std::optional<kairo::engine::EnvironmentComponent> Environment;
         std::optional<kairo::engine::LogicComponent> Logic;
         std::optional<kairo::engine::RigidBodyComponent> RigidBody;
         std::optional<kairo::engine::ColliderComponent> Collider;
@@ -93,6 +95,8 @@ export namespace kairo::editor
                     kairo::engine::EntitySettingsComponent::ValidateTag(tag);
                 if (entity.MeshRenderer.has_value()) entity.MeshRenderer->Validate();
                 if (entity.Camera.has_value()) entity.Camera->Validate();
+                if (entity.Light.has_value()) entity.Light->Validate();
+                if (entity.Environment.has_value()) entity.Environment->Validate();
                 if (entity.Logic.has_value()) entity.Logic->Validate();
                 if (entity.RigidBody.has_value()) entity.RigidBody->Validate();
                 if (entity.Collider.has_value()) entity.Collider->Validate();
@@ -148,6 +152,8 @@ export namespace kairo::editor
             }
             if (scene.HasMeshRenderer(source)) entity.MeshRenderer = scene.MeshRenderer(source);
             if (scene.HasCamera(source)) entity.Camera = scene.Camera(source);
+            if (scene.HasLight(source)) entity.Light = scene.Light(source);
+            if (scene.HasEnvironment(source)) entity.Environment = scene.Environment(source);
             if (scene.HasLogic(source)) entity.Logic = scene.Logic(source);
             if (scene.HasRigidBody(source)) entity.RigidBody = scene.RigidBody(source);
             if (scene.HasCollider(source)) entity.Collider = scene.Collider(source);
@@ -178,6 +184,8 @@ export namespace kairo::editor
             for (const std::string& tag : source.Tags) candidate.AddTag(entity, tag);
             if (source.MeshRenderer.has_value()) candidate.SetMeshRenderer(entity, *source.MeshRenderer);
             if (source.Camera.has_value()) candidate.SetCamera(entity, *source.Camera);
+            if (source.Light.has_value()) candidate.SetLight(entity, *source.Light);
+            if (source.Environment.has_value()) candidate.SetEnvironment(entity, *source.Environment);
             if (source.Logic.has_value()) candidate.SetLogic(entity, *source.Logic);
             if (source.RigidBody.has_value()) candidate.SetRigidBody(entity, *source.RigidBody);
             if (source.Collider.has_value()) candidate.SetCollider(entity, *source.Collider);

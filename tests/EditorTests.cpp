@@ -1479,11 +1479,23 @@ TEST_CASE("Scene commands restore stable entities and merge Inspector edits", "[
 
     const auto mesh = kairo::assets::AssetID::Parse("00000000-0000-4000-8000-000000000401");
     const auto material = kairo::assets::AssetID::Parse("00000000-0000-4000-8000-000000000402");
+    const auto materialTwo = kairo::assets::AssetID::Parse("00000000-0000-4000-8000-000000000403");
     const auto logic = project.CreateDocument(
         DocumentKind::Logic, "Command Logic", "Logic/Command.kdoc");
     auto& authoredScene = project.EditScene();
-    authoredScene.SetMeshRenderer(entity, { { mesh }, { material }, false });
+    kairo::engine::MeshRendererComponent renderer{ { mesh }, { material }, false };
+    renderer.AdditionalMaterialSlots = { { materialTwo } };
+    renderer.CastShadows = false;
+    renderer.RenderLayers = 0x21u;
+    authoredScene.SetMeshRenderer(entity, renderer);
     authoredScene.SetCamera(entity, { 0.9f, 0.2f, 500.0f, true });
+    kairo::engine::LightComponent light;
+    light.Intensity = 42'000.0f;
+    authoredScene.SetLight(entity, light);
+    kairo::engine::EnvironmentComponent environment;
+    environment.Priority = 12;
+    environment.ExposureEV100 = -1.0f;
+    authoredScene.SetEnvironment(entity, environment);
     CommandHistory logicHistory;
     logicHistory.Execute(std::make_unique<SetLogicDocumentCommand>(
         project, entity, kairo::assets::DocumentAssetHandle{ logic }));
@@ -1520,8 +1532,14 @@ TEST_CASE("Scene commands restore stable entities and merge Inspector edits", "[
     CHECK(project.Scene().Transform(entity).Local == finalTransform);
     CHECK(project.Scene().MeshRenderer(entity).MeshAsset.ID == mesh);
     CHECK(project.Scene().MeshRenderer(entity).MaterialAsset.ID == material);
+    CHECK(project.Scene().MeshRenderer(entity).MaterialForSlot(1u).ID == materialTwo);
+    CHECK_FALSE(project.Scene().MeshRenderer(entity).CastShadows);
+    CHECK(project.Scene().MeshRenderer(entity).RenderLayers == 0x21u);
     CHECK_FALSE(project.Scene().MeshRenderer(entity).Visible);
     CHECK(project.Scene().Camera(entity).NearPlane == 0.2f);
+    CHECK(project.Scene().Light(entity).Intensity == 42'000.0f);
+    CHECK(project.Scene().Environment(entity).Priority == 12);
+    CHECK(project.Scene().Environment(entity).ExposureEV100 == -1.0f);
     CHECK(project.Scene().Logic(entity).Document.ID == logic);
     CHECK(project.Scene().RigidBody(entity).Motion == kairo::engine::RigidBodyMotion::Kinematic);
     CHECK(project.Scene().RigidBody(entity).Density == 3.0f);
@@ -1564,8 +1582,25 @@ TEST_CASE("Duplicate entity command preserves complete subtrees across undo and 
     scene.AddTag(source, "gameplay");
     const auto mesh = kairo::assets::AssetID::Parse("00000000-0000-4000-8000-000000000451");
     const auto material = kairo::assets::AssetID::Parse("00000000-0000-4000-8000-000000000452");
-    scene.SetMeshRenderer(source, { { mesh }, { material }, false });
-    scene.SetCamera(source, { 0.8f, 0.2f, 800.0f, true });
+    const auto materialTwo = kairo::assets::AssetID::Parse("00000000-0000-4000-8000-000000000453");
+    kairo::engine::MeshRendererComponent sourceRenderer{ { mesh }, { material }, false };
+    sourceRenderer.AdditionalMaterialSlots = { { materialTwo } };
+    sourceRenderer.ReceiveShadows = false;
+    sourceRenderer.RenderLayers = 0x45u;
+    scene.SetMeshRenderer(source, sourceRenderer);
+    kairo::engine::CameraComponent sourceCamera{ 0.8f, 0.2f, 800.0f, true };
+    sourceCamera.Projection = kairo::engine::CameraProjection::Orthographic;
+    sourceCamera.OrthographicSize = 14.0f;
+    sourceCamera.ExposureEV100 = 2.0f;
+    scene.SetCamera(source, sourceCamera);
+    kairo::engine::LightComponent sourceLight;
+    sourceLight.Intensity = 65'000.0f;
+    sourceLight.Shadows = kairo::engine::ShadowPolicy::Hard;
+    scene.SetLight(source, sourceLight);
+    kairo::engine::EnvironmentComponent sourceEnvironment;
+    sourceEnvironment.Priority = 4;
+    sourceEnvironment.ToneMap = kairo::engine::ToneMapping::Reinhard;
+    scene.SetEnvironment(source, sourceEnvironment);
     scene.SetRigidBody(source, {
         kairo::engine::RigidBodyMotion::Kinematic, 2.0f, 0.4f, 0.2f, 0.1f });
     scene.SetCollider(source, {
@@ -1597,8 +1632,19 @@ TEST_CASE("Duplicate entity command preserves complete subtrees across undo and 
     CHECK(scene.HasTag(duplicate, "gameplay"));
     CHECK(scene.MeshRenderer(duplicate).MeshAsset.ID == mesh);
     CHECK(scene.MeshRenderer(duplicate).MaterialAsset.ID == material);
+    CHECK(scene.MeshRenderer(duplicate).MaterialForSlot(1u).ID == materialTwo);
+    CHECK_FALSE(scene.MeshRenderer(duplicate).ReceiveShadows);
+    CHECK(scene.MeshRenderer(duplicate).RenderLayers == 0x45u);
     CHECK_FALSE(scene.MeshRenderer(duplicate).Visible);
     CHECK(scene.Camera(duplicate).FarPlane == 800.0f);
+    CHECK(scene.Camera(duplicate).Projection == kairo::engine::CameraProjection::Orthographic);
+    CHECK(scene.Camera(duplicate).OrthographicSize == 14.0f);
+    CHECK_FALSE(scene.Camera(duplicate).Primary);
+    CHECK(scene.Camera(source).Primary);
+    CHECK(scene.Light(duplicate).Intensity == 65'000.0f);
+    CHECK(scene.Light(duplicate).Shadows == kairo::engine::ShadowPolicy::Hard);
+    CHECK(scene.Environment(duplicate).Priority == 4);
+    CHECK(scene.Environment(duplicate).ToneMap == kairo::engine::ToneMapping::Reinhard);
     CHECK(scene.RigidBody(duplicate).Density == 2.0f);
     CHECK(scene.Collider(duplicate).Radius == 0.65f);
     CHECK(scene.Collider(duplicate).BelongsTo == 4u);
@@ -1627,6 +1673,10 @@ TEST_CASE("Duplicate entity command preserves complete subtrees across undo and 
     CHECK(scene.Parent(duplicate) == externalParent);
     CHECK(scene.Parent(duplicateChild) == duplicate);
     CHECK(scene.MeshRenderer(duplicate).MeshAsset.ID == mesh);
+    CHECK(scene.MeshRenderer(duplicate).MaterialForSlot(1u).ID == materialTwo);
+    CHECK_FALSE(scene.Camera(duplicate).Primary);
+    CHECK(scene.Light(duplicate).Intensity == 65'000.0f);
+    CHECK(scene.Environment(duplicate).Priority == 4);
     CHECK(scene.Collider(duplicate).IsTrigger);
     CHECK(scene.HasTag(duplicateChild, "attachment"));
 

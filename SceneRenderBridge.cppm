@@ -1,5 +1,6 @@
 module;
 
+#include <cstddef>
 #include <filesystem>
 #include <optional>
 #include <stdexcept>
@@ -127,7 +128,7 @@ export namespace kairo::editor
     ///
     /// Coordinate convention: EngineCore and KairoRenderer share KairoMath's
     /// right-handed TRS representation, so no axis or handedness conversion is
-    /// performed. MaterialAsset remains authored scene data until the renderer
+    /// performed. Material slots remain authored scene data until the renderer
     /// material registry lands; the current forward pass uses a neutral tint.
     /// Degeneracy: missing assets and singular transforms fail before the
     /// renderer records GPU commands.
@@ -139,7 +140,8 @@ export namespace kairo::editor
         for (const kairo::engine::Entity entity : scene.RenderableEntities())
         {
             const auto& meshRenderer = scene.MeshRenderer(entity);
-            assets.ValidateMaterial(meshRenderer.MaterialAsset);
+            for (std::size_t slot = 0u; slot < meshRenderer.MaterialSlotCount(); ++slot)
+                assets.ValidateMaterial(meshRenderer.MaterialForSlot(slot));
             result.Add({
                 assets.ResolveMesh(meshRenderer.MeshAsset),
                 kairo::foundation::math::ToMatrix4(scene.WorldTransform(entity)),

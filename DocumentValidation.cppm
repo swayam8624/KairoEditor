@@ -2,7 +2,6 @@ module;
 
 #include <algorithm>
 #include <cstddef>
-#include <cstdint>
 #include <optional>
 #include <string>
 #include <utility>
@@ -11,13 +10,12 @@ module;
 export module Kairo.Editor.DocumentValidation;
 
 import Kairo.Editor.AuthoringDocument;
+export import Kairo.Editor.Diagnostics;
 import Kairo.Editor.DocumentSchema;
 import Kairo.Editor.DocumentTypes;
 
 export namespace kairo::editor
 {
-    enum class DiagnosticSeverity : std::uint8_t { Information, Warning, Error };
-
     struct DocumentDiagnostic final
     {
         DiagnosticSeverity Severity = DiagnosticSeverity::Error;
