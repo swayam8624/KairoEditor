@@ -12,8 +12,8 @@ set(KAIRO_EDITOR_MONO_FONT_PATH "" CACHE FILEPATH "Optional monospace TTF font f
 
 # Immutable standalone fallback revisions. Local source directories and sibling
 # checkouts still take precedence for active workspace development.
-set(KAIRO_EDITOR_CORE_REVISION agent/phase1-5-portability-hardening)
-set(KAIRO_EDITOR_RENDERER_REVISION agent/phase1-5-cross-platform-ci)
+set(KAIRO_EDITOR_CORE_REVISION agent/phases6-12-runtime)
+set(KAIRO_EDITOR_RENDERER_REVISION df5e2fb145c45f072e9d5750f2ac8660ce306ad7)
 set(KAIRO_EDITOR_AI_REVISION 34d6b79727ea0bf11a369244e03c32895da9bd14)
 set(KAIRO_EDITOR_JSON_REVISION 65ee68451d8eb2b5f3a30b410476ab83deb3289b)
 
@@ -69,7 +69,7 @@ target_sources(KairoEditor PUBLIC FILE_SET CXX_MODULES BASE_DIRS ${CMAKE_CURRENT
     DocumentCompiler.cppm LogicDocumentCompiler.cppm ProjectLogicBuild.cppm ProjectDocuments.cppm GraphCanvas.cppm DocumentProjection.cppm
     AuthoringWorkspaceState.cppm
     ProjectDescriptor.cppm ProjectRecovery.cppm ProjectSession.cppm CommandHistory.cppm CommandTransaction.cppm EditorActions.cppm EditorInputRouter.cppm KeymapSettings.cppm EditorLayoutRecovery.cppm ViewportController.cppm PrimitiveTypes.cppm SceneCommands.cppm
-    AssetBrowserModel.cppm SceneSelection.cppm EditorDiagnostics.cppm SceneFragment.cppm ProjectLifecycle.cppm ProductionAuthoring.cppm
+    AssetBrowserModel.cppm SceneSelection.cppm EditorDiagnostics.cppm SceneFragment.cppm ProjectLifecycle.cppm ProductionAuthoring.cppm AdvancedProductionAuthoring.cppm NativeGameplayAuthoring.cppm OfflineRenderAuthoring.cppm MaterialPreviewAuthoring.cppm ProductionSystemsAuthoring.cppm
     AIEditorTools.cppm AIEditorSession.cppm EditorState.cppm PanelState.cppm KairoEditor.cppm)
 target_link_libraries(KairoEditor PUBLIC KairoEngineCore KairoAI nlohmann_json::nlohmann_json)
 
@@ -170,7 +170,7 @@ if(KAIRO_EDITOR_BUILD_TESTS)
     include(FetchContent)
     FetchContent_Declare(Catch2 GIT_REPOSITORY https://github.com/catchorg/Catch2.git GIT_TAG v3.5.4)
     FetchContent_MakeAvailable(Catch2)
-    add_executable(KairoEditorTests tests/EditorTests.cpp tests/ProductionAuthoringTests.cpp)
+    add_executable(KairoEditorTests tests/EditorTests.cpp tests/ProductionAuthoringTests.cpp tests/AdvancedProductionAuthoringTests.cpp tests/ProductionSystemsAuthoringTests.cpp)
     target_link_libraries(KairoEditorTests PRIVATE KairoEditor Catch2::Catch2WithMain)
     add_executable(KairoEditorPhase4Tests tests/Phase4WorkflowTests.cpp)
     target_link_libraries(KairoEditorPhase4Tests PRIVATE KairoEditor Catch2::Catch2WithMain)
