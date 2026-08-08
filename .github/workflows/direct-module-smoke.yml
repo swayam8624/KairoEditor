@@ -1,0 +1,24 @@
+name: Editor Direct Module Smoke
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  macos-llvm:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install toolchain
+        run: brew install cmake ninja llvm
+      - name: Configure
+        env:
+          CC: $(brew --prefix llvm)/bin/clang
+          CXX: $(brew --prefix llvm)/bin/clang++
+        run: cmake -S . -B build -G Ninja -DKAIRO_EDITOR_BUILD_TESTS=ON -DKAIRO_EDITOR_BUILD_APP=OFF
+      - name: Build
+        run: cmake --build build --parallel 2
