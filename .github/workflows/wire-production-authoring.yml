@@ -1,0 +1,22 @@
+name: Wire Phase 12 production authoring
+on:
+  push:
+    branches:
+      - agent/phases6-12-editor
+permissions:
+  contents: write
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: agent/phases6-12-editor
+      - run: python3 .github/scripts/wire_production_authoring.py
+      - run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m "Build Phase 12 Editor production authoring workflow"
+          git push
