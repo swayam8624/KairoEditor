@@ -29,6 +29,7 @@ export import Kairo.Editor.ProductionAuthoring;
 export import Kairo.Editor.AdvancedProductionAuthoring;
 export import Kairo.Editor.NativeGameplayAuthoring;
 export import Kairo.Editor.OfflineRenderAuthoring;
+export import Kairo.Editor.MaterialPreviewAuthoring;
 export import Kairo.Editor.ProductionSystemsAuthoring;
 export import Kairo.Editor.CommandHistory;
 export import Kairo.Editor.CommandTransaction;
