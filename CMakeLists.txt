@@ -32,8 +32,7 @@ if(NOT TARGET KairoAI)
         include(FetchContent)
         FetchContent_Declare(KairoAI
             GIT_REPOSITORY https://github.com/swayam8624/KairoAI.git
-            GIT_TAG ${KAIRO_EDITOR_AI_REVISION}
-            GIT_SHALLOW TRUE)
+            GIT_TAG ${KAIRO_EDITOR_AI_REVISION})
         FetchContent_MakeAvailable(KairoAI)
     endif()
 endif()
@@ -57,8 +56,7 @@ if(NOT TARGET KairoEngineCore)
         include(FetchContent)
         FetchContent_Declare(KairoEngineCore
             GIT_REPOSITORY https://github.com/swayam8624/KairoEngineCore.git
-            GIT_TAG ${KAIRO_EDITOR_CORE_REVISION}
-            GIT_SHALLOW TRUE)
+            GIT_TAG ${KAIRO_EDITOR_CORE_REVISION})
         FetchContent_MakeAvailable(KairoEngineCore)
     endif()
 endif()
