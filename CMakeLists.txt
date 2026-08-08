@@ -12,8 +12,8 @@ set(KAIRO_EDITOR_MONO_FONT_PATH "" CACHE FILEPATH "Optional monospace TTF font f
 
 # Immutable standalone fallback revisions. Local source directories and sibling
 # checkouts still take precedence for active workspace development.
-set(KAIRO_EDITOR_CORE_REVISION 10db0f120c158e3a34c4897c7eec4e519bf81cd2)
-set(KAIRO_EDITOR_RENDERER_REVISION d59d0c7293e379e64e8f9aef198ca302fa87558b)
+set(KAIRO_EDITOR_CORE_REVISION agent/phase1-5-portability-hardening)
+set(KAIRO_EDITOR_RENDERER_REVISION agent/phase1-5-cross-platform-ci)
 set(KAIRO_EDITOR_AI_REVISION 34d6b79727ea0bf11a369244e03c32895da9bd14)
 set(KAIRO_EDITOR_JSON_REVISION 65ee68451d8eb2b5f3a30b410476ab83deb3289b)
 
@@ -32,8 +32,7 @@ if(NOT TARGET KairoAI)
         include(FetchContent)
         FetchContent_Declare(KairoAI
             GIT_REPOSITORY https://github.com/swayam8624/KairoAI.git
-            GIT_TAG ${KAIRO_EDITOR_AI_REVISION}
-            GIT_SHALLOW TRUE)
+            GIT_TAG ${KAIRO_EDITOR_AI_REVISION})
         FetchContent_MakeAvailable(KairoAI)
     endif()
 endif()
@@ -57,8 +56,7 @@ if(NOT TARGET KairoEngineCore)
         include(FetchContent)
         FetchContent_Declare(KairoEngineCore
             GIT_REPOSITORY https://github.com/swayam8624/KairoEngineCore.git
-            GIT_TAG ${KAIRO_EDITOR_CORE_REVISION}
-            GIT_SHALLOW TRUE)
+            GIT_TAG ${KAIRO_EDITOR_CORE_REVISION})
         FetchContent_MakeAvailable(KairoEngineCore)
     endif()
 endif()
