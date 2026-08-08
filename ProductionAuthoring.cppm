@@ -16,6 +16,7 @@ module;
 export module Kairo.Editor.ProductionAuthoring;
 
 import Kairo.Assets.EditableMesh;
+import Kairo.Assets.MeshArtifact;
 import Kairo.Assets.UVAuthoring;
 import Kairo.Assets.Sculpting;
 
