@@ -25,6 +25,7 @@ export import Kairo.Editor.SceneSelection;
 export import Kairo.Editor.Diagnostics;
 export import Kairo.Editor.SceneFragment;
 export import Kairo.Editor.ProjectLifecycle;
+export import Kairo.Editor.ProductionAuthoring;
 export import Kairo.Editor.CommandHistory;
 export import Kairo.Editor.CommandTransaction;
 export import Kairo.Editor.Actions;
