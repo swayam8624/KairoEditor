@@ -181,7 +181,7 @@ export namespace kairo::editor
             {
                 const std::vector<kairo::assets::EditableFaceID> source(m_Faces.begin(), m_Faces.end());
                 const auto result = kairo::assets::DuplicateFaces(m_Document.Mesh, source, offset);
-                m_Faces = { result.begin(), result.end() };
+                m_Faces = std::set<kairo::assets::EditableFaceID>(result.begin(), result.end());
                 m_Vertices.clear(); m_Edges.clear();
                 FinishTopologyEdit();
                 return result;
@@ -199,7 +199,7 @@ export namespace kairo::editor
             {
                 const auto result = kairo::assets::BridgeLoops(
                     m_Document.Mesh, firstLoop, secondLoop, materialSlot);
-                m_Faces = { result.begin(), result.end() };
+                m_Faces = std::set<kairo::assets::EditableFaceID>(result.begin(), result.end());
                 m_Vertices.clear(); m_Edges.clear();
                 FinishTopologyEdit();
                 return result;
