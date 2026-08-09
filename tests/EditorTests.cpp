@@ -1075,12 +1075,14 @@ TEST_CASE("Project descriptors round trip portable bootstrap state", "[KairoEdit
         "startup-scene \"Scenes/City.kscene\"\n"
         "input-map \"Config/Input.kinput\"\n"
         "rendering-profile \"desktop\"\n"
+        "graphics-backend \"auto\"\n"
         "build-profile \"Development\" development \"Build/Development\"\n"
         "build-profile \"Release\" release \"Build/Release\"\n");
     CHECK(ParseProjectDescriptor(encoded) == original);
     const auto migrated = ParseProjectDescriptor(
         "kairo-project 1\nname \"Legacy\"\nassets \"Assets.kassets\"\nstartup-scene \"Main.kscene\"\n");
     CHECK(migrated.EngineVersion == "0.1.0");
+    CHECK(migrated.GraphicsBackend == "auto");
     CHECK(migrated.BuildProfiles.size() == 2u);
     REQUIRE_THROWS_AS(ParseProjectDescriptor(
         "kairo-project 2\nname \"Incomplete\"\nassets \"Assets.kassets\"\n"
@@ -1088,6 +1090,7 @@ TEST_CASE("Project descriptors round trip portable bootstrap state", "[KairoEdit
 
     ProjectDescriptor configured{ "Configured", "Assets.kassets", "Scenes/Main.kscene" };
     configured.EnabledPlugins = { "kairo.physics", "kairo.ai" };
+    configured.GraphicsBackend = "opengl";
     configured.BuildProfiles = { { "Shipping", ProjectBuildKind::Release, "Artifacts/Shipping" } };
     CHECK(ParseProjectDescriptor(SerializeProjectDescriptor(configured)) == configured);
 }
@@ -1122,6 +1125,9 @@ TEST_CASE("Project descriptors reject malformed and unsafe input with locations"
     REQUIRE_THROWS_AS(SerializeProjectDescriptor(invalid), std::invalid_argument);
     ProjectDescriptor aliasing{ "Alias", "Scenes/../Main.kscene", "Main.kscene" };
     REQUIRE_THROWS_AS(SerializeProjectDescriptor(aliasing), std::invalid_argument);
+    ProjectDescriptor invalidBackend{ "Backend", "Assets.kassets", "Main.kscene" };
+    invalidBackend.GraphicsBackend = "software";
+    REQUIRE_THROWS_AS(SerializeProjectDescriptor(invalidBackend), std::invalid_argument);
 }
 
 TEST_CASE("Project descriptor files use the validated disk format", "[KairoEditor][Project]")

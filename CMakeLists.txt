@@ -1,5 +1,8 @@
 cmake_minimum_required(VERSION 3.28)
 project(KairoEditor LANGUAGES CXX)
+if(APPLE)
+    enable_language(OBJCXX)
+endif()
 
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -124,6 +127,22 @@ if(KAIRO_EDITOR_BUILD_APP)
         ${dearimgui_SOURCE_DIR}/misc/cpp/imgui_stdlib.cpp
         ${dearimgui_SOURCE_DIR}/backends/imgui_impl_glfw.cpp
         ${dearimgui_SOURCE_DIR}/backends/imgui_impl_vulkan.cpp)
+    target_sources(KairoDearImGui PRIVATE
+        ${dearimgui_SOURCE_DIR}/backends/imgui_impl_opengl3.cpp)
+    if(APPLE)
+        target_sources(KairoDearImGui PRIVATE
+            ${dearimgui_SOURCE_DIR}/backends/imgui_impl_metal.mm
+            detail/MetalImGuiBridge.mm)
+        set_source_files_properties(
+            ${dearimgui_SOURCE_DIR}/backends/imgui_impl_metal.mm
+            detail/MetalImGuiBridge.mm PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
+        target_link_libraries(KairoDearImGui PUBLIC "-framework Metal")
+    endif()
+    if(WIN32)
+        target_sources(KairoDearImGui PRIVATE
+            ${dearimgui_SOURCE_DIR}/backends/imgui_impl_dx12.cpp)
+        target_link_libraries(KairoDearImGui PUBLIC d3d12 dxgi)
+    endif()
     target_include_directories(KairoDearImGui PUBLIC
         ${dearimgui_SOURCE_DIR}
         ${dearimgui_SOURCE_DIR}/misc/cpp
@@ -145,11 +164,22 @@ if(KAIRO_EDITOR_BUILD_APP)
         KairoUI.cppm EditorTheme.cppm ImGuiRuntime.cppm ImGuiGraphCanvas.cppm TransformGizmo.cppm
         ImGuiReflectionInspector.cppm EditorShell.cppm)
     target_link_libraries(KairoEditorImGui PUBLIC KairoEditor KairoRenderer KairoDearImGui Kairo::ImGuizmo)
+    target_compile_definitions(KairoEditorImGui PRIVATE
+        KAIRO_EDITOR_HAS_OPENGL_UI=1)
+    if(APPLE)
+        target_compile_definitions(KairoEditorImGui PRIVATE
+            KAIRO_EDITOR_HAS_METAL_UI=1)
+    endif()
+    if(WIN32)
+        target_compile_definitions(KairoEditorImGui PRIVATE
+            KAIRO_EDITOR_HAS_D3D12_UI=1)
+    endif()
 
     add_library(KairoEditorRendererBridge)
     target_sources(KairoEditorRendererBridge PUBLIC FILE_SET CXX_MODULES BASE_DIRS ${CMAKE_CURRENT_SOURCE_DIR} FILES
         SceneRenderBridge.cppm)
-    target_link_libraries(KairoEditorRendererBridge PUBLIC KairoEditor KairoRenderer)
+    target_link_libraries(KairoEditorRendererBridge PUBLIC
+        KairoEditor KairoRenderer KairoRealtimeRenderBridge)
 
     add_library(KairoEditorPhysics)
     target_sources(KairoEditorPhysics PUBLIC FILE_SET CXX_MODULES BASE_DIRS ${CMAKE_CURRENT_SOURCE_DIR} FILES
@@ -243,6 +273,30 @@ if(KAIRO_EDITOR_BUILD_TESTS)
                 --frames 3 --no-layout-persistence
                 --screenshot ${CMAKE_CURRENT_BINARY_DIR}/artifacts/shared-content-editor.ppm)
             set_tests_properties(KairoEditorSharedContentSmoke PROPERTIES TIMEOUT 20 SKIP_RETURN_CODE 77)
+            if(NOT WIN32)
+                add_test(NAME KairoEditorOpenGLSharedContentSmoke COMMAND KairoEditorApp
+                    --project ${CMAKE_CURRENT_SOURCE_DIR}/../Samples/SharedContentShowcase/Project.kproject
+                    --renderer opengl --frames 3 --no-layout-persistence
+                    --screenshot ${CMAKE_CURRENT_BINARY_DIR}/artifacts/shared-content-opengl.ppm)
+                set_tests_properties(KairoEditorOpenGLSharedContentSmoke PROPERTIES
+                    TIMEOUT 20 SKIP_RETURN_CODE 77)
+                if(APPLE)
+                    add_test(NAME KairoEditorMetalSharedContentSmoke COMMAND KairoEditorApp
+                        --project ${CMAKE_CURRENT_SOURCE_DIR}/../Samples/SharedContentShowcase/Project.kproject
+                        --renderer metal --frames 3 --no-layout-persistence
+                        --screenshot ${CMAKE_CURRENT_BINARY_DIR}/artifacts/shared-content-metal.ppm)
+                    set_tests_properties(KairoEditorMetalSharedContentSmoke PROPERTIES
+                        TIMEOUT 20 SKIP_RETURN_CODE 77)
+                endif()
+            endif()
+            if(WIN32)
+                add_test(NAME KairoEditorDirect3D12SharedContentSmoke COMMAND KairoEditorApp
+                    --project ${CMAKE_CURRENT_SOURCE_DIR}/../Samples/SharedContentShowcase/Project.kproject
+                    --renderer d3d12 --frames 3 --no-layout-persistence
+                    --screenshot ${CMAKE_CURRENT_BINARY_DIR}/artifacts/shared-content-d3d12.ppm)
+                set_tests_properties(KairoEditorDirect3D12SharedContentSmoke PROPERTIES
+                    TIMEOUT 30 SKIP_RETURN_CODE 77)
+            endif()
         endif()
         add_test(NAME KairoEditorCodeSurfaceSmoke COMMAND KairoEditorApp
             --project ${CMAKE_CURRENT_SOURCE_DIR}/examples/StarterProject/Project.kproject

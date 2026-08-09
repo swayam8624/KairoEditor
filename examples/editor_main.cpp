@@ -188,6 +188,7 @@ namespace
         std::optional<std::uint64_t> FrameLimit;
         std::optional<std::filesystem::path> Screenshot;
         std::optional<kairo::renderer::ViewportShadingMode> ViewportShading;
+        std::optional<kairo::renderer::GraphicsBackend> BackendOverride;
         bool PersistLayout = true;
     };
 
@@ -247,6 +248,15 @@ namespace
                 else if (mode == "normals") options.ViewportShading = kairo::renderer::ViewportShadingMode::Normals;
                 else if (mode == "lighting") options.ViewportShading = kairo::renderer::ViewportShadingMode::Lighting;
                 else throw std::invalid_argument("--viewport-mode requires lit, unlit, normals, or lighting.");
+                continue;
+            }
+            if (argument == "--renderer")
+            {
+                if (++index == argc)
+                    throw std::invalid_argument(
+                        "--renderer requires auto, vulkan, metal, d3d12, or opengl.");
+                options.BackendOverride =
+                    kairo::renderer::ParseGraphicsBackend(argv[index]);
                 continue;
             }
             if (argument != "--frames")
@@ -323,7 +333,12 @@ int main(int argc, char** argv)
                 kairo::editor::UnsavedChangesPolicy::Discard);
         }
         if (options.Document.has_value()) (void)project.OpenDocument(*options.Document);
-        kairo::renderer::RendererRuntime renderer({ project.Descriptor().Name, 1600u, 1000u, true });
+        const kairo::renderer::GraphicsBackend backend =
+            options.BackendOverride.value_or(
+                kairo::renderer::ParseGraphicsBackend(
+                    project.Descriptor().GraphicsBackend));
+        kairo::renderer::RendererRuntime renderer({
+            project.Descriptor().Name, 1600u, 1000u, true, backend });
         kairo::editor::EditorState state(project.Scene());
         if (const auto entities = project.Scene().Entities(); !entities.empty()) state.Select(entities.front());
         kairo::editor::RenderAssetBindings renderAssets(project.Assets());
