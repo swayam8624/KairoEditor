@@ -37,8 +37,16 @@ namespace kairo::editor
 
         const DocumentSchemaRegistry schemas = CreateCoreDocumentSchemaRegistry();
         const LogicDocumentCompiler compiler;
-        std::vector<std::pair<BuiltLogicArtifact, kairo::engine::CompiledLogicArtifact>> pending;
-        pending.reserve(documents.size());
+
+        // Keep publication transactional: compile every attached document first,
+        // then write artifacts only after the full set has validated. Separate
+        // staging vectors intentionally avoid a deeply nested pair aggregate;
+        // MSVC 19.44 ICEs while lowering that expression in a module unit.
+        std::vector<BuiltLogicArtifact> pendingRecords;
+        std::vector<kairo::engine::CompiledLogicArtifact> pendingArtifacts;
+        pendingRecords.reserve(documents.size());
+        pendingArtifacts.reserve(documents.size());
+
         for (const kairo::assets::AssetID id : documents)
         {
             const auto metadata = assets.Resolve(kairo::assets::DocumentAssetHandle{ id });
@@ -59,20 +67,27 @@ namespace kairo::editor
                     ? "unknown compiler failure" : error->Code + ": " + error->Message;
                 throw std::runtime_error("Logic build failed for " + metadata.Path.generic_string() + " (" + detail + ")");
             }
+
             kairo::engine::CompiledLogicArtifact artifact;
             artifact.Source = id;
             artifact.SourceFingerprint = kairo::assets::FingerprintFile(sourcePath);
             artifact.Program = kairo::engine::ParseLogicProgram(result.Artifact->Payload);
-            const auto artifactPath = kairo::engine::CompiledLogicPath(root, id);
-            pending.push_back({ { id, sourcePath, artifactPath }, std::move(artifact) });
+
+            BuiltLogicArtifact record;
+            record.Document = id;
+            record.SourcePath = sourcePath;
+            record.ArtifactPath = kairo::engine::CompiledLogicPath(root, id);
+            pendingRecords.push_back(std::move(record));
+            pendingArtifacts.push_back(std::move(artifact));
         }
 
         std::vector<BuiltLogicArtifact> built;
-        built.reserve(pending.size());
-        for (auto& [record, artifact] : pending)
+        built.reserve(pendingRecords.size());
+        for (std::size_t index = 0u; index < pendingRecords.size(); ++index)
         {
-            kairo::engine::SaveCompiledLogicArtifact(record.ArtifactPath, artifact);
-            built.push_back(std::move(record));
+            kairo::engine::SaveCompiledLogicArtifact(
+                pendingRecords[index].ArtifactPath, pendingArtifacts[index]);
+            built.push_back(std::move(pendingRecords[index]));
         }
         return built;
     }
