@@ -177,11 +177,11 @@ export namespace kairo::editor
         return result;
     }
 
-    /// Checked payload-only build boundary. `DocumentCompileResult` is owned and
-    /// destroyed inside this module so consumers never materialize its optional
-    /// artifact/diagnostic graph across a C++ module boundary. This is also the
-    /// stable build API for tooling that needs only validated runtime bytes.
-    [[nodiscard]] inline std::vector<std::byte> CompileDocumentPayloadOrThrow(
+    /// Checked payload-only build boundary. This is deliberately out-of-line:
+    /// `DocumentCompileResult` is owned and destroyed in this module object so
+    /// importers never instantiate its optional artifact/diagnostic teardown.
+    /// Tooling that needs only validated runtime bytes should use this boundary.
+    [[nodiscard]] std::vector<std::byte> CompileDocumentPayloadOrThrow(
         const AuthoringDocument& document,
         const DocumentSchemaRegistry& schemas,
         const DocumentCompiler& compiler)
