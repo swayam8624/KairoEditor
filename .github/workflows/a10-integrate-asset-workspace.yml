@@ -1,0 +1,54 @@
+name: A10 Asset Workspace Integration
+
+on:
+  push:
+    branches:
+      - complete/asset-workspace-integration
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: complete/asset-workspace-integration
+          fetch-depth: 0
+      - name: Integrate AssetWorkspace into production build
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          cmake = Path('CMakeLists.txt')
+          text = cmake.read_text()
+          old = '    AssetBrowserModel.cppm SceneSelection.cppm EditorDiagnostics.cppm SceneFragment.cppm ProductionAuthoring.cppm'
+          new = '    AssetBrowserModel.cppm AssetWorkspace.cppm SceneSelection.cppm EditorDiagnostics.cppm SceneFragment.cppm ProductionAuthoring.cppm'
+          if old not in text:
+              raise SystemExit('CMake module insertion point not found')
+          text = text.replace(old, new, 1)
+
+          old = '    add_executable(KairoEditorTests tests/EditorTests.cpp tests/ProductionAuthoringTests.cpp tests/AdvancedProductionAuthoringTests.cpp tests/ProductionSystemsAuthoringTests.cpp)'
+          new = '    add_executable(KairoEditorTests tests/EditorTests.cpp tests/AssetWorkspaceTests.cpp tests/ProductionAuthoringTests.cpp tests/AdvancedProductionAuthoringTests.cpp tests/ProductionSystemsAuthoringTests.cpp)'
+          if old not in text:
+              raise SystemExit('CMake test insertion point not found')
+          text = text.replace(old, new, 1)
+          cmake.write_text(text)
+
+          umbrella = Path('KairoEditor.cppm')
+          text = umbrella.read_text()
+          old = 'export import Kairo.Editor.AssetBrowserModel;\n'
+          new = old + 'export import Kairo.Editor.AssetWorkspace;\n'
+          if old not in text or 'export import Kairo.Editor.AssetWorkspace;' in text:
+              raise SystemExit('Umbrella insertion point invalid')
+          umbrella.write_text(text.replace(old, new, 1))
+          PY
+
+          rm .github/workflows/a10-integrate-asset-workspace.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add CMakeLists.txt KairoEditor.cppm .github/workflows/a10-integrate-asset-workspace.yml
+          git commit -m "Integrate AssetWorkspace into editor build"
+          git push origin HEAD:complete/asset-workspace-integration
