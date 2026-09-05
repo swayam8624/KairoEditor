@@ -24,6 +24,15 @@ import Kairo.Editor.ProjectDescriptor;
 import Kairo.Editor.ProjectPaths;
 import Kairo.EngineCore;
 
+// MSVC 19.44 has a frontend C1001 in symbols.c when optimizing the teardown
+// graph of the C++23 module-owned compiler types in this orchestration unit.
+// Keep the complete production path compiled and tested on Windows rather than
+// excluding it from the build. Newer MSVC revisions use the normal Release
+// optimization level automatically.
+#if defined(_MSC_VER) && _MSC_VER == 1944
+#pragma optimize("", off)
+#endif
+
 namespace kairo::editor
 {
     std::vector<BuiltLogicArtifact> BuildAttachedLogicArtifacts(
@@ -35,8 +44,6 @@ namespace kairo::editor
 
         // Keep compiler-heavy imported module state in a scope that is fully
         // destroyed before the public return object is moved back to the caller.
-        // MSVC 19.44 otherwise ICEs in symbols.c while synthesizing the combined
-        // teardown path for these C++23 module-owned container element types.
         {
             const auto root = CanonicalProjectRoot(projectRoot);
             std::set<kairo::assets::AssetID> documents;
@@ -114,3 +121,7 @@ namespace kairo::editor
         return BuildAttachedLogicArtifacts(root, scene, assets);
     }
 }
+
+#if defined(_MSC_VER) && _MSC_VER == 1944
+#pragma optimize("", on)
+#endif
