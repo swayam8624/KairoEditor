@@ -38,8 +38,8 @@ namespace kairo::editor
 
         // Stage every payload and exact source fingerprint before publication.
         // All document/compiler lifetimes stay behind LogicDocumentCompiler's
-        // payload-only facade. This unit owns only stable IDs, paths,
-        // fingerprints, and validated runtime bytes.
+        // payload-only facade; no generic compiler contract is imported here.
+        // This unit owns only stable IDs, paths, fingerprints, and runtime bytes.
         std::vector<project_logic_build_detail::PendingLogicArtifact> pending;
         pending.reserve(documents.size());
 
