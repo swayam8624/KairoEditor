@@ -268,7 +268,7 @@ export namespace kairo::editor
                             value.Get<bool>() ? 1u : 0u }); return reg;
                     case ValueType::Float:
                         Emit({ kairo::engine::LogicOpcode::LoadFloat, reg,
-                            AddFloat(value.Get<double>()) }); return reg;
+                            AddFloat(value.Get<double>())); return reg;
                     case ValueType::Vector3:
                         Emit({ kairo::engine::LogicOpcode::LoadVector3, reg,
                             AddVector(value.Get<kairo::foundation::math::Vec3d>()) }); return reg;
@@ -326,4 +326,10 @@ export namespace kairo::editor
             { m_Diagnostics.push_back({ DiagnosticSeverity::Error, std::move(code), std::move(message), node, pin }); }
         };
     };
+
+    /// File-to-bytecode build entry point. The declaration lives in the module
+    /// interface, but its body is compiled in a same-module implementation unit
+    /// so MSVC does not encode the build-helper lifetime graph into the BMI.
+    [[nodiscard]] std::vector<std::byte> CompileCoreLogicDocumentFile(
+        const std::filesystem::path& sourcePath, std::string_view expectedDocumentID);
 }
