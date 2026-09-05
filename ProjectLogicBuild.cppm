@@ -18,6 +18,9 @@ export namespace kairo::editor
         std::filesystem::path ArtifactPath;
     };
 
+    /// The public module keeps only the stable build contract; implementation
+    /// lives in a private module unit so consumers do not import compiler-heavy
+    /// document and logic backend state through this interface.
     /// Compiles every logic document attached to the current scene before
     /// publishing any portable runtime artifacts. Fails closed on missing,
     /// dirty, wrong-kind, invalid, or dependency-cyclic documents.
