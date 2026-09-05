@@ -8,10 +8,9 @@ module;
 #include <vector>
 
 // Keep this file as an implementation unit of the compiler module. MSVC 19.44
-// cannot compile one function that simultaneously owns the loaded document,
-// schema registry, concrete compiler, payload, and exception teardown graph.
-// The two-stage boundary below keeps those lifetimes in separate functions
-// without changing any runtime validation or bytecode semantics.
+// ICEs while synthesizing destruction for the imported schema/compiler object
+// graph. Core compiler services are immutable and intentionally process-lived;
+// build calls borrow them and own only their authored document/runtime bytes.
 module Kairo.Editor.LogicDocumentCompiler;
 
 import Kairo.Editor.AuthoringDocument;
@@ -26,15 +25,33 @@ namespace kairo::editor
 {
     namespace logic_document_compiler_detail
     {
+        struct CoreCompilerServices final
+        {
+            DocumentSchemaRegistry Schemas = CreateCoreDocumentSchemaRegistry();
+            LogicDocumentCompiler Compiler;
+        };
+
+        [[nodiscard]] const CoreCompilerServices& Services()
+        {
+            // Deliberately process-lifetime. Avoiding static destruction also
+            // avoids MSVC 19.44's symbols.c ICE without changing build results.
+            static const CoreCompilerServices* services = new CoreCompilerServices{};
+            return *services;
+        }
+
+        [[nodiscard]] std::vector<std::byte> ValidateRuntimePayload(
+            std::vector<std::byte> payload)
+        {
+            kairo::engine::ValidateCompiledLogicPayload(payload);
+            return payload;
+        }
+
         [[nodiscard]] std::vector<std::byte> CompileLoadedDocument(
             const AuthoringDocument& document)
         {
-            const DocumentSchemaRegistry schemas = CreateCoreDocumentSchemaRegistry();
-            const LogicDocumentCompiler compiler;
-            std::vector<std::byte> payload =
-                CompileDocumentPayloadOrThrow(document, schemas, compiler);
-            kairo::engine::ValidateCompiledLogicPayload(payload);
-            return payload;
+            const CoreCompilerServices& services = Services();
+            return ValidateRuntimePayload(CompileDocumentPayloadOrThrow(
+                document, services.Schemas, services.Compiler));
         }
     }
 
