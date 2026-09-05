@@ -37,8 +37,8 @@ namespace kairo::editor
             if (scene.HasLogic(entity)) documents.insert(scene.Logic(entity).Document.ID);
 
         // Stage every payload and exact source fingerprint before publication.
-        // All document/compiler lifetimes stay behind LogicDocumentCompiler's
-        // payload-only facade; no generic compiler contract is imported here.
+        // The logic module owns document loading, authored-graph validation,
+        // compiler diagnostics, safety limits, and runtime-payload validation.
         // This unit owns only stable IDs, paths, fingerprints, and runtime bytes.
         std::vector<project_logic_build_detail::PendingLogicArtifact> pending;
         pending.reserve(documents.size());
