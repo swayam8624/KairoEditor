@@ -20,7 +20,7 @@ jobs:
       - name: Install native editor dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang ninja-build libglfw3-dev libvulkan-dev libgl1-mesa-dev
+          sudo apt-get install -y clang ninja-build libglfw3-dev libvulkan-dev libgl1-mesa-dev glslang-tools
           echo "CC=clang" >> "$GITHUB_ENV"
           echo "CXX=clang++" >> "$GITHUB_ENV"
 
