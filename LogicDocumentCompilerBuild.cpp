@@ -9,6 +9,10 @@ module;
 #include <utility>
 #include <vector>
 
+// Keep this file as an implementation unit of the compiler module. In
+// particular, do not turn it back into an ordinary importing translation unit:
+// MSVC 19.44 ICEs when the document/compiler lifetime graph crosses that BMI
+// boundary, while same-module ownership preserves the exact runtime behavior.
 module Kairo.Editor.LogicDocumentCompiler;
 
 import Kairo.Editor.AuthoringDocument;
