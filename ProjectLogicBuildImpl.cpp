@@ -4,7 +4,6 @@ module;
 #include <cstddef>
 #include <filesystem>
 #include <set>
-#include <span>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -27,28 +26,6 @@ import Kairo.EngineCore;
 
 namespace kairo::editor
 {
-    namespace project_logic_build_detail
-    {
-        inline void ValidateRuntimePayload(std::span<const std::byte> payload)
-        {
-            (void)kairo::engine::ParseLogicProgram(payload);
-        }
-
-        inline void PublishRuntimeArtifact(const BuiltLogicArtifact& record,
-            const kairo::assets::AssetFingerprint& fingerprint,
-            std::span<const std::byte> payload)
-        {
-            // Keep the EngineCore-owned artifact type inside this narrow helper.
-            // MSVC 19.44 ICEs when a container of this imported module type is
-            // destroyed inside the larger project-build function.
-            kairo::engine::CompiledLogicArtifact artifact;
-            artifact.Source = record.Document;
-            artifact.SourceFingerprint = fingerprint;
-            artifact.Program = kairo::engine::ParseLogicProgram(payload);
-            kairo::engine::SaveCompiledLogicArtifact(record.ArtifactPath, artifact);
-        }
-    }
-
     std::vector<BuiltLogicArtifact> BuildAttachedLogicArtifacts(
         const std::filesystem::path& projectRoot,
         const kairo::engine::Scene& scene,
@@ -63,9 +40,9 @@ namespace kairo::editor
         const LogicDocumentCompiler compiler;
 
         // Preserve the build boundary: every attached graph is compiled and its
-        // runtime payload is parsed before publication begins. Stage only plain
-        // byte/fingerprint values here; the EngineCore artifact object is
-        // materialized one-at-a-time in the narrow publication helper above.
+        // runtime payload is validated before publication begins. Only plain
+        // bytes and fingerprints cross the Editor/EngineCore ownership boundary;
+        // runtime LogicProgram/CompiledLogicArtifact objects remain EngineCore-owned.
         std::vector<BuiltLogicArtifact> pendingRecords;
         std::vector<kairo::assets::AssetFingerprint> pendingFingerprints;
         std::vector<std::vector<std::byte>> pendingPayloads;
@@ -94,7 +71,7 @@ namespace kairo::editor
                 throw std::runtime_error("Logic build failed for " + metadata.Path.generic_string() + " (" + detail + ")");
             }
 
-            project_logic_build_detail::ValidateRuntimePayload(result.Artifact->Payload);
+            kairo::engine::ValidateCompiledLogicPayload(result.Artifact->Payload);
 
             BuiltLogicArtifact record;
             record.Document = id;
@@ -106,8 +83,11 @@ namespace kairo::editor
         }
 
         for (std::size_t index = 0u; index < pendingRecords.size(); ++index)
-            project_logic_build_detail::PublishRuntimeArtifact(
-                pendingRecords[index], pendingFingerprints[index], pendingPayloads[index]);
+            kairo::engine::SaveCompiledLogicPayload(
+                pendingRecords[index].ArtifactPath,
+                pendingRecords[index].Document,
+                pendingFingerprints[index],
+                pendingPayloads[index]);
         return pendingRecords;
     }
 
