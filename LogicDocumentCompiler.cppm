@@ -3,6 +3,7 @@ module;
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <filesystem>
 #include <map>
 #include <optional>
 #include <set>
@@ -15,11 +16,14 @@ module;
 export module Kairo.Editor.LogicDocumentCompiler;
 
 import Kairo.Editor.AuthoringDocument;
+import Kairo.Editor.CoreDocumentSchemas;
 import Kairo.Editor.DocumentCompiler;
 import Kairo.Editor.DocumentSchema;
+import Kairo.Editor.DocumentSerialization;
 import Kairo.Editor.DocumentTypes;
 import Kairo.Editor.DocumentValidation;
 import Kairo.EngineCore.Entity;
+import Kairo.EngineCore.LogicArtifact;
 import Kairo.EngineCore.LogicBytecode;
 import Kairo.Foundation.Math.Vector;
 
@@ -321,4 +325,44 @@ export namespace kairo::editor
             { m_Diagnostics.push_back({ DiagnosticSeverity::Error, std::move(code), std::move(message), node, pin }); }
         };
     };
+
+    /// Builds one persisted logic document into a runtime payload while keeping
+    /// all AuthoringDocument, schema, diagnostic, and compiler-result lifetimes
+    /// inside the module that owns those contracts. Consumers receive only
+    /// validated bytes, which avoids exporting compiler-internal lifetime graphs
+    /// across C++ module boundaries.
+    [[nodiscard]] inline std::vector<std::byte> CompileLogicDocumentFile(
+        const std::filesystem::path& sourcePath, std::string_view expectedDocumentID)
+    {
+        if (sourcePath.empty())
+            throw std::invalid_argument("Logic compiler requires a source document path.");
+        if (expectedDocumentID.empty())
+            throw std::invalid_argument("Logic compiler requires an expected document ID.");
+
+        const AuthoringDocument document = LoadDocument(sourcePath);
+        if (document.ID().ToString() != expectedDocumentID)
+            throw std::invalid_argument(
+                "Logic document file identity disagrees with its asset metadata: " +
+                sourcePath.generic_string());
+        if (document.Kind() != DocumentKind::Logic)
+            throw std::invalid_argument(
+                "Attached document is not a logic graph: " + sourcePath.generic_string());
+
+        const DocumentSchemaRegistry schemas = CreateCoreDocumentSchemaRegistry();
+        const LogicDocumentCompiler compiler;
+        DocumentCompileResult result = CompileDocument(document, schemas, compiler);
+        if (!result.Succeeded())
+        {
+            const auto error = std::find_if(result.Diagnostics.begin(), result.Diagnostics.end(),
+                [](const DocumentDiagnostic& diagnostic)
+                { return diagnostic.Severity == DiagnosticSeverity::Error; });
+            const std::string detail = error == result.Diagnostics.end()
+                ? "unknown compiler failure" : error->Code + ": " + error->Message;
+            throw std::runtime_error(
+                "Logic build failed for " + sourcePath.generic_string() + " (" + detail + ")");
+        }
+
+        kairo::engine::ValidateCompiledLogicPayload(result.Artifact->Payload);
+        return std::move(result.Artifact->Payload);
+    }
 }
