@@ -2,6 +2,7 @@
 #include <filesystem>
 
 import Kairo.Assets;
+import Kairo.Editor.AssetDragDrop;
 import Kairo.Editor.AssetWorkspace;
 
 TEST_CASE("Asset workspace sorts paths and exposes reverse dependencies")
@@ -42,7 +43,7 @@ TEST_CASE("Asset workspace filters by type status and path text")
         "Textures/Brick_BaseColor.ktex", "kairo.generated", {} });
     registry.Create({ AssetType::Mesh, AssetOrigin::Builtin,
         "Meshes/Brick.mesh", "kairo.builtin", {} });
-    registry.Create({ AssetType::Scene, AssetOrigin::SourceFile,
+    const AssetID scene = registry.Create({ AssetType::Scene, AssetOrigin::SourceFile,
         "Scenes/Level.scene", "kairo.scene", {} });
 
     const AssetWorkspace workspace = AssetWorkspace::Build(std::filesystem::current_path(), registry, imports);
@@ -58,7 +59,33 @@ TEST_CASE("Asset workspace filters by type status and path text")
     generatedOnly.IncludeChanged = false;
     generatedOnly.IncludeMissing = false;
     generatedOnly.IncludeBuiltin = false;
+    generatedOnly.IncludeUnknown = false;
     const auto generated = workspace.Filter(generatedOnly);
     REQUIRE(generated.size() == 1u);
     CHECK(generated[0].Status == AssetWorkspaceStatus::Generated);
+
+    AssetWorkspaceFilter untrackedOnly;
+    untrackedOnly.IncludeCurrent = false;
+    untrackedOnly.IncludeChanged = false;
+    untrackedOnly.IncludeMissing = false;
+    untrackedOnly.IncludeGenerated = false;
+    untrackedOnly.IncludeBuiltin = false;
+    const auto untracked = workspace.Filter(untrackedOnly);
+    REQUIRE(untracked.size() == 1u);
+    CHECK(untracked[0].Metadata.ID == scene);
+    CHECK(NameOfAssetWorkspaceStatus(untracked[0].Status) == "Untracked");
+}
+
+TEST_CASE("Asset drag payloads preserve persistent identity and enforce reflected target type")
+{
+    using namespace kairo::assets;
+    using namespace kairo::editor;
+
+    const AssetID id = GenerateAssetID();
+    const AssetDragPayload mesh = MakeAssetDragPayload(id, AssetType::Mesh);
+    CHECK(mesh.Asset() == id);
+    CHECK(mesh.Type == AssetType::Mesh);
+    CHECK(AssetMatchesReferenceTarget(mesh.Type, "Kairo.Assets.Mesh"));
+    CHECK_FALSE(AssetMatchesReferenceTarget(mesh.Type, "Kairo.Assets.Material"));
+    CHECK(ReflectionReferenceTarget(AssetType::Document) == "Kairo.Assets.Document");
 }
