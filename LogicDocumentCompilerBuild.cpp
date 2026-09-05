@@ -2,17 +2,16 @@ module;
 
 #include <cstddef>
 #include <filesystem>
-#include <new>
 #include <stdexcept>
 #include <string>
 #include <string_view>
-#include <utility>
 #include <vector>
 
-// Keep this file as an implementation unit of the compiler module. In
-// particular, do not turn it back into an ordinary importing translation unit:
-// MSVC 19.44 ICEs when the document/compiler lifetime graph crosses that BMI
-// boundary, while same-module ownership preserves the exact runtime behavior.
+// Keep this file as an implementation unit of the compiler module. MSVC 19.44
+// cannot compile one function that simultaneously owns the loaded document,
+// schema registry, concrete compiler, payload, and exception teardown graph.
+// The two-stage boundary below keeps those lifetimes in separate functions
+// without changing any runtime validation or bytecode semantics.
 module Kairo.Editor.LogicDocumentCompiler;
 
 import Kairo.Editor.AuthoringDocument;
@@ -25,6 +24,20 @@ import Kairo.EngineCore.LogicArtifact;
 
 namespace kairo::editor
 {
+    namespace logic_document_compiler_detail
+    {
+        [[nodiscard]] std::vector<std::byte> CompileLoadedDocument(
+            const AuthoringDocument& document)
+        {
+            const DocumentSchemaRegistry schemas = CreateCoreDocumentSchemaRegistry();
+            const LogicDocumentCompiler compiler;
+            std::vector<std::byte> payload =
+                CompileDocumentPayloadOrThrow(document, schemas, compiler);
+            kairo::engine::ValidateCompiledLogicPayload(payload);
+            return payload;
+        }
+    }
+
     std::vector<std::byte> CompileCoreLogicDocumentFile(
         const std::filesystem::path& sourcePath, std::string_view expectedDocumentID)
     {
@@ -42,22 +55,6 @@ namespace kairo::editor
             throw std::invalid_argument(
                 "Attached document is not a logic graph: " + sourcePath.generic_string());
 
-        const DocumentSchemaRegistry schemas = CreateCoreDocumentSchemaRegistry();
-        const LogicDocumentCompiler compiler;
-        try
-        {
-            std::vector<std::byte> payload = CompileDocumentPayloadOrThrow(document, schemas, compiler);
-            kairo::engine::ValidateCompiledLogicPayload(payload);
-            return payload;
-        }
-        catch (const std::bad_alloc&)
-        {
-            throw;
-        }
-        catch (const std::exception& error)
-        {
-            throw std::runtime_error(
-                "Logic build failed for " + sourcePath.generic_string() + " (" + error.what() + ")");
-        }
+        return logic_document_compiler_detail::CompileLoadedDocument(document);
     }
 }
