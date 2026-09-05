@@ -32,6 +32,21 @@ export namespace kairo::editor
         Unknown
     };
 
+    [[nodiscard]] constexpr std::string_view NameOfAssetWorkspaceStatus(
+        AssetWorkspaceStatus status) noexcept
+    {
+        switch (status)
+        {
+            case AssetWorkspaceStatus::Current: return "Current";
+            case AssetWorkspaceStatus::Changed: return "Changed";
+            case AssetWorkspaceStatus::MissingSource: return "Missing";
+            case AssetWorkspaceStatus::Generated: return "Generated";
+            case AssetWorkspaceStatus::Builtin: return "Builtin";
+            case AssetWorkspaceStatus::Unknown: return "Untracked";
+        }
+        return "Untracked";
+    }
+
     struct AssetWorkspaceEntry final
     {
         kairo::assets::AssetMetadata Metadata;
@@ -51,6 +66,7 @@ export namespace kairo::editor
         bool IncludeMissing = true;
         bool IncludeGenerated = true;
         bool IncludeBuiltin = true;
+        bool IncludeUnknown = true;
     };
 
     [[nodiscard]] inline AssetWorkspaceStatus StatusForAsset(
@@ -170,10 +186,10 @@ export namespace kairo::editor
             {
                 case AssetWorkspaceStatus::Current: return filter.IncludeCurrent;
                 case AssetWorkspaceStatus::Changed: return filter.IncludeChanged;
-                case AssetWorkspaceStatus::MissingSource:
-                case AssetWorkspaceStatus::Unknown: return filter.IncludeMissing;
+                case AssetWorkspaceStatus::MissingSource: return filter.IncludeMissing;
                 case AssetWorkspaceStatus::Generated: return filter.IncludeGenerated;
                 case AssetWorkspaceStatus::Builtin: return filter.IncludeBuiltin;
+                case AssetWorkspaceStatus::Unknown: return filter.IncludeUnknown;
             }
             return false;
         }
