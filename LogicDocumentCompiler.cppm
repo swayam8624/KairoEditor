@@ -328,9 +328,8 @@ export namespace kairo::editor
 
     /// Builds one persisted logic document into a runtime payload while keeping
     /// all AuthoringDocument, schema, diagnostic, and compiler-result lifetimes
-    /// inside the module that owns those contracts. Consumers receive only
-    /// validated bytes, which avoids exporting compiler-internal lifetime graphs
-    /// across C++ module boundaries.
+    /// behind their owning module boundaries. The generic compiler module owns
+    /// DocumentCompileResult; this module receives only checked payload bytes.
     [[nodiscard]] inline std::vector<std::byte> CompileLogicDocumentFile(
         const std::filesystem::path& sourcePath, std::string_view expectedDocumentID)
     {
@@ -350,19 +349,22 @@ export namespace kairo::editor
 
         const DocumentSchemaRegistry schemas = CreateCoreDocumentSchemaRegistry();
         const LogicDocumentCompiler compiler;
-        DocumentCompileResult result = CompileDocument(document, schemas, compiler);
-        if (!result.Succeeded())
+        try
         {
-            const auto error = std::find_if(result.Diagnostics.begin(), result.Diagnostics.end(),
-                [](const DocumentDiagnostic& diagnostic)
-                { return diagnostic.Severity == DiagnosticSeverity::Error; });
-            const std::string detail = error == result.Diagnostics.end()
-                ? "unknown compiler failure" : error->Code + ": " + error->Message;
-            throw std::runtime_error(
-                "Logic build failed for " + sourcePath.generic_string() + " (" + detail + ")");
+            std::vector<std::byte> payload =
+                CompileDocumentPayloadOrThrow(document, schemas, compiler);
+            kairo::engine::ValidateCompiledLogicPayload(payload);
+            return payload;
         }
-
-        kairo::engine::ValidateCompiledLogicPayload(result.Artifact->Payload);
-        return std::move(result.Artifact->Payload);
+        catch (const std::bad_alloc&)
+        {
+            throw;
+        }
+        catch (const std::exception& error)
+        {
+            throw std::runtime_error(
+                "Logic build failed for " + sourcePath.generic_string() +
+                " (" + std::string(error.what()) + ")");
+        }
     }
 }
