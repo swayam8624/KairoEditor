@@ -1,108 +1,74 @@
 module;
 
-#include <algorithm>
 #include <cstddef>
 #include <filesystem>
 #include <set>
-#include <stdexcept>
-#include <string>
 #include <utility>
 #include <vector>
 
 module Kairo.Editor.ProjectLogicBuild;
 
 import Kairo.Assets;
-import Kairo.Editor.AuthoringDocument;
-import Kairo.Editor.CoreDocumentSchemas;
-import Kairo.Editor.DocumentCompiler;
-import Kairo.Editor.DocumentSchema;
-import Kairo.Editor.DocumentSerialization;
-import Kairo.Editor.DocumentTypes;
-import Kairo.Editor.DocumentValidation;
 import Kairo.Editor.LogicDocumentCompiler;
 import Kairo.Editor.ProjectDescriptor;
 import Kairo.Editor.ProjectPaths;
 import Kairo.EngineCore;
 
-// MSVC 19.44 has a frontend C1001 in symbols.c when optimizing the teardown
-// graph of the C++23 module-owned compiler types in this orchestration unit.
-// Keep the complete production path compiled and tested on Windows rather than
-// excluding it from the build. Newer MSVC revisions use the normal Release
-// optimization level automatically.
-#if defined(_MSC_VER) && _MSC_VER == 1944
-#pragma optimize("", off)
-#endif
-
 namespace kairo::editor
 {
+    namespace project_logic_build_detail
+    {
+        struct PendingLogicArtifact final
+        {
+            BuiltLogicArtifact Record;
+            kairo::assets::AssetFingerprint Fingerprint;
+            std::vector<std::byte> Payload;
+        };
+    }
+
     std::vector<BuiltLogicArtifact> BuildAttachedLogicArtifacts(
         const std::filesystem::path& projectRoot,
         const kairo::engine::Scene& scene,
         const kairo::assets::AssetRegistry& assets)
     {
-        std::vector<BuiltLogicArtifact> built;
+        const auto root = CanonicalProjectRoot(projectRoot);
+        std::set<kairo::assets::AssetID> documents;
+        for (const kairo::engine::Entity entity : scene.Entities())
+            if (scene.HasLogic(entity)) documents.insert(scene.Logic(entity).Document.ID);
 
-        // Keep compiler-heavy imported module state in a scope that is fully
-        // destroyed before the public return object is moved back to the caller.
+        // Stage every payload and exact source fingerprint before publication.
+        // Compiler-owned document/schema/diagnostic lifetimes stay inside
+        // Kairo.Editor.LogicDocumentCompiler; this orchestration unit handles
+        // only stable IDs, paths, fingerprints, and validated runtime bytes.
+        std::vector<project_logic_build_detail::PendingLogicArtifact> pending;
+        pending.reserve(documents.size());
+
+        for (const kairo::assets::AssetID id : documents)
         {
-            const auto root = CanonicalProjectRoot(projectRoot);
-            std::set<kairo::assets::AssetID> documents;
-            for (const kairo::engine::Entity entity : scene.Entities())
-                if (scene.HasLogic(entity)) documents.insert(scene.Logic(entity).Document.ID);
+            const auto metadata = assets.Resolve(kairo::assets::DocumentAssetHandle{ id });
+            const auto sourcePath = ResolveExistingProjectFile(root, metadata.Path, "logic document");
 
-            const DocumentSchemaRegistry schemas = CreateCoreDocumentSchemaRegistry();
-            const LogicDocumentCompiler compiler;
-
-            // Preserve the build boundary: every attached graph is compiled and its
-            // runtime payload is validated before publication begins. Only plain
-            // bytes and fingerprints cross the Editor/EngineCore ownership boundary;
-            // runtime LogicProgram/CompiledLogicArtifact objects remain EngineCore-owned.
-            std::vector<kairo::assets::AssetFingerprint> pendingFingerprints;
-            std::vector<std::vector<std::byte>> pendingPayloads;
-            built.reserve(documents.size());
-            pendingFingerprints.reserve(documents.size());
-            pendingPayloads.reserve(documents.size());
-
-            for (const kairo::assets::AssetID id : documents)
-            {
-                const auto metadata = assets.Resolve(kairo::assets::DocumentAssetHandle{ id });
-                const auto sourcePath = ResolveExistingProjectFile(root, metadata.Path, "logic document");
-                const AuthoringDocument document = LoadDocument(sourcePath);
-                if (document.ID() != id)
-                    throw std::invalid_argument("Logic document file identity disagrees with its asset metadata: " +
-                        metadata.Path.generic_string());
-                if (document.Kind() != DocumentKind::Logic)
-                    throw std::invalid_argument("Attached document is not a logic graph: " + metadata.Path.generic_string());
-                DocumentCompileResult result = CompileDocument(document, schemas, compiler);
-                if (!result.Succeeded())
-                {
-                    const auto error = std::find_if(result.Diagnostics.begin(), result.Diagnostics.end(),
-                        [](const DocumentDiagnostic& diagnostic)
-                        { return diagnostic.Severity == DiagnosticSeverity::Error; });
-                    const std::string detail = error == result.Diagnostics.end()
-                        ? "unknown compiler failure" : error->Code + ": " + error->Message;
-                    throw std::runtime_error("Logic build failed for " + metadata.Path.generic_string() + " (" + detail + ")");
-                }
-
-                kairo::engine::ValidateCompiledLogicPayload(result.Artifact->Payload);
-
-                BuiltLogicArtifact record;
-                record.Document = id;
-                record.SourcePath = sourcePath;
-                record.ArtifactPath = kairo::engine::CompiledLogicPath(root, id);
-                built.push_back(std::move(record));
-                pendingFingerprints.push_back(kairo::assets::FingerprintFile(sourcePath));
-                pendingPayloads.push_back(std::move(result.Artifact->Payload));
-            }
-
-            for (std::size_t index = 0u; index < built.size(); ++index)
-                kairo::engine::SaveCompiledLogicPayload(
-                    built[index].ArtifactPath,
-                    built[index].Document,
-                    pendingFingerprints[index],
-                    pendingPayloads[index]);
+            project_logic_build_detail::PendingLogicArtifact staged;
+            staged.Record.Document = id;
+            staged.Record.SourcePath = sourcePath;
+            staged.Record.ArtifactPath = kairo::engine::CompiledLogicPath(root, id);
+            staged.Payload = CompileLogicDocumentFile(sourcePath, id.ToString());
+            staged.Fingerprint = kairo::assets::FingerprintFile(sourcePath);
+            pending.push_back(std::move(staged));
         }
 
+        // Publication starts only after the complete batch compiled and parsed.
+        // A failed graph therefore cannot leave a partially rebuilt project.
+        for (const auto& staged : pending)
+            kairo::engine::SaveCompiledLogicPayload(
+                staged.Record.ArtifactPath,
+                staged.Record.Document,
+                staged.Fingerprint,
+                staged.Payload);
+
+        std::vector<BuiltLogicArtifact> built;
+        built.reserve(pending.size());
+        for (auto& staged : pending) built.push_back(std::move(staged.Record));
         return built;
     }
 
@@ -121,7 +87,3 @@ namespace kairo::editor
         return BuildAttachedLogicArtifacts(root, scene, assets);
     }
 }
-
-#if defined(_MSC_VER) && _MSC_VER == 1944
-#pragma optimize("", on)
-#endif
