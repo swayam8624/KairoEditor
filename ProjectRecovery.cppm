@@ -7,6 +7,7 @@ module;
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <optional>
 #include <sstream>
 #include <stdexcept>
@@ -382,16 +383,39 @@ export namespace kairo::editor
         const auto relativeProject = std::filesystem::relative(projectFile, canonicalRoot);
         const auto safeProject = kairo::assets::NormalizeAssetPath(relativeProject);
         const auto safeScene = kairo::assets::NormalizeAssetPath(activeScene);
-        const auto now = std::chrono::duration_cast<std::chrono::milliseconds>(
+        const auto wallClockNow = std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::system_clock::now().time_since_epoch()).count();
         const auto root = RecoveryRoot(canonicalRoot);
         std::error_code error;
         std::filesystem::create_directories(root, error);
         if (error) throw std::runtime_error("Cannot create project recovery directory: " + error.message());
-        const std::string name = SnapshotName(now);
+
+        // Several recovery points can be created within one clock millisecond.
+        // Retention must reflect creation order rather than a random directory
+        // suffix. Keep the manifest timestamp strictly newer than every valid
+        // published snapshot, also covering wall-clock rollback.
+        std::int64_t created = wallClockNow;
+        for (const auto& entry : std::filesystem::directory_iterator(root))
+        {
+            if (!entry.is_directory() || !entry.path().filename().string().starts_with("snapshot-")) continue;
+            try
+            {
+                const RecoverySnapshot existing = LoadRecoverySnapshot(entry.path());
+                if (existing.CreatedUnixMilliseconds >= created)
+                {
+                    if (existing.CreatedUnixMilliseconds == std::numeric_limits<std::int64_t>::max())
+                        throw std::overflow_error("Recovery snapshot timestamp space is exhausted.");
+                    created = existing.CreatedUnixMilliseconds + 1;
+                }
+            }
+            catch (const std::overflow_error&) { throw; }
+            catch (...) { /* Corrupt snapshots do not participate in retention ordering. */ }
+        }
+
+        const std::string name = SnapshotName(created);
         const auto staging = root / (name + ".staging");
         const auto published = root / name;
-        RecoverySnapshot snapshot{ published, canonicalRoot, safeProject, safeScene, now, {} };
+        RecoverySnapshot snapshot{ published, canonicalRoot, safeProject, safeScene, created, {} };
         try
         {
             WritePayload(staging, snapshot, RecoveryFileRole::ProjectDescriptor, safeProject,
