@@ -176,4 +176,28 @@ export namespace kairo::editor
         result.Artifact = CompiledDocument{ document.ID(), document.Kind(), target, std::move(output.Payload) };
         return result;
     }
+
+    /// Checked payload-only build boundary. `DocumentCompileResult` is owned and
+    /// destroyed inside this module so consumers never materialize its optional
+    /// artifact/diagnostic graph across a C++ module boundary. This is also the
+    /// stable build API for tooling that needs only validated runtime bytes.
+    [[nodiscard]] inline std::vector<std::byte> CompileDocumentPayloadOrThrow(
+        const AuthoringDocument& document,
+        const DocumentSchemaRegistry& schemas,
+        const DocumentCompiler& compiler)
+    {
+        DocumentCompileResult result = CompileDocument(document, schemas, compiler);
+        if (!result.Succeeded())
+        {
+            std::string detail = "unknown compiler failure";
+            for (const DocumentDiagnostic& diagnostic : result.Diagnostics)
+            {
+                if (diagnostic.Severity != DiagnosticSeverity::Error) continue;
+                detail = diagnostic.Code + ": " + diagnostic.Message;
+                break;
+            }
+            throw std::runtime_error(detail);
+        }
+        return std::move(result.Artifact->Payload);
+    }
 }
