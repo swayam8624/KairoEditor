@@ -6,11 +6,10 @@ module;
 #include <utility>
 #include <vector>
 
-#include "LogicBuildFacade.hpp"
-
 module Kairo.Editor.ProjectLogicBuild;
 
 import Kairo.Assets;
+import Kairo.Editor.LogicDocumentCompiler;
 import Kairo.Editor.ProjectDescriptor;
 import Kairo.Editor.ProjectPaths;
 import Kairo.EngineCore;

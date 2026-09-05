@@ -268,7 +268,7 @@ export namespace kairo::editor
                             value.Get<bool>() ? 1u : 0u }); return reg;
                     case ValueType::Float:
                         Emit({ kairo::engine::LogicOpcode::LoadFloat, reg,
-                            AddFloat(value.Get<double>())); return reg;
+                            AddFloat(value.Get<double>()) }); return reg;
                     case ValueType::Vector3:
                         Emit({ kairo::engine::LogicOpcode::LoadVector3, reg,
                             AddVector(value.Get<kairo::foundation::math::Vec3d>()) }); return reg;

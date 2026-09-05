@@ -85,7 +85,7 @@ target_sources(KairoEditor PUBLIC FILE_SET CXX_MODULES BASE_DIRS ${CMAKE_CURRENT
 # authoring surface. Declare that dependency explicitly so CMake can build the
 # C++ module import DAG correctly instead of relying on KairoEngineCore's
 # transitive usage requirements.
-target_sources(KairoEditor PRIVATE ProjectLogicBuildImpl.cpp LogicBuildFacade.cpp)
+target_sources(KairoEditor PRIVATE ProjectLogicBuildImpl.cpp LogicDocumentCompilerBuild.cpp)
 target_link_libraries(KairoEditor PUBLIC KairoEngineCore KairoAssets KairoAI nlohmann_json::nlohmann_json)
 
 add_executable(KairoProjectCompiler examples/project_compiler_main.cpp)
