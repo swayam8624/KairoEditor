@@ -1,0 +1,32 @@
+name: Agent Reflection V2 UI Validation
+
+on:
+  push:
+    branches: [complete/reflection-v2-inspector]
+    paths: [.github/workflows/agent_reflection_v2_ui_validation.yml]
+
+permissions:
+  contents: read
+
+jobs:
+  native-ui-build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install native editor dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang ninja-build libglfw3-dev libvulkan-dev libgl1-mesa-dev
+          echo "CC=clang" >> "$GITHUB_ENV"
+          echo "CXX=clang++" >> "$GITHUB_ENV"
+      - name: Configure native editor
+        run: >-
+          cmake -S . -B build -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DKAIRO_EDITOR_BUILD_APP=ON
+          -DKAIRO_EDITOR_BUILD_TESTS=ON
+      - name: Build native editor and UI tests
+        run: cmake --build build --parallel
+      - name: Run non-interactive UI tests
+        run: ctest --test-dir build --output-on-failure -R "KairoEditorUITests|KairoEditorRenderBridgeTests|KairoEditorPhysicsPreviewTests"
