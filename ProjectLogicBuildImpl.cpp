@@ -41,9 +41,10 @@ namespace kairo::editor
             if (scene.HasLogic(entity)) documents.insert(scene.Logic(entity).Document.ID);
 
         // Stage every payload and exact source fingerprint before publication.
-        // Compiler-owned document/schema/diagnostic lifetimes stay inside
-        // Kairo.Editor.LogicDocumentCompiler; this orchestration unit handles
-        // only stable IDs, paths, fingerprints, and validated runtime bytes.
+        // Generic document/schema/diagnostic/result lifetimes stay inside
+        // Kairo.Editor.DocumentCompiler; the concrete logic backend lifetime
+        // stays inside Kairo.Editor.LogicDocumentCompiler. This orchestration
+        // unit handles only stable IDs, paths, fingerprints, and validated bytes.
         std::vector<project_logic_build_detail::PendingLogicArtifact> pending;
         pending.reserve(documents.size());
 
