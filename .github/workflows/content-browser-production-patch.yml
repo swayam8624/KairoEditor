@@ -1,0 +1,322 @@
+name: Production Content Browser Patch
+
+on:
+  push:
+    branches:
+      - complete/content-browser-production
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: complete/content-browser-production
+          fetch-depth: 0
+      - name: Wire production content browser
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          cmake = Path('CMakeLists.txt')
+          text = cmake.read_text()
+          old = 'AssetBrowserModel.cppm AssetWorkspace.cppm SceneSelection.cppm'
+          new = 'AssetBrowserModel.cppm AssetWorkspace.cppm AssetDragDrop.cppm SceneSelection.cppm'
+          if old not in text:
+              raise SystemExit('CMake asset module insertion point not found')
+          cmake.write_text(text.replace(old, new, 1))
+
+          inspector = Path('ImGuiReflectionInspector.cppm')
+          text = inspector.read_text()
+          old = 'import Kairo.Editor.UI;\n'
+          new = 'import Kairo.Editor.UI;\nimport Kairo.Editor.AssetDragDrop;\n'
+          if old not in text or 'import Kairo.Editor.AssetDragDrop;' in text:
+              raise SystemExit('Inspector import insertion point invalid')
+          text = text.replace(old, new, 1)
+
+          old = '''        case PropertyValueKind::Reference:\n        {\n            const ReferenceValue& value = current.Get<ReferenceValue>();\n            const std::size_t byteLimit = property.Metadata.MaximumReferenceBytes == 0u\n                ? std::size_t{ 4096u }\n                : std::min(property.Metadata.MaximumReferenceBytes, std::size_t{ 4096u });\n            std::vector<char> buffer(byteLimit + 1u, '\\0');\n            std::copy_n(value.Identifier.data(), std::min(value.Identifier.size(), byteLimit), buffer.data());\n            if (!ImGui::InputText(label, buffer.data(), buffer.size())) return false;\n            edited = PropertyValue(ReferenceValue{ value.TargetType, std::string(buffer.data()) });\n            return true;\n        }\n'''
+          new = '''        case PropertyValueKind::Reference:\n        {\n            const ReferenceValue& value = current.Get<ReferenceValue>();\n            const std::size_t byteLimit = property.Metadata.MaximumReferenceBytes == 0u\n                ? std::size_t{ 4096u }\n                : std::min(property.Metadata.MaximumReferenceBytes, std::size_t{ 4096u });\n            std::vector<char> buffer(byteLimit + 1u, '\\0');\n            std::copy_n(value.Identifier.data(), std::min(value.Identifier.size(), byteLimit), buffer.data());\n            bool changed = ImGui::InputText(label, buffer.data(), buffer.size());\n            if (changed)\n                edited = PropertyValue(ReferenceValue{ value.TargetType, std::string(buffer.data()) });\n\n            const ImGuiPayload* activePayload = ImGui::GetDragDropPayload();\n            if (activePayload != nullptr &&\n                activePayload->IsDataType(AssetDragDropPayloadType.data()) &&\n                activePayload->DataSize == static_cast<int>(sizeof(AssetDragPayload)))\n            {\n                const auto& dragged = *static_cast<const AssetDragPayload*>(activePayload->Data);\n                if (AssetMatchesReferenceTarget(dragged.Type, value.TargetType) &&\n                    ImGui::BeginDragDropTarget())\n                {\n                    if (const ImGuiPayload* accepted =\n                        ImGui::AcceptDragDropPayload(AssetDragDropPayloadType.data());\n                        accepted != nullptr && accepted->DataSize == static_cast<int>(sizeof(AssetDragPayload)))\n                    {\n                        const auto& payload = *static_cast<const AssetDragPayload*>(accepted->Data);\n                        edited = PropertyValue(ReferenceValue{ value.TargetType, payload.Asset().ToString() });\n                        changed = true;\n                    }\n                    ImGui::EndDragDropTarget();\n                }\n            }\n            return changed;\n        }\n'''
+          if old not in text:
+              raise SystemExit('Inspector reference editor block not found')
+          inspector.write_text(text.replace(old, new, 1))
+
+          shell = Path('EditorShell.cppm')
+          text = shell.read_text()
+          old = 'import Kairo.Editor;\n'
+          new = 'import Kairo.Editor;\nimport Kairo.Assets;\n'
+          if old not in text or 'import Kairo.Assets;' in text:
+              raise SystemExit('EditorShell asset import insertion point invalid')
+          text = text.replace(old, new, 1)
+
+          old = '        std::array<char, 256> m_AssetFilter{};\n'
+          new = '''        std::array<char, 256> m_AssetFilter{};\n        kairo::assets::ImportDatabase m_AssetImports;\n        std::optional<kairo::assets::AssetID> m_SelectedAsset;\n        int m_AssetTypeFilter = 0;\n        int m_AssetStatusFilter = 0;\n        bool m_RequestAssetRemovalPopup = false;\n        std::optional<kairo::assets::AssetID> m_PendingAssetRemoval;\n'''
+          if old not in text:
+              raise SystemExit('EditorShell asset state insertion point not found')
+          text = text.replace(old, new, 1)
+
+          old_start = text.index('        void DrawContentBrowser()\n        {')
+          old_end = text.index('\n        [[nodiscard]] std::optional<kairo::assets::AssetID> DrawDocumentTabs', old_start)
+          replacement = r'''        void DrawContentBrowser()
+        {
+            using kairo::assets::AssetOrigin;
+            using kairo::assets::AssetType;
+
+            (void)SearchField("##AssetFilter", "Filter assets", m_AssetFilter.data(), m_AssetFilter.size());
+
+            constexpr std::array assetTypes{
+                AssetType::Mesh, AssetType::Material, AssetType::Texture2D,
+                AssetType::Scene, AssetType::Shader, AssetType::Audio,
+                AssetType::Script, AssetType::Document, AssetType::Other
+            };
+            const char* typePreview = "All Types";
+            std::string typePreviewStorage;
+            if (m_AssetTypeFilter > 0)
+            {
+                typePreviewStorage = std::string(kairo::assets::NameOfAssetType(
+                    assetTypes.at(static_cast<std::size_t>(m_AssetTypeFilter - 1))));
+                typePreview = typePreviewStorage.c_str();
+            }
+            ImGui::SetNextItemWidth(150.0f);
+            if (ImGui::BeginCombo("Type", typePreview))
+            {
+                if (ImGui::Selectable("All Types", m_AssetTypeFilter == 0)) m_AssetTypeFilter = 0;
+                for (std::size_t index = 0u; index < assetTypes.size(); ++index)
+                {
+                    const std::string label(kairo::assets::NameOfAssetType(assetTypes[index]));
+                    if (ImGui::Selectable(label.c_str(),
+                        m_AssetTypeFilter == static_cast<int>(index + 1u)))
+                        m_AssetTypeFilter = static_cast<int>(index + 1u);
+                }
+                ImGui::EndCombo();
+            }
+            ImGui::SameLine();
+
+            constexpr std::array statuses{
+                AssetWorkspaceStatus::Current, AssetWorkspaceStatus::Changed,
+                AssetWorkspaceStatus::MissingSource, AssetWorkspaceStatus::Generated,
+                AssetWorkspaceStatus::Builtin, AssetWorkspaceStatus::Unknown
+            };
+            const char* statusPreview = m_AssetStatusFilter == 0 ? "All Statuses" :
+                NameOfAssetWorkspaceStatus(statuses.at(
+                    static_cast<std::size_t>(m_AssetStatusFilter - 1))).data();
+            ImGui::SetNextItemWidth(150.0f);
+            if (ImGui::BeginCombo("Status", statusPreview))
+            {
+                if (ImGui::Selectable("All Statuses", m_AssetStatusFilter == 0)) m_AssetStatusFilter = 0;
+                for (std::size_t index = 0u; index < statuses.size(); ++index)
+                    if (ImGui::Selectable(NameOfAssetWorkspaceStatus(statuses[index]).data(),
+                        m_AssetStatusFilter == static_cast<int>(index + 1u)))
+                        m_AssetStatusFilter = static_cast<int>(index + 1u);
+                ImGui::EndCombo();
+            }
+
+            // ProjectSession does not yet persist KairoAssets import provenance.
+            // An empty database therefore means source-file assets are shown as
+            // Untracked rather than fabricating successful source fingerprints.
+            const AssetWorkspace workspace = AssetWorkspace::Build(
+                m_Project.ProjectRoot(), m_Project.Assets(), m_AssetImports);
+            AssetWorkspaceFilter filter;
+            filter.Search = m_AssetFilter.data();
+            if (m_AssetTypeFilter > 0)
+                filter.Type = assetTypes.at(static_cast<std::size_t>(m_AssetTypeFilter - 1));
+            if (m_AssetStatusFilter > 0)
+            {
+                filter.IncludeCurrent = false;
+                filter.IncludeChanged = false;
+                filter.IncludeMissing = false;
+                filter.IncludeGenerated = false;
+                filter.IncludeBuiltin = false;
+                filter.IncludeUnknown = false;
+                switch (statuses.at(static_cast<std::size_t>(m_AssetStatusFilter - 1)))
+                {
+                    case AssetWorkspaceStatus::Current: filter.IncludeCurrent = true; break;
+                    case AssetWorkspaceStatus::Changed: filter.IncludeChanged = true; break;
+                    case AssetWorkspaceStatus::MissingSource: filter.IncludeMissing = true; break;
+                    case AssetWorkspaceStatus::Generated: filter.IncludeGenerated = true; break;
+                    case AssetWorkspaceStatus::Builtin: filter.IncludeBuiltin = true; break;
+                    case AssetWorkspaceStatus::Unknown: filter.IncludeUnknown = true; break;
+                }
+            }
+            const auto records = workspace.Filter(filter);
+            if (m_SelectedAsset.has_value() && !m_Project.Assets().Contains(*m_SelectedAsset))
+                m_SelectedAsset.reset();
+
+            if (ImGui::BeginTable("AssetRegistry", 5,
+                ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV |
+                ImGuiTableFlags_ScrollY | ImGuiTableFlags_Resizable |
+                ImGuiTableFlags_SizingStretchProp, { 0.0f, 280.0f }))
+            {
+                ImGui::TableSetupColumn("Status", ImGuiTableColumnFlags_WidthFixed, 84.0f);
+                ImGui::TableSetupColumn("Type", ImGuiTableColumnFlags_WidthFixed, 86.0f);
+                ImGui::TableSetupColumn("Path");
+                ImGui::TableSetupColumn("Rev", ImGuiTableColumnFlags_WidthFixed, 42.0f);
+                ImGui::TableSetupColumn("Uses", ImGuiTableColumnFlags_WidthFixed, 44.0f);
+                ImGui::TableHeadersRow();
+                for (const AssetWorkspaceEntry& entry : records)
+                {
+                    const auto& asset = entry.Metadata;
+                    const std::string path = asset.Path.generic_string();
+                    const std::string type(kairo::assets::NameOfAssetType(asset.Type));
+                    const bool selected = m_SelectedAsset.has_value() && *m_SelectedAsset == asset.ID;
+                    ImGui::TableNextRow();
+                    ImGui::TableSetColumnIndex(0);
+                    ImGui::TextUnformatted(NameOfAssetWorkspaceStatus(entry.Status).data());
+                    ImGui::TableSetColumnIndex(1);
+                    ImGui::TextUnformatted(type.c_str());
+                    ImGui::TableSetColumnIndex(2);
+                    const std::string row = path + "##asset-" + asset.ID.ToString();
+                    if (ImGui::Selectable(row.c_str(), selected,
+                        ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_AllowDoubleClick))
+                        m_SelectedAsset = asset.ID;
+                    if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left) &&
+                        asset.Type == AssetType::Document)
+                        OpenDocument(asset.Path);
+                    if (ImGui::BeginDragDropSource())
+                    {
+                        const AssetDragPayload payload = MakeAssetDragPayload(asset.ID, asset.Type);
+                        ImGui::SetDragDropPayload(AssetDragDropPayloadType.data(), &payload, sizeof(payload));
+                        ImGui::TextUnformatted(path.c_str());
+                        ImGui::TextDisabled("%s", type.c_str());
+                        ImGui::EndDragDropSource();
+                    }
+                    if (ImGui::IsItemHovered())
+                        ImGui::SetTooltip("%s\n%s\n%s", path.c_str(), asset.ID.ToString().c_str(),
+                            kairo::assets::NameOfAssetOrigin(asset.Origin).data());
+                    ImGui::TableSetColumnIndex(3);
+                    ImGui::Text("%llu", static_cast<unsigned long long>(asset.Revision));
+                    ImGui::TableSetColumnIndex(4);
+                    ImGui::Text("%zu", entry.Dependents.size());
+                }
+                ImGui::EndTable();
+            }
+            ImGui::TextDisabled("%zu of %zu assets", records.size(), workspace.Entries().size());
+
+            if (m_SelectedAsset.has_value() && m_Project.Assets().Contains(*m_SelectedAsset))
+            {
+                const AssetWorkspaceEntry& selected = workspace.At(*m_SelectedAsset);
+                const auto& metadata = selected.Metadata;
+                ImGui::SeparatorText("Asset Details");
+                ImGui::Text("%s", metadata.Path.generic_string().c_str());
+                ImGui::TextDisabled("ID  %s", metadata.ID.ToString().c_str());
+                ImGui::TextDisabled("Type %s   Origin %s   Status %s   Revision %llu",
+                    kairo::assets::NameOfAssetType(metadata.Type).data(),
+                    kairo::assets::NameOfAssetOrigin(metadata.Origin).data(),
+                    NameOfAssetWorkspaceStatus(selected.Status).data(),
+                    static_cast<unsigned long long>(metadata.Revision));
+                ImGui::TextDisabled("Importer %s", metadata.Importer.c_str());
+
+                if (!metadata.Dependencies.empty())
+                {
+                    ImGui::TextUnformatted("Dependencies");
+                    for (const auto& dependency : metadata.Dependencies)
+                    {
+                        const auto target = m_Project.Assets().Find(dependency.ID);
+                        const std::string label = target.has_value()
+                            ? target->Path.generic_string() : dependency.ID.ToString();
+                        ImGui::BulletText("%s", label.c_str());
+                    }
+                }
+                if (!selected.Dependents.empty())
+                {
+                    ImGui::TextUnformatted("Used by");
+                    for (const auto& dependent : selected.Dependents)
+                    {
+                        const auto owner = m_Project.Assets().Find(dependent.ID);
+                        const std::string label = owner.has_value()
+                            ? owner->Path.generic_string() : dependent.ID.ToString();
+                        ImGui::BulletText("%s", label.c_str());
+                    }
+                }
+
+                const bool openDirtyDocument = metadata.Type == AssetType::Document &&
+                    m_Project.Documents().Contains(metadata.ID) &&
+                    m_Project.Documents().IsDirty(metadata.ID);
+                const bool builtin = metadata.Origin == AssetOrigin::Builtin;
+                const bool canRemove = selected.CanDelete() && !builtin && !openDirtyDocument;
+                if (!selected.CanDelete())
+                    ImGui::TextDisabled("Removal blocked by %zu dependent asset(s).", selected.Dependents.size());
+                else if (builtin)
+                    ImGui::TextDisabled("Builtin assets cannot be removed from the project registry.");
+                else if (openDirtyDocument)
+                    ImGui::TextDisabled("Save or close the dirty document before removing its asset metadata.");
+                if (ActionButton("Remove from Project", UIButtonTone::Destructive, canRemove))
+                {
+                    m_PendingAssetRemoval = metadata.ID;
+                    m_RequestAssetRemovalPopup = true;
+                }
+                ImGui::SameLine();
+                ImGui::TextDisabled("Source files are left untouched.");
+            }
+
+            if (m_RequestAssetRemovalPopup)
+            {
+                ImGui::OpenPopup("Remove Asset from Project");
+                m_RequestAssetRemovalPopup = false;
+            }
+            if (ImGui::BeginPopupModal("Remove Asset from Project", nullptr,
+                ImGuiWindowFlags_AlwaysAutoResize))
+            {
+                if (!m_PendingAssetRemoval.has_value() ||
+                    !m_Project.Assets().Contains(*m_PendingAssetRemoval))
+                {
+                    m_PendingAssetRemoval.reset();
+                    ImGui::CloseCurrentPopup();
+                }
+                else
+                {
+                    const auto metadata = m_Project.Assets().At(*m_PendingAssetRemoval);
+                    ImGui::TextWrapped("Remove '%s' from the project asset registry?",
+                        metadata.Path.generic_string().c_str());
+                    ImGui::TextDisabled("This does not delete the source file from disk.");
+                    if (ActionButton("Remove", UIButtonTone::Destructive, true, 100.0f))
+                    {
+                        const auto id = *m_PendingAssetRemoval;
+                        RunCommand([this, id]
+                        {
+                            const auto metadata = m_Project.Assets().At(id);
+                            const AssetWorkspace latest = AssetWorkspace::Build(
+                                m_Project.ProjectRoot(), m_Project.Assets(), m_AssetImports);
+                            if (!latest.At(id).CanDelete())
+                                throw std::logic_error("Cannot remove an asset that has dependents.");
+                            if (metadata.Origin == AssetOrigin::Builtin)
+                                throw std::logic_error("Builtin assets cannot be removed from the project registry.");
+                            const bool openDocument = metadata.Type == AssetType::Document &&
+                                m_Project.Documents().Contains(id);
+                            if (openDocument && m_Project.Documents().IsDirty(id))
+                                throw std::logic_error("Cannot remove an open document with unsaved changes.");
+                            if (openDocument)
+                            {
+                                m_Project.CloseDocument(id);
+                                m_AuthoringWorkspace.Close(id);
+                            }
+                            m_Project.EditAssets().Remove(id);
+                            m_SelectedAsset.reset();
+                            m_PendingAssetRemoval.reset();
+                            ImGui::CloseCurrentPopup();
+                        });
+                    }
+                    ImGui::SameLine();
+                    if (ActionButton("Cancel", UIButtonTone::Neutral, true, 100.0f))
+                    {
+                        m_PendingAssetRemoval.reset();
+                        ImGui::CloseCurrentPopup();
+                    }
+                }
+                ImGui::EndPopup();
+            }
+        }
+'''
+          text = text[:old_start] + replacement + text[old_end:]
+          shell.write_text(text)
+          PY
+
+          rm .github/workflows/content-browser-production-patch.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add CMakeLists.txt ImGuiReflectionInspector.cppm EditorShell.cppm .github/workflows/content-browser-production-patch.yml
+          git commit -m "Wire production content browser and typed drops"
+          git push origin HEAD:complete/content-browser-production
