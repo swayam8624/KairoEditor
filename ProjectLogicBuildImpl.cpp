@@ -3,12 +3,16 @@ module;
 #include <cstddef>
 #include <filesystem>
 #include <set>
+#include <stdexcept>
+#include <string>
 #include <utility>
 #include <vector>
 
 module Kairo.Editor.ProjectLogicBuild;
 
 import Kairo.Assets;
+import Kairo.Editor.DocumentCompiler;
+import Kairo.Editor.DocumentTypes;
 import Kairo.Editor.LogicDocumentCompiler;
 import Kairo.Editor.ProjectDescriptor;
 import Kairo.Editor.ProjectPaths;
@@ -52,7 +56,18 @@ namespace kairo::editor
             staged.Record.Document = id;
             staged.Record.SourcePath = sourcePath;
             staged.Record.ArtifactPath = kairo::engine::CompiledLogicPath(root, id);
-            staged.Payload = CompileLogicDocumentFile(sourcePath, id.ToString());
+            try
+            {
+                staged.Payload = CompileDocumentFilePayloadOrThrow(
+                    sourcePath, id.ToString(), DocumentKind::Logic, CoreLogicDocumentCompiler());
+                kairo::engine::ValidateCompiledLogicPayload(staged.Payload);
+            }
+            catch (const std::exception& error)
+            {
+                throw std::runtime_error(
+                    "Logic build failed for " + sourcePath.generic_string() +
+                    " (" + std::string(error.what()) + ")");
+            }
             staged.Fingerprint = kairo::assets::FingerprintFile(sourcePath);
             pending.push_back(std::move(staged));
         }

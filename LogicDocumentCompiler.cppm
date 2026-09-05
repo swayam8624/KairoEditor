@@ -326,45 +326,13 @@ export namespace kairo::editor
         };
     };
 
-    /// Builds one persisted logic document into a runtime payload while keeping
-    /// all AuthoringDocument, schema, diagnostic, and compiler-result lifetimes
-    /// behind their owning module boundaries. The generic compiler module owns
-    /// DocumentCompileResult; this module receives only checked payload bytes.
-    [[nodiscard]] inline std::vector<std::byte> CompileLogicDocumentFile(
-        const std::filesystem::path& sourcePath, std::string_view expectedDocumentID)
+    /// Stable backend accessor used by project-build orchestration. The concrete
+    /// compiler lifetime remains owned by this module while generic document
+    /// loading, schema validation, diagnostics, and result ownership remain in
+    /// Kairo.Editor.DocumentCompiler.
+    [[nodiscard]] inline const DocumentCompiler& CoreLogicDocumentCompiler() noexcept
     {
-        if (sourcePath.empty())
-            throw std::invalid_argument("Logic compiler requires a source document path.");
-        if (expectedDocumentID.empty())
-            throw std::invalid_argument("Logic compiler requires an expected document ID.");
-
-        const AuthoringDocument document = LoadDocument(sourcePath);
-        if (document.ID().ToString() != expectedDocumentID)
-            throw std::invalid_argument(
-                "Logic document file identity disagrees with its asset metadata: " +
-                sourcePath.generic_string());
-        if (document.Kind() != DocumentKind::Logic)
-            throw std::invalid_argument(
-                "Attached document is not a logic graph: " + sourcePath.generic_string());
-
-        const DocumentSchemaRegistry schemas = CreateCoreDocumentSchemaRegistry();
-        const LogicDocumentCompiler compiler;
-        try
-        {
-            std::vector<std::byte> payload =
-                CompileDocumentPayloadOrThrow(document, schemas, compiler);
-            kairo::engine::ValidateCompiledLogicPayload(payload);
-            return payload;
-        }
-        catch (const std::bad_alloc&)
-        {
-            throw;
-        }
-        catch (const std::exception& error)
-        {
-            throw std::runtime_error(
-                "Logic build failed for " + sourcePath.generic_string() +
-                " (" + std::string(error.what()) + ")");
-        }
+        static const LogicDocumentCompiler compiler;
+        return compiler;
     }
 }
