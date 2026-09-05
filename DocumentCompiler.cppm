@@ -2,7 +2,6 @@ module;
 
 #include <cstddef>
 #include <exception>
-#include <filesystem>
 #include <iterator>
 #include <new>
 #include <optional>
@@ -16,9 +15,7 @@ export module Kairo.Editor.DocumentCompiler;
 
 import Kairo.Assets;
 import Kairo.Editor.AuthoringDocument;
-import Kairo.Editor.CoreDocumentSchemas;
 import Kairo.Editor.DocumentSchema;
-import Kairo.Editor.DocumentSerialization;
 import Kairo.Editor.DocumentTypes;
 import Kairo.Editor.DocumentValidation;
 import Kairo.Editor.TextValidation;
@@ -179,57 +176,4 @@ export namespace kairo::editor
         result.Artifact = CompiledDocument{ document.ID(), document.Kind(), target, std::move(output.Payload) };
         return result;
     }
-
-    /// Checked payload-only boundary for build orchestration. The complete
-    /// DocumentCompileResult lifetime stays inside its owning module while
-    /// callers receive only the validated runtime bytes. This preserves the
-    /// same validation, compiler-contract checks, and diagnostics as
-    /// CompileDocument without forcing consumers to materialize the wrapper.
-    [[nodiscard]] inline std::vector<std::byte> CompileDocumentPayloadOrThrow(
-        const AuthoringDocument& document,
-        const DocumentSchemaRegistry& schemas,
-        const DocumentCompiler& compiler)
-    {
-        DocumentCompileResult result = CompileDocument(document, schemas, compiler);
-        if (!result.Succeeded())
-        {
-            std::string detail = "unknown compiler failure";
-            for (const DocumentDiagnostic& diagnostic : result.Diagnostics)
-            {
-                if (diagnostic.Severity != DiagnosticSeverity::Error) continue;
-                detail = diagnostic.Code + ": " + diagnostic.Message;
-                break;
-            }
-            throw std::runtime_error(detail);
-        }
-        return std::move(result.Artifact->Payload);
-    }
-    /// Checked file-to-payload boundary for project builds. AuthoringDocument,
-    /// core-schema, diagnostic, and DocumentCompileResult lifetimes all remain
-    /// inside their owning module; callers receive only validated compiler bytes.
-    [[nodiscard]] inline std::vector<std::byte> CompileDocumentFilePayloadOrThrow(
-        const std::filesystem::path& sourcePath,
-        std::string_view expectedDocumentID,
-        DocumentKind expectedKind,
-        const DocumentCompiler& compiler)
-    {
-        if (sourcePath.empty())
-            throw std::invalid_argument("Document compiler requires a source path.");
-        if (expectedDocumentID.empty())
-            throw std::invalid_argument("Document compiler requires an expected document ID.");
-
-        const AuthoringDocument document = LoadDocument(sourcePath);
-        if (document.ID().ToString() != expectedDocumentID)
-            throw std::invalid_argument(
-                "Document file identity disagrees with its asset metadata: " +
-                sourcePath.generic_string());
-        if (document.Kind() != expectedKind)
-            throw std::invalid_argument(
-                "Document kind disagrees with its build target: " +
-                sourcePath.generic_string());
-
-        const DocumentSchemaRegistry schemas = CreateCoreDocumentSchemaRegistry();
-        return CompileDocumentPayloadOrThrow(document, schemas, compiler);
-    }
-
 }
