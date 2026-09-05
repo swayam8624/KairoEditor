@@ -5,6 +5,7 @@ module;
 #include <cstdint>
 #include <filesystem>
 #include <map>
+#include <new>
 #include <optional>
 #include <set>
 #include <stdexcept>
@@ -326,16 +327,111 @@ export namespace kairo::editor
         };
     };
 
-    /// Project-build facade that keeps the concrete compiler and all generic
-    /// document compiler contracts behind their owning module boundaries. The
-    /// caller receives only runtime-validated bytecode bytes.
+    namespace logic_document_compiler_detail
+    {
+        [[nodiscard]] inline std::string FirstErrorDetail(
+            const std::vector<DocumentDiagnostic>& diagnostics)
+        {
+            for (const DocumentDiagnostic& diagnostic : diagnostics)
+            {
+                if (diagnostic.Severity != DiagnosticSeverity::Error) continue;
+                return diagnostic.Code + ": " + diagnostic.Message;
+            }
+            return "unknown compiler failure";
+        }
+
+        [[nodiscard]] inline AuthoringDocument LoadLogicBuildDocument(
+            const std::filesystem::path& sourcePath, std::string_view expectedDocumentID)
+        {
+            if (sourcePath.empty())
+                throw std::invalid_argument("Logic compiler requires a source document path.");
+            if (expectedDocumentID.empty())
+                throw std::invalid_argument("Logic compiler requires an expected document ID.");
+
+            AuthoringDocument document = LoadDocument(sourcePath);
+            if (document.ID().ToString() != expectedDocumentID)
+                throw std::invalid_argument(
+                    "Logic document file identity disagrees with its asset metadata: " +
+                    sourcePath.generic_string());
+            if (document.Kind() != DocumentKind::Logic)
+                throw std::invalid_argument(
+                    "Attached document is not a logic graph: " + sourcePath.generic_string());
+            return document;
+        }
+
+        [[nodiscard]] inline std::vector<std::byte> CompileLogicBuildDocument(
+            const AuthoringDocument& document, const std::filesystem::path& sourcePath)
+        {
+            const DocumentSchemaRegistry schemas = CreateCoreDocumentSchemaRegistry();
+            std::vector<DocumentDiagnostic> validation = ValidateDocument(document, schemas);
+            if (HasErrors(validation))
+                throw std::runtime_error(
+                    "Logic build failed for " + sourcePath.generic_string() + " (" +
+                    FirstErrorDetail(validation) + ")");
+
+            static const LogicDocumentCompiler compiler;
+            DocumentCompilerOutput output;
+            try
+            {
+                output = compiler.Compile(document, schemas);
+            }
+            catch (const std::bad_alloc&)
+            {
+                throw;
+            }
+            catch (const std::exception& error)
+            {
+                throw std::runtime_error(
+                    "Logic build failed for " + sourcePath.generic_string() + " (" +
+                    document_compiler_detail::SafeFailureMessage(error) + ")");
+            }
+            catch (...)
+            {
+                throw std::runtime_error(
+                    "Logic build failed for " + sourcePath.generic_string() +
+                    " (Compiler failed with an unknown exception.)");
+            }
+
+            if (output.Diagnostics.size() > MaximumCompilerDiagnostics)
+                throw std::runtime_error(
+                    "Logic build failed for " + sourcePath.generic_string() +
+                    " (compiler-contract: Compiler exceeded the diagnostic safety limit.)");
+            if (output.Payload.size() > MaximumCompiledDocumentBytes)
+                throw std::runtime_error(
+                    "Logic build failed for " + sourcePath.generic_string() +
+                    " (compiler-contract: Compiler exceeded the artifact safety limit.)");
+
+            try
+            {
+                for (const DocumentDiagnostic& diagnostic : output.Diagnostics)
+                    document_compiler_detail::ValidateDiagnostic(diagnostic, document);
+            }
+            catch (const std::exception& error)
+            {
+                throw std::runtime_error(
+                    "Logic build failed for " + sourcePath.generic_string() +
+                    " (compiler-contract: " + std::string(error.what()) + ")");
+            }
+
+            if (HasErrors(output.Diagnostics))
+                throw std::runtime_error(
+                    "Logic build failed for " + sourcePath.generic_string() + " (" +
+                    FirstErrorDetail(output.Diagnostics) + ")");
+
+            kairo::engine::ValidateCompiledLogicPayload(output.Payload);
+            return std::move(output.Payload);
+        }
+    }
+
+    /// File-to-runtime-bytecode build boundary for the core logic backend.
+    /// It intentionally avoids DocumentCompileResult so MSVC 19.44 does not
+    /// have to merge the generic artifact wrapper with this concrete compiler's
+    /// module-owned state. Validation and compiler safety limits are preserved.
     [[nodiscard]] inline std::vector<std::byte> CompileCoreLogicDocumentFile(
         const std::filesystem::path& sourcePath, std::string_view expectedDocumentID)
     {
-        static const LogicDocumentCompiler compiler;
-        std::vector<std::byte> payload = CompileDocumentFilePayloadOrThrow(
-            sourcePath, expectedDocumentID, DocumentKind::Logic, compiler);
-        kairo::engine::ValidateCompiledLogicPayload(payload);
-        return payload;
+        const AuthoringDocument document =
+            logic_document_compiler_detail::LoadLogicBuildDocument(sourcePath, expectedDocumentID);
+        return logic_document_compiler_detail::CompileLogicBuildDocument(document, sourcePath);
     }
 }
