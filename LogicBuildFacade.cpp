@@ -1,6 +1,5 @@
 #include "LogicBuildFacade.hpp"
 
-#include <algorithm>
 #include <new>
 #include <stdexcept>
 #include <string>
@@ -9,6 +8,7 @@
 import Kairo.Editor.AuthoringDocument;
 import Kairo.Editor.CoreDocumentSchemas;
 import Kairo.Editor.DocumentCompiler;
+import Kairo.Editor.DocumentSchema;
 import Kairo.Editor.DocumentSerialization;
 import Kairo.Editor.DocumentTypes;
 import Kairo.Editor.LogicDocumentCompiler;
@@ -35,21 +35,20 @@ namespace kairo::editor
 
         const DocumentSchemaRegistry schemas = CreateCoreDocumentSchemaRegistry();
         const LogicDocumentCompiler compiler;
-        DocumentCompileResult result = CompileDocument(document, schemas, compiler);
-        if (!result.Succeeded())
+        try
         {
-            std::string detail = "unknown compiler failure";
-            for (const DocumentDiagnostic& diagnostic : result.Diagnostics)
-            {
-                if (diagnostic.Severity != DiagnosticSeverity::Error) continue;
-                detail = diagnostic.Code + ": " + diagnostic.Message;
-                break;
-            }
-            throw std::runtime_error(
-                "Logic build failed for " + sourcePath.generic_string() + " (" + detail + ")");
+            std::vector<std::byte> payload = CompileDocumentPayloadOrThrow(document, schemas, compiler);
+            kairo::engine::ValidateCompiledLogicPayload(payload);
+            return payload;
         }
-
-        kairo::engine::ValidateCompiledLogicPayload(result.Artifact->Payload);
-        return std::move(result.Artifact->Payload);
+        catch (const std::bad_alloc&)
+        {
+            throw;
+        }
+        catch (const std::exception& error)
+        {
+            throw std::runtime_error(
+                "Logic build failed for " + sourcePath.generic_string() + " (" + error.what() + ")");
+        }
     }
 }
