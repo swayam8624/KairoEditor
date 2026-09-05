@@ -82,3 +82,34 @@ jobs:
             echo "::error file=test.log,title=Test failure::$message"
           fi
           exit $status
+
+  native-ui:
+    name: Ubuntu Native ImGui
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install native editor dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang ninja-build libglfw3-dev libvulkan-dev libgl1-mesa-dev glslang-tools xvfb
+          echo "CC=clang" >> "$GITHUB_ENV"
+          echo "CXX=clang++" >> "$GITHUB_ENV"
+      - name: Configure native editor
+        run: >-
+          cmake -S . -B build -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DKAIRO_EDITOR_BUILD_APP=ON
+          -DKAIRO_EDITOR_BUILD_TESTS=ON
+      - name: Build native editor and UI integration tests
+        run: >-
+          cmake --build build --parallel 2 --target
+          KairoEditorApp
+          KairoEditorUITests
+          KairoEditorRenderBridgeTests
+          KairoEditorPhysicsPreviewTests
+      - name: Test native UI integration surfaces
+        run: >-
+          xvfb-run --auto-servernum --server-args="-screen 0 1280x1024x24"
+          ctest --test-dir build --output-on-failure
+          -R "KairoEditorUITests|KairoEditorRenderBridgeTests|KairoEditorPhysicsPreviewTests"

@@ -3,7 +3,9 @@ module;
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <filesystem>
 #include <map>
+#include <new>
 #include <optional>
 #include <set>
 #include <stdexcept>
@@ -15,11 +17,14 @@ module;
 export module Kairo.Editor.LogicDocumentCompiler;
 
 import Kairo.Editor.AuthoringDocument;
+import Kairo.Editor.CoreDocumentSchemas;
 import Kairo.Editor.DocumentCompiler;
 import Kairo.Editor.DocumentSchema;
+import Kairo.Editor.DocumentSerialization;
 import Kairo.Editor.DocumentTypes;
 import Kairo.Editor.DocumentValidation;
 import Kairo.EngineCore.Entity;
+import Kairo.EngineCore.LogicArtifact;
 import Kairo.EngineCore.LogicBytecode;
 import Kairo.Foundation.Math.Vector;
 
@@ -321,4 +326,10 @@ export namespace kairo::editor
             { m_Diagnostics.push_back({ DiagnosticSeverity::Error, std::move(code), std::move(message), node, pin }); }
         };
     };
+
+    /// File-to-bytecode build entry point. The declaration lives in the module
+    /// interface, but its body is compiled in a same-module implementation unit
+    /// so MSVC does not encode the build-helper lifetime graph into the BMI.
+    [[nodiscard]] std::vector<std::byte> CompileCoreLogicDocumentFile(
+        const std::filesystem::path& sourcePath, std::string_view expectedDocumentID);
 }

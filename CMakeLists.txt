@@ -17,8 +17,9 @@ set(KAIRO_EDITOR_NATIVE_GAMEPLAY_TARGETS "" CACHE STRING
 
 # Immutable standalone fallback revisions. Local source directories and sibling
 # checkouts still take precedence for active workspace development.
-set(KAIRO_EDITOR_CORE_REVISION f31a6f8889edb03fe15299ad52090f3120b0232c)
-set(KAIRO_EDITOR_RENDERER_REVISION df5e2fb145c45f072e9d5750f2ac8660ce306ad7)
+set(KAIRO_EDITOR_CORE_REVISION 2a9441749b386ba9afb8e39ad3b5c3b4a265c7ee)
+set(KAIRO_EDITOR_RENDERER_REVISION af289df8f26e7d4fb78e66bb3bee1b1fcf3caab2)
+set(KAIRO_EDITOR_REALTIME_BRIDGE_REVISION 7b131d06078c8ff3c648d53536c046d6f7891f99)
 set(KAIRO_EDITOR_AI_REVISION 34d6b79727ea0bf11a369244e03c32895da9bd14)
 set(KAIRO_EDITOR_JSON_REVISION 65ee68451d8eb2b5f3a30b410476ab83deb3289b)
 
@@ -84,6 +85,7 @@ target_sources(KairoEditor PUBLIC FILE_SET CXX_MODULES BASE_DIRS ${CMAKE_CURRENT
 # authoring surface. Declare that dependency explicitly so CMake can build the
 # C++ module import DAG correctly instead of relying on KairoEngineCore's
 # transitive usage requirements.
+target_sources(KairoEditor PRIVATE ProjectLogicBuildImpl.cpp LogicDocumentCompilerBuild.cpp)
 target_link_libraries(KairoEditor PUBLIC KairoEngineCore KairoAssets KairoAI nlohmann_json::nlohmann_json)
 
 add_executable(KairoProjectCompiler examples/project_compiler_main.cpp)
@@ -108,6 +110,27 @@ if(KAIRO_EDITOR_BUILD_APP)
                 GIT_SHALLOW TRUE)
             FetchContent_MakeAvailable(KairoRenderer)
         endif()
+    endif()
+
+    # The realtime scene bridge is an umbrella runtime component rather than an
+    # EngineCore module. A standalone Editor build fetches only that source
+    # revision and defines the same narrow target used by KairoGameEngine.
+    if(NOT TARGET KairoRealtimeRenderBridge)
+        include(FetchContent)
+        FetchContent_Declare(KairoRealtimeBridgeSource
+            GIT_REPOSITORY https://github.com/swayam8624/KairoGameEngine.git
+            GIT_TAG ${KAIRO_EDITOR_REALTIME_BRIDGE_REVISION}
+            GIT_SHALLOW TRUE
+            GIT_SUBMODULES ""
+            SOURCE_SUBDIR KairoNoCMakeProject)
+        FetchContent_MakeAvailable(KairoRealtimeBridgeSource)
+        add_library(KairoRealtimeRenderBridge STATIC)
+        target_sources(KairoRealtimeRenderBridge
+            PUBLIC FILE_SET CXX_MODULES TYPE CXX_MODULES
+            BASE_DIRS ${kairorealtimebridgesource_SOURCE_DIR}/Runtime/KairoRealtimeRenderBridge
+            FILES ${kairorealtimebridgesource_SOURCE_DIR}/Runtime/KairoRealtimeRenderBridge/RealtimeSceneBridge.cppm)
+        target_link_libraries(KairoRealtimeRenderBridge
+            PUBLIC KairoEngineCore KairoRenderer KairoAssets)
     endif()
 
     include(FetchContent)

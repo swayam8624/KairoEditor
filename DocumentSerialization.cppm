@@ -7,6 +7,7 @@ module;
 #include <cstdint>
 #include <filesystem>
 #include <limits>
+#include <locale>
 #include <optional>
 #include <sstream>
 #include <stdexcept>
@@ -65,9 +66,10 @@ export namespace kairo::editor
         [[nodiscard]] inline double ParseDouble(const FormatToken& token, std::size_t line)
         {
             double value = 0.0;
-            const auto [end, error] = std::from_chars(token.Text.data(), token.Text.data() + token.Text.size(), value,
-                std::chars_format::general);
-            if (error != std::errc{} || end != token.Text.data() + token.Text.size() || !std::isfinite(value))
+            std::istringstream input{ token.Text };
+            input.imbue(std::locale::classic());
+            input >> std::noskipws >> value;
+            if (!input || !input.eof() || !std::isfinite(value))
                 throw DocumentFormatError(line, token.Column, "invalid finite floating-point value");
             return value;
         }
