@@ -1,0 +1,30 @@
+name: Apply MSVC Logic Facade Split
+
+on:
+  push:
+    branches:
+      - complete/reflection-v2-inspector
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: ${{ github.actor != 'github-actions[bot]' }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: Split file-build helper out of module BMI
+        shell: bash
+        run: |
+          python3 -c "import base64; exec(base64.b64decode('${encoded}').decode())"
+      - name: Commit split
+        shell: bash
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m "Split logic file build out of module BMI"
+          git push
