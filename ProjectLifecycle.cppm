@@ -14,7 +14,7 @@ module;
 
 export module Kairo.Editor.ProjectLifecycle;
 
-import Kairo.Assets.AssetID;
+import Kairo.Assets;
 import Kairo.Editor.ProjectDescriptor;
 
 export namespace kairo::editor
@@ -72,11 +72,12 @@ export namespace kairo::editor
         {
             if (path.empty()) throw std::invalid_argument("Recent-projects path cannot be empty.");
             std::error_code error;
-            if (!path.parent_path().empty())
-                std::filesystem::create_directories(path.parent_path(), error);
+            const auto parent = path.has_parent_path() ? path.parent_path() : std::filesystem::path(".");
+            std::filesystem::create_directories(parent, error);
             if (error) throw std::runtime_error("Cannot create recent-projects directory: " + error.message());
-            const std::filesystem::path temporary = path.string() + ".tmp-" +
-                kairo::assets::GenerateAssetID().ToString();
+
+            const std::filesystem::path temporary = parent /
+                (".kairo-recent-" + kairo::assets::GenerateAssetID().ToString());
             try
             {
                 std::ofstream output(temporary, std::ios::binary | std::ios::trunc);
@@ -86,14 +87,9 @@ export namespace kairo::editor
                     output << std::quoted(entry.generic_string()) << '\n';
                 output.flush();
                 if (!output) throw std::runtime_error("Cannot flush recent-projects file.");
-                std::filesystem::rename(temporary, path, error);
-                if (error)
-                {
-                    std::filesystem::remove(path, error);
-                    error.clear();
-                    std::filesystem::rename(temporary, path, error);
-                }
-                if (error) throw std::runtime_error("Cannot publish recent-projects file: " + error.message());
+                output.close();
+                if (!output) throw std::runtime_error("Cannot close recent-projects file.");
+                kairo::assets::ReplaceFileAtomically(temporary, path);
             }
             catch (...)
             {
