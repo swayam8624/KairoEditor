@@ -3,16 +3,12 @@ module;
 #include <cstddef>
 #include <filesystem>
 #include <set>
-#include <stdexcept>
-#include <string>
 #include <utility>
 #include <vector>
 
 module Kairo.Editor.ProjectLogicBuild;
 
 import Kairo.Assets;
-import Kairo.Editor.DocumentCompiler;
-import Kairo.Editor.DocumentTypes;
 import Kairo.Editor.LogicDocumentCompiler;
 import Kairo.Editor.ProjectDescriptor;
 import Kairo.Editor.ProjectPaths;
@@ -41,10 +37,9 @@ namespace kairo::editor
             if (scene.HasLogic(entity)) documents.insert(scene.Logic(entity).Document.ID);
 
         // Stage every payload and exact source fingerprint before publication.
-        // Generic document/schema/diagnostic/result lifetimes stay inside
-        // Kairo.Editor.DocumentCompiler; the concrete logic backend lifetime
-        // stays inside Kairo.Editor.LogicDocumentCompiler. This orchestration
-        // unit handles only stable IDs, paths, fingerprints, and validated bytes.
+        // All document/compiler lifetimes stay behind LogicDocumentCompiler's
+        // payload-only facade. This unit owns only stable IDs, paths,
+        // fingerprints, and validated runtime bytes.
         std::vector<project_logic_build_detail::PendingLogicArtifact> pending;
         pending.reserve(documents.size());
 
@@ -57,18 +52,7 @@ namespace kairo::editor
             staged.Record.Document = id;
             staged.Record.SourcePath = sourcePath;
             staged.Record.ArtifactPath = kairo::engine::CompiledLogicPath(root, id);
-            try
-            {
-                staged.Payload = CompileDocumentFilePayloadOrThrow(
-                    sourcePath, id.ToString(), DocumentKind::Logic, CoreLogicDocumentCompiler());
-                kairo::engine::ValidateCompiledLogicPayload(staged.Payload);
-            }
-            catch (const std::exception& error)
-            {
-                throw std::runtime_error(
-                    "Logic build failed for " + sourcePath.generic_string() +
-                    " (" + std::string(error.what()) + ")");
-            }
+            staged.Payload = CompileCoreLogicDocumentFile(sourcePath, id.ToString());
             staged.Fingerprint = kairo::assets::FingerprintFile(sourcePath);
             pending.push_back(std::move(staged));
         }

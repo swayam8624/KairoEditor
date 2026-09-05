@@ -326,13 +326,16 @@ export namespace kairo::editor
         };
     };
 
-    /// Stable backend accessor used by project-build orchestration. The concrete
-    /// compiler lifetime remains owned by this module while generic document
-    /// loading, schema validation, diagnostics, and result ownership remain in
-    /// Kairo.Editor.DocumentCompiler.
-    [[nodiscard]] inline const DocumentCompiler& CoreLogicDocumentCompiler() noexcept
+    /// Project-build facade that keeps the concrete compiler and all generic
+    /// document compiler contracts behind their owning module boundaries. The
+    /// caller receives only runtime-validated bytecode bytes.
+    [[nodiscard]] inline std::vector<std::byte> CompileCoreLogicDocumentFile(
+        const std::filesystem::path& sourcePath, std::string_view expectedDocumentID)
     {
         static const LogicDocumentCompiler compiler;
-        return compiler;
+        std::vector<std::byte> payload = CompileDocumentFilePayloadOrThrow(
+            sourcePath, expectedDocumentID, DocumentKind::Logic, compiler);
+        kairo::engine::ValidateCompiledLogicPayload(payload);
+        return payload;
     }
 }
