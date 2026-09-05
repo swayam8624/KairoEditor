@@ -3,6 +3,7 @@ module;
 #include <imgui.h>
 
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <functional>
 #include <limits>
@@ -32,14 +33,13 @@ export namespace kairo::editor
     using ReflectedPropertyCommit = std::function<void(std::string_view typeKey,
         std::string_view propertyKey, const kairo::reflection::PropertyValue& value)>;
 
-    /// ImGui implementation of the reflection-driven scalar inspector.
+    /// ImGui implementation of the reflection-driven inspector.
     /// Input: a registry, Scene entity, and command-producing callback.
     /// Output: component sections and editors for every currently present,
-    /// registered EngineCore component. Task: keep widget choice in the UI
-    /// backend while metadata, values, and mutations remain engine-owned.
-    /// Complex properties such as Transform are intentionally not rendered
-    /// here until their composite reflection adapters have an equally stable
-    /// value contract.
+    /// registered EngineCore component. Widget choice remains in the UI backend
+    /// while metadata, values, validation, and mutations remain engine-owned.
+    /// Reflection V2 composite, enumeration, and stable-reference kinds are
+    /// rendered without importing concrete subsystem value types here.
     inline void DrawReflectedInspector(const kairo::reflection::ReflectionRegistry& registry,
         kairo::engine::Scene& scene, kairo::engine::Entity entity,
         const ReflectedPropertyCommit& commit)
@@ -54,6 +54,7 @@ export namespace kairo::editor
             ImGui::PushID(type.Key.c_str());
             for (const PropertyDescriptor& property : type.Properties)
             {
+                ImGui::PushID(property.Metadata.Key.c_str());
                 const PropertyValue current = registry.Read(type.Key, property.Metadata.Key, component.Object);
                 PropertyValue edited = current;
                 const bool readOnly = HasFlag(property.Metadata.Flags, PropertyFlags::ReadOnly);
@@ -65,6 +66,7 @@ export namespace kairo::editor
                     ImGui::SetTooltip("%s", property.Metadata.Tooltip.c_str());
                 if (changed && !readOnly && edited != current)
                     commit(type.Key, property.Metadata.Key, edited);
+                ImGui::PopID();
             }
             ImGui::PopID();
         }
@@ -73,6 +75,28 @@ export namespace kairo::editor
 
 namespace kairo::editor
 {
+    namespace reflection_inspector_detail
+    {
+        [[nodiscard]] inline bool DrawDoubleComponents(
+            const char* label, double* values, int count)
+        {
+            return ImGui::DragScalarN(label, ImGuiDataType_Double, values, count,
+                0.01f, nullptr, nullptr, "%.6g");
+        }
+
+        [[nodiscard]] inline const kairo::reflection::EnumOption* CurrentEnumOption(
+            const kairo::reflection::PropertyDescriptor& property,
+            const kairo::reflection::EnumerationValue& value)
+        {
+            const auto found = std::ranges::find_if(property.Metadata.EnumOptions,
+                [&value](const kairo::reflection::EnumOption& option)
+                {
+                    return option.Value == value.Value && option.Key == value.Key;
+                });
+            return found == property.Metadata.EnumOptions.end() ? nullptr : &*found;
+        }
+    }
+
     [[nodiscard]] inline bool DrawPropertyEditor(const kairo::reflection::PropertyDescriptor& property,
         const kairo::reflection::PropertyValue& current, kairo::reflection::PropertyValue& edited)
     {
@@ -90,7 +114,8 @@ namespace kairo::editor
         case PropertyValueKind::SignedInteger:
         {
             std::int64_t value = current.Get<std::int64_t>();
-            if (!ImGui::DragScalar(label, ImGuiDataType_S64, &value, 1.0f, nullptr, nullptr, "%lld", ImGuiSliderFlags_AlwaysClamp))
+            if (!ImGui::DragScalar(label, ImGuiDataType_S64, &value, 1.0f, nullptr, nullptr,
+                "%lld", ImGuiSliderFlags_AlwaysClamp))
                 return false;
             edited = PropertyValue(value);
             return true;
@@ -98,7 +123,8 @@ namespace kairo::editor
         case PropertyValueKind::UnsignedInteger:
         {
             std::uint64_t value = current.Get<std::uint64_t>();
-            if (!ImGui::DragScalar(label, ImGuiDataType_U64, &value, 1.0f, nullptr, nullptr, "%llu", ImGuiSliderFlags_AlwaysClamp))
+            if (!ImGui::DragScalar(label, ImGuiDataType_U64, &value, 1.0f, nullptr, nullptr,
+                "%llu", ImGuiSliderFlags_AlwaysClamp))
                 return false;
             edited = PropertyValue(value);
             return true;
@@ -111,7 +137,8 @@ namespace kairo::editor
             const double maximum = range ? range->Maximum : std::numeric_limits<double>::max();
             const double step = range && range->Step > 0.0 ? range->Step : 0.01;
             if (!ImGui::DragScalar(label, ImGuiDataType_Double, &value, static_cast<float>(step),
-                range ? &minimum : nullptr, range ? &maximum : nullptr, "%.6g", ImGuiSliderFlags_AlwaysClamp))
+                range ? &minimum : nullptr, range ? &maximum : nullptr, "%.6g",
+                ImGuiSliderFlags_AlwaysClamp))
                 return false;
             edited = PropertyValue(value);
             return true;
@@ -128,6 +155,74 @@ namespace kairo::editor
                 : ImGui::InputText(label, buffer.data(), buffer.size());
             if (!changed) return false;
             edited = PropertyValue(std::string(buffer.data()));
+            return true;
+        }
+        case PropertyValueKind::Vector2:
+        {
+            const Vector2Value& value = current.Get<Vector2Value>();
+            std::array<double, 2> components{ value.X, value.Y };
+            if (!reflection_inspector_detail::DrawDoubleComponents(label, components.data(), 2)) return false;
+            edited = PropertyValue(Vector2Value{ components[0], components[1] });
+            return true;
+        }
+        case PropertyValueKind::Vector3:
+        {
+            const Vector3Value& value = current.Get<Vector3Value>();
+            std::array<double, 3> components{ value.X, value.Y, value.Z };
+            if (!reflection_inspector_detail::DrawDoubleComponents(label, components.data(), 3)) return false;
+            edited = PropertyValue(Vector3Value{ components[0], components[1], components[2] });
+            return true;
+        }
+        case PropertyValueKind::Vector4:
+        {
+            const Vector4Value& value = current.Get<Vector4Value>();
+            std::array<double, 4> components{ value.X, value.Y, value.Z, value.W };
+            if (!reflection_inspector_detail::DrawDoubleComponents(label, components.data(), 4)) return false;
+            edited = PropertyValue(Vector4Value{
+                components[0], components[1], components[2], components[3] });
+            return true;
+        }
+        case PropertyValueKind::Quaternion:
+        {
+            const QuaternionValue& value = current.Get<QuaternionValue>();
+            std::array<double, 4> components{ value.X, value.Y, value.Z, value.W };
+            if (!reflection_inspector_detail::DrawDoubleComponents(label, components.data(), 4)) return false;
+            edited = PropertyValue(QuaternionValue{
+                components[0], components[1], components[2], components[3] });
+            return true;
+        }
+        case PropertyValueKind::Enumeration:
+        {
+            const EnumerationValue& value = current.Get<EnumerationValue>();
+            const EnumOption* selected = reflection_inspector_detail::CurrentEnumOption(property, value);
+            const char* preview = selected != nullptr ? selected->DisplayName.c_str() : value.Key.c_str();
+            bool changed = false;
+            if (ImGui::BeginCombo(label, preview))
+            {
+                for (const EnumOption& option : property.Metadata.EnumOptions)
+                {
+                    const bool isSelected = option.Value == value.Value && option.Key == value.Key;
+                    if (ImGui::Selectable(option.DisplayName.c_str(), isSelected))
+                    {
+                        edited = PropertyValue(EnumerationValue{ option.Value, option.Key });
+                        changed = true;
+                    }
+                    if (isSelected) ImGui::SetItemDefaultFocus();
+                }
+                ImGui::EndCombo();
+            }
+            return changed;
+        }
+        case PropertyValueKind::Reference:
+        {
+            const ReferenceValue& value = current.Get<ReferenceValue>();
+            const std::size_t byteLimit = property.Metadata.MaximumReferenceBytes == 0u
+                ? std::size_t{ 4096u }
+                : std::min(property.Metadata.MaximumReferenceBytes, std::size_t{ 4096u });
+            std::vector<char> buffer(byteLimit + 1u, '\0');
+            std::copy_n(value.Identifier.data(), std::min(value.Identifier.size(), byteLimit), buffer.data());
+            if (!ImGui::InputText(label, buffer.data(), buffer.size())) return false;
+            edited = PropertyValue(ReferenceValue{ value.TargetType, std::string(buffer.data()) });
             return true;
         }
         }
