@@ -1,5 +1,6 @@
 module;
 
+#include <algorithm>
 #include <filesystem>
 #include <set>
 #include <stdexcept>
@@ -10,81 +11,60 @@ module;
 module Kairo.Editor.ProjectLogicBuild;
 
 import Kairo.Assets;
+import Kairo.Editor.AuthoringDocument;
 import Kairo.Editor.CoreDocumentSchemas;
 import Kairo.Editor.DocumentCompiler;
+import Kairo.Editor.DocumentSchema;
+import Kairo.Editor.DocumentSerialization;
 import Kairo.Editor.DocumentTypes;
+import Kairo.Editor.DocumentValidation;
 import Kairo.Editor.LogicDocumentCompiler;
-import Kairo.Editor.ProjectDocuments;
-import Kairo.EngineCore.LogicArtifact;
-import Kairo.EngineCore.Scene;
+import Kairo.Editor.ProjectDescriptor;
+import Kairo.Editor.ProjectPaths;
+import Kairo.EngineCore;
 
 namespace kairo::editor
 {
     std::vector<BuiltLogicArtifact> BuildAttachedLogicArtifacts(
         const std::filesystem::path& projectRoot,
         const kairo::engine::Scene& scene,
-        const kairo::assets::AssetRegistry& assets,
-        ProjectDocuments& documents)
+        const kairo::assets::AssetRegistry& assets)
     {
-        if (projectRoot.empty())
-            throw std::invalid_argument("Attached logic build requires a project root.");
-
-        std::set<kairo::assets::AssetID> attached;
+        const auto root = CanonicalProjectRoot(projectRoot);
+        std::set<kairo::assets::AssetID> documents;
         for (const kairo::engine::Entity entity : scene.Entities())
-            if (const auto logic = scene.Logic(entity); logic.has_value())
-                attached.insert(logic->DocumentAsset);
-        if (attached.empty()) return {};
+            if (scene.HasLogic(entity)) documents.insert(scene.Logic(entity).Document.ID);
 
-        DocumentSchemaRegistry schemas = BuildCoreDocumentSchemas();
-        DocumentCompilerRegistry compilers;
-        compilers.Register(MakeLogicDocumentCompiler());
-
+        const DocumentSchemaRegistry schemas = CreateCoreDocumentSchemaRegistry();
+        const LogicDocumentCompiler compiler;
         std::vector<std::pair<BuiltLogicArtifact, kairo::engine::CompiledLogicArtifact>> pending;
-        pending.reserve(attached.size());
-
-        for (const kairo::assets::AssetID id : attached)
+        pending.reserve(documents.size());
+        for (const kairo::assets::AssetID id : documents)
         {
-            const auto metadata = assets.Find(id);
-            if (!metadata.has_value())
-                throw std::runtime_error("Scene references an unregistered logic document asset.");
-            if (metadata->Type != kairo::assets::AssetType::Document)
-                throw std::runtime_error("Scene logic attachment does not reference a document asset.");
-            const auto kind = DocumentKindFromPath(metadata->Path);
-            if (!kind.has_value() || *kind != DocumentKind::Logic)
-                throw std::runtime_error("Scene logic attachment is not a .klogic document.");
-
-            bool openedHere = false;
-            if (!documents.Contains(id))
+            const auto metadata = assets.Resolve(kairo::assets::DocumentAssetHandle{ id });
+            const auto sourcePath = ResolveExistingProjectFile(root, metadata.Path, "logic document");
+            const AuthoringDocument document = LoadDocument(sourcePath);
+            if (document.ID() != id)
+                throw std::invalid_argument("Logic document file identity disagrees with its asset metadata: " +
+                    metadata.Path.generic_string());
+            if (document.Kind() != DocumentKind::Logic)
+                throw std::invalid_argument("Attached document is not a logic graph: " + metadata.Path.generic_string());
+            const DocumentCompileResult result = CompileDocument(document, schemas, compiler);
+            if (!result.Succeeded())
             {
-                documents.Open(metadata->Path, id);
-                openedHere = true;
+                const auto error = std::find_if(result.Diagnostics.begin(), result.Diagnostics.end(),
+                    [](const DocumentDiagnostic& diagnostic)
+                    { return diagnostic.Severity == DiagnosticSeverity::Error; });
+                const std::string detail = error == result.Diagnostics.end()
+                    ? "unknown compiler failure" : error->Code + ": " + error->Message;
+                throw std::runtime_error("Logic build failed for " + metadata.Path.generic_string() + " (" + detail + ")");
             }
-
-            try
-            {
-                const AuthoringDocument& document = documents.Get(id);
-                if (document.IsDirty())
-                    throw std::runtime_error("Attached logic document must be saved before build.");
-                const DocumentCompileResult result = CompileDocument(document, schemas, compilers);
-                if (!result.Succeeded() || !result.Artifact.has_value())
-                    throw std::runtime_error("Attached logic document failed compilation.");
-                const kairo::engine::LogicProgram program =
-                    kairo::engine::ParseLogicProgram(result.Artifact->Payload);
-                kairo::engine::CompiledLogicArtifact artifact;
-                artifact.Source = id;
-                artifact.SourceFingerprint = kairo::assets::FingerprintFile(projectRoot / metadata->Path);
-                artifact.Program = program;
-                const std::filesystem::path artifactPath =
-                    kairo::engine::CompiledLogicArtifactPath(projectRoot, id);
-                pending.push_back({ { id, metadata->Path, artifactPath }, std::move(artifact) });
-                if (openedHere) documents.Close(id);
-            }
-            catch (...)
-            {
-                if (openedHere && documents.Contains(id))
-                    documents.Close(id);
-                throw;
-            }
+            kairo::engine::CompiledLogicArtifact artifact;
+            artifact.Source = id;
+            artifact.SourceFingerprint = kairo::assets::FingerprintFile(sourcePath);
+            artifact.Program = kairo::engine::ParseLogicProgram(result.Artifact->Payload);
+            const auto artifactPath = kairo::engine::CompiledLogicPath(root, id);
+            pending.push_back({ { id, sourcePath, artifactPath }, std::move(artifact) });
         }
 
         std::vector<BuiltLogicArtifact> built;
@@ -98,11 +78,17 @@ namespace kairo::editor
     }
 
     std::vector<BuiltLogicArtifact> BuildProjectLogic(
-        const std::filesystem::path& projectRoot,
-        const kairo::engine::Scene& scene,
-        const kairo::assets::AssetRegistry& assets,
-        ProjectDocuments& documents)
+        const std::filesystem::path& projectFile)
     {
-        return BuildAttachedLogicArtifacts(projectRoot, scene, assets, documents);
+        const auto descriptorPath = CanonicalExistingFile(projectFile, "project descriptor");
+        const auto root = descriptorPath.parent_path();
+        const ProjectDescriptor descriptor = LoadProjectDescriptor(descriptorPath);
+        kairo::assets::AssetRegistry assets;
+        kairo::assets::LoadAssetManifest(
+            ResolveExistingProjectFile(root, descriptor.AssetManifest, "asset manifest"), assets);
+        kairo::engine::Scene scene;
+        kairo::engine::LoadScene(
+            ResolveExistingProjectFile(root, descriptor.StartupScene, "startup scene"), assets, scene);
+        return BuildAttachedLogicArtifacts(root, scene, assets);
     }
 }
