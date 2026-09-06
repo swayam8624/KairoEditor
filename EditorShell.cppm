@@ -297,6 +297,8 @@ export namespace kairo::editor
         const kairo::assets::ImportDatabase* m_AssetImports = nullptr;
         AssetThumbnailScheduler m_AssetThumbnailScheduler;
         AssetBrowserRequestQueue m_AssetBrowserRequests;
+        std::optional<AssetWorkspace> m_AssetWorkspaceSnapshot;
+        bool m_RefreshAssetWorkspace = true;
         std::array<char, 256> m_NewDocumentName{};
         std::array<char, 512> m_NewDocumentPath{};
         std::array<char, 4096> m_AIPrompt{};
@@ -2194,6 +2196,9 @@ export namespace kairo::editor
         void DrawContentBrowser()
         {
             (void)SearchField("##AssetFilter", "Filter assets", m_AssetFilter.data(), m_AssetFilter.size());
+            ImGui::SameLine();
+            if (ImGui::SmallButton("Refresh")) m_RefreshAssetWorkspace = true;
+
             const auto records = m_Project.Assets().Snapshot();
             const std::string filter = Lower(m_AssetFilter.data());
             const auto statusName = [](AssetWorkspaceStatus status) -> const char*
@@ -2227,6 +2232,40 @@ export namespace kairo::editor
                 return "[---]";
             };
 
+            // Fingerprinting is deliberately snapshot-driven rather than a
+            // per-frame operation. ImportDatabase::Evaluate hashes source bytes;
+            // doing that for every row every ImGui frame would make browser cost
+            // scale with total asset bytes instead of visible UI work.
+            if (m_AssetImports != nullptr)
+            {
+                bool stale = m_RefreshAssetWorkspace || !m_AssetWorkspaceSnapshot.has_value();
+                if (!stale)
+                {
+                    const auto& entries = m_AssetWorkspaceSnapshot->Entries();
+                    stale = entries.size() != records.size();
+                    if (!stale)
+                    {
+                        for (const auto& asset : records)
+                        {
+                            const auto found = std::ranges::find(entries, asset.ID,
+                                [](const AssetWorkspaceEntry& entry) { return entry.Metadata.ID; });
+                            if (found == entries.end() || found->Metadata.Revision != asset.Revision)
+                            {
+                                stale = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+                if (stale)
+                {
+                    m_AssetWorkspaceSnapshot = AssetWorkspace::Build(
+                        m_Project.ProjectRoot(), m_Project.Assets(), *m_AssetImports);
+                    m_RefreshAssetWorkspace = false;
+                }
+            }
+            else m_AssetWorkspaceSnapshot.reset();
+
             std::size_t visible = 0u;
             if (ImGui::BeginTable("AssetRegistry", 5,
                 ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_ScrollY |
@@ -2250,9 +2289,22 @@ export namespace kairo::editor
                         ? AssetWorkspaceStatus::Generated
                         : asset.Origin == kairo::assets::AssetOrigin::Builtin
                         ? AssetWorkspaceStatus::Builtin : AssetWorkspaceStatus::Unknown;
-                    if (m_AssetImports != nullptr)
-                        status = StatusForAsset(m_Project.ProjectRoot(), asset, *m_AssetImports);
-                    const AssetDeletePlan deletePlan = PlanAssetDeletion(m_Project.Assets(), asset.ID);
+                    std::optional<kairo::assets::ImportRecord> importRecord;
+                    std::vector<kairo::assets::AssetReference> blockers;
+                    if (m_AssetWorkspaceSnapshot.has_value())
+                    {
+                        const auto& entry = m_AssetWorkspaceSnapshot->At(asset.ID);
+                        status = entry.Status;
+                        importRecord = entry.Import;
+                        blockers = entry.Dependents;
+                    }
+                    else
+                    {
+                        const auto deletePlan = PlanAssetDeletion(m_Project.Assets(), asset.ID);
+                        blockers.reserve(deletePlan.DirectDependents.size());
+                        for (const auto& dependent : deletePlan.DirectDependents)
+                            blockers.push_back({ dependent.ID, dependent.Type });
+                    }
                     ++visible;
                     m_AssetThumbnailScheduler.Request(asset);
 
@@ -2291,38 +2343,41 @@ export namespace kairo::editor
                         ImGui::Text("Importer: %s", asset.Importer.c_str());
                         ImGui::Text("Origin: %s", kairo::assets::NameOfAssetOrigin(asset.Origin).data());
                         ImGui::Text("Revision: %llu", static_cast<unsigned long long>(asset.Revision));
-                        if (m_AssetImports != nullptr)
+                        if (importRecord.has_value())
                         {
-                            if (const auto record = m_AssetImports->Find(asset.ID); record.has_value())
-                            {
-                                ImGui::Text("Importer version: %s", record->ImporterVersion.c_str());
-                                if (!record->CanonicalSettings.empty())
-                                    ImGui::TextWrapped("Settings: %s", record->CanonicalSettings.c_str());
-                            }
+                            ImGui::Text("Importer version: %s", importRecord->ImporterVersion.c_str());
+                            if (!importRecord->CanonicalSettings.empty())
+                                ImGui::TextWrapped("Settings: %s", importRecord->CanonicalSettings.c_str());
                         }
                         ImGui::Separator();
                         if (asset.Type == kairo::assets::AssetType::Document && ImGui::MenuItem("Open"))
                             OpenDocument(asset.Path);
                         if (asset.Origin == kairo::assets::AssetOrigin::SourceFile)
                         {
-                            const bool canReimport = status != AssetWorkspaceStatus::MissingSource;
+                            const bool sourceAvailable = status != AssetWorkspaceStatus::MissingSource;
+                            const bool cleanProject = !m_Project.HasUnsavedChanges();
+                            const bool canReimport = sourceAvailable && cleanProject;
                             ImGui::BeginDisabled(!canReimport);
                             if (ImGui::MenuItem("Reimport"))
                                 m_AssetBrowserRequests.Push({ AssetBrowserRequestKind::Reimport, asset.ID });
                             ImGui::EndDisabled();
-                            if (!canReimport)
+                            if (!sourceAvailable)
                                 ImGui::TextDisabled("Source file is missing; reimport is unavailable.");
+                            else if (!cleanProject)
+                                ImGui::TextDisabled("Save all project changes before reimporting.");
                         }
                         ImGui::Separator();
-                        if (deletePlan.DirectDependents.empty())
+                        if (blockers.empty())
                             ImGui::TextDisabled("No registered asset depends on this asset.");
                         else
                         {
                             ImGui::TextDisabled("Delete blocked by %zu direct dependent%s:",
-                                deletePlan.DirectDependents.size(),
-                                deletePlan.DirectDependents.size() == 1u ? "" : "s");
-                            for (const auto& dependent : deletePlan.DirectDependents)
-                                ImGui::BulletText("%s", dependent.Path.generic_string().c_str());
+                                blockers.size(), blockers.size() == 1u ? "" : "s");
+                            for (const auto& dependent : blockers)
+                            {
+                                const auto metadata = m_Project.Assets().At(dependent.ID);
+                                ImGui::BulletText("%s", metadata.Path.generic_string().c_str());
+                            }
                         }
                         ImGui::EndPopup();
                     }
@@ -2332,8 +2387,7 @@ export namespace kairo::editor
 
                     ImGui::TableSetColumnIndex(4);
                     ImGui::Text("r%llu", static_cast<unsigned long long>(asset.Revision));
-                    if (!deletePlan.DirectDependents.empty())
-                        ImGui::TextDisabled("%zu deps", deletePlan.DirectDependents.size());
+                    if (!blockers.empty()) ImGui::TextDisabled("%zu deps", blockers.size());
                 }
                 ImGui::EndTable();
             }

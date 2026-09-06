@@ -13,7 +13,9 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
-#if !defined(_WIN32)
+#if defined(_WIN32)
+#include <process.h>
+#else
 #include <unistd.h>
 #endif
 
@@ -634,11 +636,14 @@ int main(int argc, char** argv)
         }
         if (projectTransition.has_value())
         {
-#if defined(_WIN32)
-            throw std::runtime_error("Project switching requires restarting KairoEditorApp on this platform build.");
-#else
             const std::string executable = std::filesystem::absolute(argv[0]).string();
             const std::string projectPath = projectTransition->string();
+#if defined(_WIN32)
+            const intptr_t result = _spawnl(_P_OVERLAY, executable.c_str(), executable.c_str(),
+                "--project", projectPath.c_str(), static_cast<char*>(nullptr));
+            if (result == -1)
+                throw std::runtime_error("Cannot restart KairoEditorApp for the selected project.");
+#else
             execl(executable.c_str(), executable.c_str(), "--project", projectPath.c_str(),
                 static_cast<char*>(nullptr));
             throw std::runtime_error("Cannot restart KairoEditorApp for the selected project.");
