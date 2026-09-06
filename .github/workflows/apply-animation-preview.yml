@@ -9,45 +9,44 @@ permissions:
   contents: write
 
 jobs:
-  apply:
-    runs-on: ubuntu-latest
+  patch:
+    if: ${{ github.actor != 'github-actions[bot]' }}
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: feature/gltf-animation-preview-controls
           fetch-depth: 0
-
-      - name: Patch editor integration
+      - name: Wire animation preview
         shell: bash
         run: |
-          python3 - <<'PY'
+          python3 <<'PY'
           from pathlib import Path
 
           def replace_exact(path, old, new):
-              p = Path(path)
-              text = p.read_text()
+              target = Path(path)
+              text = target.read_text()
               if old not in text:
-                  raise SystemExit(f"expected patch anchor missing in {path}")
-              p.write_text(text.replace(old, new, 1))
+                  raise SystemExit(f'expected patch anchor missing in {path}')
+              target.write_text(text.replace(old, new, 1))
 
           replace_exact(
-              "CMakeLists.txt",
-              "set(KAIRO_EDITOR_CORE_REVISION 2a9441749b386ba9afb8e39ad3b5c3b4a265c7ee)\nset(KAIRO_EDITOR_RENDERER_REVISION af289df8f26e7d4fb78e66bb3bee1b1fcf3caab2)\nset(KAIRO_EDITOR_REALTIME_BRIDGE_REVISION 7b131d06078c8ff3c648d53536c046d6f7891f99)",
-              "set(KAIRO_EDITOR_CORE_REVISION ecc4a96ef9829d7a7563aeb047a95c0638af0d1c)\nset(KAIRO_EDITOR_RENDERER_REVISION 3758270e792ff00ca8c05429a83e619f03cc4455)\nset(KAIRO_EDITOR_REALTIME_BRIDGE_REVISION 82ab9ff6b528d11e2bfef1de14c9b3179e3e654a)")
+              'CMakeLists.txt',
+              'set(KAIRO_EDITOR_CORE_REVISION 2a9441749b386ba9afb8e39ad3b5c3b4a265c7ee)\nset(KAIRO_EDITOR_RENDERER_REVISION af289df8f26e7d4fb78e66bb3bee1b1fcf3caab2)\nset(KAIRO_EDITOR_REALTIME_BRIDGE_REVISION 7b131d06078c8ff3c648d53536c046d6f7891f99)',
+              'set(KAIRO_EDITOR_CORE_REVISION ecc4a96ef9829d7a7563aeb047a95c0638af0d1c)\nset(KAIRO_EDITOR_RENDERER_REVISION 3758270e792ff00ca8c05429a83e619f03cc4455)\nset(KAIRO_EDITOR_REALTIME_BRIDGE_REVISION 82ab9ff6b528d11e2bfef1de14c9b3179e3e654a)')
 
           replace_exact(
-              "CMakeLists.txt",
-              "        KairoUI.cppm EditorTheme.cppm ImGuiRuntime.cppm ImGuiGraphCanvas.cppm TransformGizmo.cppm\n        ImGuiReflectionInspector.cppm EditorShell.cppm)",
-              "        KairoUI.cppm EditorTheme.cppm ImGuiRuntime.cppm ImGuiGraphCanvas.cppm TransformGizmo.cppm\n        ImGuiReflectionInspector.cppm AnimationPreview.cppm EditorShell.cppm)")
+              'CMakeLists.txt',
+              '        KairoUI.cppm EditorTheme.cppm ImGuiRuntime.cppm ImGuiGraphCanvas.cppm TransformGizmo.cppm\n        ImGuiReflectionInspector.cppm EditorShell.cppm)',
+              '        KairoUI.cppm EditorTheme.cppm ImGuiRuntime.cppm ImGuiGraphCanvas.cppm TransformGizmo.cppm\n        ImGuiReflectionInspector.cppm AnimationPreview.cppm EditorShell.cppm)')
 
           replace_exact(
-              "examples/editor_main.cpp",
-              "import Kairo.Editor.SceneRenderBridge;\nimport Kairo.EngineCore;",
-              "import Kairo.Editor.SceneRenderBridge;\nimport Kairo.Editor.AnimationPreview;\nimport Kairo.EngineCore;")
+              'examples/editor_main.cpp',
+              'import Kairo.Editor.SceneRenderBridge;\nimport Kairo.EngineCore;',
+              'import Kairo.Editor.SceneRenderBridge;\nimport Kairo.Editor.AnimationPreview;\nimport Kairo.EngineCore;')
 
           replace_exact(
-              "examples/editor_main.cpp",
-              """            const auto imported = kairo::editor::ImportRenderGltfScene(
+              'examples/editor_main.cpp',
+              '''            const auto imported = kairo::editor::ImportRenderGltfScene(
                 project.ProjectRoot(), { asset.ID }, project.Assets(), meshImports,
                 derivedCache, resolveGltfTexture);
             std::vector<kairo::editor::RenderAssetBindings::ScenePrimitive> primitives;
@@ -59,8 +58,8 @@ jobs:
 #if defined(KAIRO_EDITOR_HAS_OFFLINE_RENDER)
             offlineScenes.emplace(asset.ID, std::move(imported));
 #endif
-""",
-              """            auto imported = kairo::editor::ImportRenderGltfSceneWithSource(
+''',
+              '''            auto imported = kairo::editor::ImportRenderGltfSceneWithSource(
                 project.ProjectRoot(), { asset.ID }, project.Assets(), meshImports,
                 derivedCache, resolveGltfTexture);
             std::vector<kairo::renderer::MeshHandle> meshHandles;
@@ -72,50 +71,49 @@ jobs:
 #if defined(KAIRO_EDITOR_HAS_OFFLINE_RENDER)
             offlineScenes.emplace(asset.ID, std::move(imported.RenderAsset));
 #endif
-""")
+''')
 
           replace_exact(
-              "examples/editor_main.cpp",
-              """        if (options.AuthoringSurface.has_value()) state.SetAuthoringSurface(*options.AuthoringSurface);
+              'examples/editor_main.cpp',
+              '''        if (options.AuthoringSurface.has_value()) state.SetAuthoringSurface(*options.AuthoringSurface);
 
         std::uint64_t renderedFrames = 0u;
-""",
-              """        if (options.AuthoringSurface.has_value()) state.SetAuthoringSurface(*options.AuthoringSurface);
+''',
+              '''        if (options.AuthoringSurface.has_value()) state.SetAuthoringSurface(*options.AuthoringSurface);
         kairo::editor::AnimationPreviewController animationPreview;
 
         std::uint64_t renderedFrames = 0u;
-""")
+''')
 
           replace_exact(
-              "examples/editor_main.cpp",
-              """            shell.SetViewportTexture(imgui.ViewportTexture());
+              'examples/editor_main.cpp',
+              '''            shell.SetViewportTexture(imgui.ViewportTexture());
             shell.Draw();
             renderer.NativeWindow().SetCursorCaptured(shell.ViewportCursorCaptured());
-""",
-              """            shell.SetViewportTexture(imgui.ViewportTexture());
+''',
+              '''            shell.SetViewportTexture(imgui.ViewportTexture());
             shell.Draw();
             animationPreview.Draw(state.SelectedEntity(), shell.RenderScene(), renderAssets);
             renderer.NativeWindow().SetCursorCaptured(shell.ViewportCursorCaptured());
-""")
+''')
 
           replace_exact(
-              "examples/editor_main.cpp",
-              """            renderer.SubmitRenderScene(kairo::editor::BuildRenderScene(
+              'examples/editor_main.cpp',
+              '''            renderer.SubmitRenderScene(kairo::editor::BuildRenderScene(
                 shell.RenderScene(), renderAssets, shell.ViewportRenderLayers()));
-""",
-              """            renderer.SubmitRenderScene(kairo::editor::BuildRenderScene(
+''',
+              '''            renderer.SubmitRenderScene(kairo::editor::BuildRenderScene(
                 shell.RenderScene(), renderAssets, animationPreview.Overrides(),
                 shell.ViewportRenderLayers()));
-""")
+''')
 
-          Path(".github/workflows/apply-animation-preview.yml").unlink()
+          Path('.github/workflows/apply-animation-preview.yml').unlink()
           PY
-
       - name: Commit integration
         shell: bash
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add -A
           git commit -m "Editor: wire glTF animation preview controls"
-          git push origin HEAD:feature/gltf-animation-preview-controls
+          git push
