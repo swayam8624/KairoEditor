@@ -572,7 +572,7 @@ int main(int argc, char** argv)
         kairo::editor::EditorShell shell(state, project, layoutPlan.ShouldRebuild(),
             std::move(keymap), keymapSettings, navigationSettings, navigationSettingsPath,
             std::move(ai.Provider), std::move(ai.Model), std::move(offlineRender),
-            &nativeGameplayRegistry);
+            &nativeGameplayRegistry, &meshImports);
         if (recovered.has_value()) shell.RestoreRecoveryDrafts(*recovered);
         if (options.ViewportShading.has_value()) shell.SetViewportShading(*options.ViewportShading);
         if (options.AuthoringSurface.has_value()) state.SetAuthoringSurface(*options.AuthoringSurface);
@@ -592,6 +592,18 @@ int main(int argc, char** argv)
             shell.Draw();
             renderer.NativeWindow().SetCursorCaptured(shell.ViewportCursorCaptured());
             imgui.EndFrame();
+            bool assetReloadRequested = false;
+            for (const auto& request : shell.TakeAssetBrowserRequests())
+            {
+                if (request.Kind != kairo::editor::AssetBrowserRequestKind::Reimport) continue;
+                const auto metadata = project.Assets().At(request.Asset);
+                if (metadata.Origin != kairo::assets::AssetOrigin::SourceFile)
+                    throw std::logic_error("Only source-file assets can be reimported.");
+                projectTransition = project.ProjectFile();
+                assetReloadRequested = true;
+                break;
+            }
+            if (assetReloadRequested) break;
             if (auto transition = shell.TakeProjectTransitionRequest(); transition.has_value())
             {
                 projectTransition = std::move(transition);

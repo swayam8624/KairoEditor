@@ -22,6 +22,8 @@ export import Kairo.Editor.ProjectRecovery;
 export import Kairo.Editor.ProjectSession;
 export import Kairo.Editor.AssetBrowserModel;
 export import Kairo.Editor.AssetWorkspace;
+export import Kairo.Editor.AssetBrowserRuntime;
+export import Kairo.Editor.AssetScenePlacement;
 export import Kairo.Editor.SceneSelection;
 export import Kairo.Editor.Diagnostics;
 export import Kairo.Editor.SceneFragment;

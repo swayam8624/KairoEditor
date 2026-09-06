@@ -54,7 +54,8 @@ export namespace kairo::editor
             std::filesystem::path navigationSettingsPath = {},
             std::shared_ptr<kairo::ai::Provider> aiProvider = {}, std::string aiModel = {},
             std::shared_ptr<OfflineRenderService> offlineRenderService = {},
-            const kairo::engine::NativeGameplayRegistry* nativeGameplayRegistry = nullptr)
+            const kairo::engine::NativeGameplayRegistry* nativeGameplayRegistry = nullptr,
+            const kairo::assets::ImportDatabase* assetImports = nullptr)
             : m_State(state), m_Project(project), m_GraphCanvas(m_Schemas),
               m_InputRouter(keymapSettings.Profile, keymapSettings.Overrides),
               m_RebuildLayout(rebuildLayout), m_KeymapSettings(std::move(keymapSettings)),
@@ -63,6 +64,7 @@ export namespace kairo::editor
               m_NavigationSettingsPath(std::move(navigationSettingsPath))
         {
             ValidateNavigationSettings(m_NavigationSettings);
+            m_AssetImports = assetImports;
             if (static_cast<bool>(aiProvider) != !aiModel.empty())
                 throw std::invalid_argument("AI editor provider and model must be configured together.");
             if (aiProvider)
@@ -220,6 +222,21 @@ export namespace kairo::editor
             else m_State.ClearSelection();
         }
 
+        /// Output: visible visual assets whose revision-keyed previews are not yet
+        /// scheduled by the host. The Editor never owns backend GPU resources.
+        [[nodiscard]] std::vector<AssetThumbnailRequest> TakeAssetThumbnailRequests() noexcept
+        {
+            return m_AssetThumbnailScheduler.TakePending();
+        }
+
+        /// Output: explicit browser requests such as reimport. The native host
+        /// performs them at a safe frame boundary and may restart/rebind runtime
+        /// resources without coupling the ImGui shell to an importer backend.
+        [[nodiscard]] std::vector<AssetBrowserRequest> TakeAssetBrowserRequests() noexcept
+        {
+            return m_AssetBrowserRequests.Take();
+        }
+
         /// Rehydrates non-authoritative text buffers after ProjectSession has
         /// restored canonical files and reopened documents. Invalid drafts stay
         /// editable in the Code surface and never enter graph/runtime state
@@ -277,6 +294,9 @@ export namespace kairo::editor
         bool m_RebuildLayout = true;
         bool m_DocumentPanelFocused = false;
         std::array<char, 256> m_AssetFilter{};
+        const kairo::assets::ImportDatabase* m_AssetImports = nullptr;
+        AssetThumbnailScheduler m_AssetThumbnailScheduler;
+        AssetBrowserRequestQueue m_AssetBrowserRequests;
         std::array<char, 256> m_NewDocumentName{};
         std::array<char, 512> m_NewDocumentPath{};
         std::array<char, 4096> m_AIPrompt{};
@@ -1337,6 +1357,20 @@ export namespace kairo::editor
                         IM_COL32(230, 125, 125, 255), "Viewport texture unavailable");
                 }
                 const bool hovered = ImGui::IsItemHovered();
+                if (ImGui::BeginDragDropTarget())
+                {
+                    if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("KAIRO_ASSET_ID"))
+                    {
+                        if (payload->DataSize == static_cast<int>(AssetDragPayload{}.Bytes.size()))
+                        {
+                            AssetDragPayload assetPayload;
+                            std::memcpy(assetPayload.Bytes.data(), payload->Data,
+                                assetPayload.Bytes.size());
+                            RunCommand([this, id = assetPayload.Asset()] { PlaceDroppedAsset(id); });
+                        }
+                    }
+                    ImGui::EndDragDropTarget();
+                }
                 const bool navigationClick = ImGui::GetIO().KeyAlt;
                 if (hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left) && !navigationClick)
                 {
@@ -1375,6 +1409,19 @@ export namespace kairo::editor
                 (void)camera;
             }
             ImGui::End();
+        }
+
+        void PlaceDroppedAsset(kairo::assets::AssetID asset)
+        {
+            const auto metadata = m_Project.Assets().At(asset);
+            if (!CanPlaceAssetInScene(metadata.Type))
+                throw std::invalid_argument("Only mesh and imported-scene assets can be placed directly in the viewport.");
+            auto command = std::make_unique<PlaceAssetInSceneCommand>(m_Project, asset);
+            auto* placed = command.get();
+            m_History.Execute(std::move(command));
+            const auto entity = placed->CreatedEntity();
+            m_State.Select(entity);
+            m_ViewportController.Focus(m_Project.Scene().Transform(entity).Local.Translation);
         }
 
         void DrawViewportToolButton(EditorAction tool, const char* label)
@@ -2149,44 +2196,149 @@ export namespace kairo::editor
             (void)SearchField("##AssetFilter", "Filter assets", m_AssetFilter.data(), m_AssetFilter.size());
             const auto records = m_Project.Assets().Snapshot();
             const std::string filter = Lower(m_AssetFilter.data());
+            const auto statusName = [](AssetWorkspaceStatus status) -> const char*
+            {
+                switch (status)
+                {
+                    case AssetWorkspaceStatus::Current: return "Current";
+                    case AssetWorkspaceStatus::Changed: return "Changed";
+                    case AssetWorkspaceStatus::MissingSource: return "Missing";
+                    case AssetWorkspaceStatus::Generated: return "Generated";
+                    case AssetWorkspaceStatus::Builtin: return "Builtin";
+                    case AssetWorkspaceStatus::Unknown: return "Untracked";
+                }
+                return "Unknown";
+            };
+            const auto previewName = [](kairo::assets::AssetType type) -> const char*
+            {
+                using kairo::assets::AssetType;
+                switch (type)
+                {
+                    case AssetType::Mesh: return "[MESH]";
+                    case AssetType::Material: return "[MAT]";
+                    case AssetType::Texture2D: return "[TEX]";
+                    case AssetType::Scene: return "[SCN]";
+                    case AssetType::Shader: return "[SHD]";
+                    case AssetType::Audio: return "[AUD]";
+                    case AssetType::Script: return "[SCR]";
+                    case AssetType::Document: return "[DOC]";
+                    case AssetType::Other: return "[---]";
+                }
+                return "[---]";
+            };
+
             std::size_t visible = 0u;
-            if (ImGui::BeginTable("AssetRegistry", 3,
+            if (ImGui::BeginTable("AssetRegistry", 5,
                 ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_ScrollY |
                 ImGuiTableFlags_Resizable | ImGuiTableFlags_SizingStretchProp))
             {
+                ImGui::TableSetupColumn("Preview", ImGuiTableColumnFlags_WidthFixed, 64.0f);
+                ImGui::TableSetupColumn("State", ImGuiTableColumnFlags_WidthFixed, 82.0f);
                 ImGui::TableSetupColumn("Type", ImGuiTableColumnFlags_WidthFixed, 76.0f);
                 ImGui::TableSetupColumn("Path");
-                ImGui::TableSetupColumn("Rev", ImGuiTableColumnFlags_WidthFixed, 42.0f);
+                ImGui::TableSetupColumn("Info", ImGuiTableColumnFlags_WidthFixed, 72.0f);
                 ImGui::TableHeadersRow();
                 for (const auto& asset : records)
                 {
                     const std::string path = asset.Path.generic_string();
                     const std::string type(kairo::assets::NameOfAssetType(asset.Type));
                     if (!filter.empty() && Lower(path).find(filter) == std::string::npos &&
-                        Lower(type).find(filter) == std::string::npos) continue;
+                        Lower(type).find(filter) == std::string::npos &&
+                        Lower(asset.Importer).find(filter) == std::string::npos) continue;
+
+                    AssetWorkspaceStatus status = asset.Origin == kairo::assets::AssetOrigin::Generated
+                        ? AssetWorkspaceStatus::Generated
+                        : asset.Origin == kairo::assets::AssetOrigin::Builtin
+                        ? AssetWorkspaceStatus::Builtin : AssetWorkspaceStatus::Unknown;
+                    if (m_AssetImports != nullptr)
+                        status = StatusForAsset(m_Project.ProjectRoot(), asset, *m_AssetImports);
+                    const AssetDeletePlan deletePlan = PlanAssetDeletion(m_Project.Assets(), asset.ID);
                     ++visible;
+                    m_AssetThumbnailScheduler.Request(asset);
+
                     ImGui::TableNextRow();
                     ImGui::TableSetColumnIndex(0);
-                    ImGui::TextUnformatted(type.c_str());
+                    ImGui::TextDisabled("%s", previewName(asset.Type));
+                    if (SupportsAssetThumbnail(asset.Type) && ImGui::IsItemHovered())
+                        ImGui::SetTooltip("Thumbnail requested for revision %llu",
+                            static_cast<unsigned long long>(asset.Revision));
+
                     ImGui::TableSetColumnIndex(1);
-                    const std::string row = path + "##" + asset.ID.ToString();
-                    const bool isDocument = asset.Type == kairo::assets::AssetType::Document;
-                    if (isDocument)
-                    {
-                        ImGui::Selectable(row.c_str(), false,
-                            ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_AllowDoubleClick);
-                        if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
-                            OpenDocument(asset.Path);
-                    }
-                    else ImGui::TextUnformatted(path.c_str());
-                    if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s\n%s\n%s", path.c_str(),
-                        asset.ID.ToString().c_str(), kairo::assets::NameOfAssetOrigin(asset.Origin).data());
+                    ImGui::TextUnformatted(statusName(status));
                     ImGui::TableSetColumnIndex(2);
-                    ImGui::Text("%llu", static_cast<unsigned long long>(asset.Revision));
+                    ImGui::TextUnformatted(type.c_str());
+                    ImGui::TableSetColumnIndex(3);
+                    const std::string row = path + "##" + asset.ID.ToString();
+                    ImGui::Selectable(row.c_str(), false,
+                        ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_AllowDoubleClick);
+                    if (asset.Type == kairo::assets::AssetType::Document &&
+                        ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
+                        OpenDocument(asset.Path);
+                    if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_SourceAllowNullID))
+                    {
+                        const AssetDragPayload payload = AssetDragPayload::FromAsset(asset.ID);
+                        ImGui::SetDragDropPayload("KAIRO_ASSET_ID",
+                            payload.Bytes.data(), payload.Bytes.size());
+                        ImGui::TextUnformatted(path.c_str());
+                        ImGui::TextDisabled("%s | %s", type.c_str(), asset.ID.ToString().c_str());
+                        ImGui::EndDragDropSource();
+                    }
+                    if (ImGui::BeginPopupContextItem())
+                    {
+                        ImGui::TextUnformatted(path.c_str());
+                        ImGui::TextDisabled("%s", asset.ID.ToString().c_str());
+                        ImGui::Separator();
+                        ImGui::Text("Importer: %s", asset.Importer.c_str());
+                        ImGui::Text("Origin: %s", kairo::assets::NameOfAssetOrigin(asset.Origin).data());
+                        ImGui::Text("Revision: %llu", static_cast<unsigned long long>(asset.Revision));
+                        if (m_AssetImports != nullptr)
+                        {
+                            if (const auto record = m_AssetImports->Find(asset.ID); record.has_value())
+                            {
+                                ImGui::Text("Importer version: %s", record->ImporterVersion.c_str());
+                                if (!record->CanonicalSettings.empty())
+                                    ImGui::TextWrapped("Settings: %s", record->CanonicalSettings.c_str());
+                            }
+                        }
+                        ImGui::Separator();
+                        if (asset.Type == kairo::assets::AssetType::Document && ImGui::MenuItem("Open"))
+                            OpenDocument(asset.Path);
+                        if (asset.Origin == kairo::assets::AssetOrigin::SourceFile)
+                        {
+                            const bool canReimport = status != AssetWorkspaceStatus::MissingSource;
+                            ImGui::BeginDisabled(!canReimport);
+                            if (ImGui::MenuItem("Reimport"))
+                                m_AssetBrowserRequests.Push({ AssetBrowserRequestKind::Reimport, asset.ID });
+                            ImGui::EndDisabled();
+                            if (!canReimport)
+                                ImGui::TextDisabled("Source file is missing; reimport is unavailable.");
+                        }
+                        ImGui::Separator();
+                        if (deletePlan.DirectDependents.empty())
+                            ImGui::TextDisabled("No registered asset depends on this asset.");
+                        else
+                        {
+                            ImGui::TextDisabled("Delete blocked by %zu direct dependent%s:",
+                                deletePlan.DirectDependents.size(),
+                                deletePlan.DirectDependents.size() == 1u ? "" : "s");
+                            for (const auto& dependent : deletePlan.DirectDependents)
+                                ImGui::BulletText("%s", dependent.Path.generic_string().c_str());
+                        }
+                        ImGui::EndPopup();
+                    }
+                    if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s\n%s\n%s\n%s", path.c_str(),
+                        asset.ID.ToString().c_str(), kairo::assets::NameOfAssetOrigin(asset.Origin).data(),
+                        statusName(status));
+
+                    ImGui::TableSetColumnIndex(4);
+                    ImGui::Text("r%llu", static_cast<unsigned long long>(asset.Revision));
+                    if (!deletePlan.DirectDependents.empty())
+                        ImGui::TextDisabled("%zu deps", deletePlan.DirectDependents.size());
                 }
                 ImGui::EndTable();
             }
-            ImGui::TextDisabled("%zu of %zu assets", visible, records.size());
+            ImGui::TextDisabled("%zu of %zu assets | drag mesh/scene assets into the viewport",
+                visible, records.size());
         }
 
         [[nodiscard]] std::optional<kairo::assets::AssetID> DrawDocumentTabs(Panel panel)
