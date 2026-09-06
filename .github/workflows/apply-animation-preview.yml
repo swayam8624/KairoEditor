@@ -10,7 +10,6 @@ permissions:
 
 jobs:
   apply:
-    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -48,7 +47,7 @@ jobs:
 
           replace_exact(
               "examples/editor_main.cpp",
-              '''            const auto imported = kairo::editor::ImportRenderGltfScene(
+              """            const auto imported = kairo::editor::ImportRenderGltfScene(
                 project.ProjectRoot(), { asset.ID }, project.Assets(), meshImports,
                 derivedCache, resolveGltfTexture);
             std::vector<kairo::editor::RenderAssetBindings::ScenePrimitive> primitives;
@@ -60,8 +59,8 @@ jobs:
 #if defined(KAIRO_EDITOR_HAS_OFFLINE_RENDER)
             offlineScenes.emplace(asset.ID, std::move(imported));
 #endif
-''',
-              '''            auto imported = kairo::editor::ImportRenderGltfSceneWithSource(
+""",
+              """            auto imported = kairo::editor::ImportRenderGltfSceneWithSource(
                 project.ProjectRoot(), { asset.ID }, project.Assets(), meshImports,
                 derivedCache, resolveGltfTexture);
             std::vector<kairo::renderer::MeshHandle> meshHandles;
@@ -73,41 +72,41 @@ jobs:
 #if defined(KAIRO_EDITOR_HAS_OFFLINE_RENDER)
             offlineScenes.emplace(asset.ID, std::move(imported.RenderAsset));
 #endif
-''')
+""")
 
           replace_exact(
               "examples/editor_main.cpp",
-              '''        if (options.AuthoringSurface.has_value()) state.SetAuthoringSurface(*options.AuthoringSurface);
+              """        if (options.AuthoringSurface.has_value()) state.SetAuthoringSurface(*options.AuthoringSurface);
 
         std::uint64_t renderedFrames = 0u;
-''',
-              '''        if (options.AuthoringSurface.has_value()) state.SetAuthoringSurface(*options.AuthoringSurface);
+""",
+              """        if (options.AuthoringSurface.has_value()) state.SetAuthoringSurface(*options.AuthoringSurface);
         kairo::editor::AnimationPreviewController animationPreview;
 
         std::uint64_t renderedFrames = 0u;
-''')
+""")
 
           replace_exact(
               "examples/editor_main.cpp",
-              '''            shell.SetViewportTexture(imgui.ViewportTexture());
+              """            shell.SetViewportTexture(imgui.ViewportTexture());
             shell.Draw();
             renderer.NativeWindow().SetCursorCaptured(shell.ViewportCursorCaptured());
-''',
-              '''            shell.SetViewportTexture(imgui.ViewportTexture());
+""",
+              """            shell.SetViewportTexture(imgui.ViewportTexture());
             shell.Draw();
             animationPreview.Draw(state.SelectedEntity(), shell.RenderScene(), renderAssets);
             renderer.NativeWindow().SetCursorCaptured(shell.ViewportCursorCaptured());
-''')
+""")
 
           replace_exact(
               "examples/editor_main.cpp",
-              '''            renderer.SubmitRenderScene(kairo::editor::BuildRenderScene(
+              """            renderer.SubmitRenderScene(kairo::editor::BuildRenderScene(
                 shell.RenderScene(), renderAssets, shell.ViewportRenderLayers()));
-''',
-              '''            renderer.SubmitRenderScene(kairo::editor::BuildRenderScene(
+""",
+              """            renderer.SubmitRenderScene(kairo::editor::BuildRenderScene(
                 shell.RenderScene(), renderAssets, animationPreview.Overrides(),
                 shell.ViewportRenderLayers()));
-''')
+""")
 
           Path(".github/workflows/apply-animation-preview.yml").unlink()
           PY
@@ -117,6 +116,6 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add CMakeLists.txt examples/editor_main.cpp .github/workflows/apply-animation-preview.yml
+          git add -A
           git commit -m "Editor: wire glTF animation preview controls"
           git push origin HEAD:feature/gltf-animation-preview-controls
