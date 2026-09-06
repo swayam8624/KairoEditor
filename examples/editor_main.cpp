@@ -13,7 +13,9 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
-#if !defined(_WIN32)
+#if defined(_WIN32)
+#include <process.h>
+#else
 #include <unistd.h>
 #endif
 
@@ -572,7 +574,7 @@ int main(int argc, char** argv)
         kairo::editor::EditorShell shell(state, project, layoutPlan.ShouldRebuild(),
             std::move(keymap), keymapSettings, navigationSettings, navigationSettingsPath,
             std::move(ai.Provider), std::move(ai.Model), std::move(offlineRender),
-            &nativeGameplayRegistry);
+            &nativeGameplayRegistry, &meshImports);
         if (recovered.has_value()) shell.RestoreRecoveryDrafts(*recovered);
         if (options.ViewportShading.has_value()) shell.SetViewportShading(*options.ViewportShading);
         if (options.AuthoringSurface.has_value()) state.SetAuthoringSurface(*options.AuthoringSurface);
@@ -592,6 +594,18 @@ int main(int argc, char** argv)
             shell.Draw();
             renderer.NativeWindow().SetCursorCaptured(shell.ViewportCursorCaptured());
             imgui.EndFrame();
+            bool assetReloadRequested = false;
+            for (const auto& request : shell.TakeAssetBrowserRequests())
+            {
+                if (request.Kind != kairo::editor::AssetBrowserRequestKind::Reimport) continue;
+                const auto metadata = project.Assets().At(request.Asset);
+                if (metadata.Origin != kairo::assets::AssetOrigin::SourceFile)
+                    throw std::logic_error("Only source-file assets can be reimported.");
+                projectTransition = project.ProjectFile();
+                assetReloadRequested = true;
+                break;
+            }
+            if (assetReloadRequested) break;
             if (auto transition = shell.TakeProjectTransitionRequest(); transition.has_value())
             {
                 projectTransition = std::move(transition);
@@ -622,11 +636,14 @@ int main(int argc, char** argv)
         }
         if (projectTransition.has_value())
         {
-#if defined(_WIN32)
-            throw std::runtime_error("Project switching requires restarting KairoEditorApp on this platform build.");
-#else
             const std::string executable = std::filesystem::absolute(argv[0]).string();
             const std::string projectPath = projectTransition->string();
+#if defined(_WIN32)
+            const intptr_t result = _spawnl(_P_OVERLAY, executable.c_str(), executable.c_str(),
+                "--project", projectPath.c_str(), static_cast<char*>(nullptr));
+            if (result == -1)
+                throw std::runtime_error("Cannot restart KairoEditorApp for the selected project.");
+#else
             execl(executable.c_str(), executable.c_str(), "--project", projectPath.c_str(),
                 static_cast<char*>(nullptr));
             throw std::runtime_error("Cannot restart KairoEditorApp for the selected project.");
