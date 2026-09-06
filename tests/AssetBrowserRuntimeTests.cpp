@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <cstdint>
+#include <stdexcept>
 
 import Kairo.Assets;
 import Kairo.Editor.AssetBrowserRuntime;
@@ -36,6 +37,21 @@ TEST_CASE("thumbnail scheduler deduplicates revision keyed requests")
     REQUIRE(requests.front().Revision == 8u);
 }
 
+TEST_CASE("thumbnail scheduler rejects invalid extents")
+{
+    const auto id = kairo::assets::AssetID::Parse("12345678-1234-4abc-8def-1234567890ab");
+    kairo::assets::AssetMetadata metadata;
+    metadata.ID = id;
+    metadata.Type = kairo::assets::AssetType::Mesh;
+    metadata.Revision = 1u;
+
+    kairo::editor::AssetThumbnailScheduler scheduler;
+    REQUIRE_THROWS_AS(scheduler.Request(metadata, 0u), std::out_of_range);
+    REQUIRE_THROWS_AS(scheduler.Request(metadata,
+        kairo::editor::MaximumAssetThumbnailExtent + 1u), std::out_of_range);
+    REQUIRE(scheduler.TakePending().empty());
+}
+
 TEST_CASE("thumbnail scheduler ignores nonvisual asset types")
 {
     const auto id = kairo::assets::AssetID::Parse("12345678-1234-4abc-8def-1234567890ab");
@@ -59,5 +75,13 @@ TEST_CASE("asset browser request queue deduplicates exact requests")
 
     const auto requests = queue.Take();
     REQUIRE(requests.size() == 2u);
+    REQUIRE(queue.Size() == 0u);
+}
+
+TEST_CASE("asset browser request queue rejects invalid identity")
+{
+    kairo::editor::AssetBrowserRequestQueue queue;
+    REQUIRE_THROWS_AS(queue.Push({ kairo::editor::AssetBrowserRequestKind::Reimport, {} }),
+        std::invalid_argument);
     REQUIRE(queue.Size() == 0u);
 }
