@@ -17,9 +17,9 @@ set(KAIRO_EDITOR_NATIVE_GAMEPLAY_TARGETS "" CACHE STRING
 
 # Immutable standalone fallback revisions. Local source directories and sibling
 # checkouts still take precedence for active workspace development.
-set(KAIRO_EDITOR_CORE_REVISION 2a9441749b386ba9afb8e39ad3b5c3b4a265c7ee)
-set(KAIRO_EDITOR_RENDERER_REVISION af289df8f26e7d4fb78e66bb3bee1b1fcf3caab2)
-set(KAIRO_EDITOR_REALTIME_BRIDGE_REVISION 7b131d06078c8ff3c648d53536c046d6f7891f99)
+set(KAIRO_EDITOR_CORE_REVISION ecc4a96ef9829d7a7563aeb047a95c0638af0d1c)
+set(KAIRO_EDITOR_RENDERER_REVISION 3758270e792ff00ca8c05429a83e619f03cc4455)
+set(KAIRO_EDITOR_REALTIME_BRIDGE_REVISION ac8591b6884de03aaca395859ce3d796a0413af5)
 set(KAIRO_EDITOR_AI_REVISION 34d6b79727ea0bf11a369244e03c32895da9bd14)
 set(KAIRO_EDITOR_JSON_REVISION 65ee68451d8eb2b5f3a30b410476ab83deb3289b)
 
@@ -185,7 +185,7 @@ if(KAIRO_EDITOR_BUILD_APP)
     add_library(KairoEditorImGui)
     target_sources(KairoEditorImGui PUBLIC FILE_SET CXX_MODULES BASE_DIRS ${CMAKE_CURRENT_SOURCE_DIR} FILES
         KairoUI.cppm EditorTheme.cppm ImGuiRuntime.cppm ImGuiGraphCanvas.cppm TransformGizmo.cppm
-        ImGuiReflectionInspector.cppm EditorShell.cppm)
+        ImGuiReflectionInspector.cppm AnimationPreview.cppm EditorShell.cppm)
     target_link_libraries(KairoEditorImGui PUBLIC KairoEditor KairoRenderer KairoDearImGui Kairo::ImGuizmo)
     target_compile_definitions(KairoEditorImGui PRIVATE
         KAIRO_EDITOR_HAS_OPENGL_UI=1)
