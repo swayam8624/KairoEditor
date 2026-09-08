@@ -1,0 +1,28 @@
+name: Materialize Animation Preview
+
+on:
+  push:
+    branches:
+      - feature/gltf-animation-preview-controls
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Apply source integration
+        run: python3 .github/scripts/materialize_animation_preview.py
+      - name: Commit source integration
+        shell: bash
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git diff --cached --quiet && exit 0
+          git commit -m "Editor: wire glTF animation preview controls"
+          git push
