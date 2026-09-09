@@ -37,6 +37,7 @@ export import Kairo.Editor.OfflineRenderAuthoring;
 export import Kairo.Editor.MaterialPreviewAuthoring;
 export import Kairo.Editor.ProductionSystemsAuthoring;
 export import Kairo.Editor.ShippingAuthoring;
+export import Kairo.Editor.AnimationTimeline;
 export import Kairo.Editor.CommandHistory;
 export import Kairo.Editor.CommandTransaction;
 export import Kairo.Editor.Actions;
