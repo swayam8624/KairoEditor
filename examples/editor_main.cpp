@@ -25,6 +25,7 @@ import Kairo.Editor.Theme;
 import Kairo.Editor.ImGuiRuntime;
 import Kairo.Editor.ImGuiShell;
 import Kairo.Editor.SceneRenderBridge;
+import Kairo.Editor.AnimationPreview;
 import Kairo.EngineCore;
 import Kairo.Renderer;
 #if defined(KAIRO_EDITOR_HAS_OFFLINE_RENDER)
@@ -473,17 +474,17 @@ int main(int argc, char** argv)
 #endif
                 return handle;
             };
-            const auto imported = kairo::editor::ImportRenderGltfScene(
+            auto imported = kairo::editor::ImportRenderGltfSceneWithSource(
                 project.ProjectRoot(), { asset.ID }, project.Assets(), meshImports,
                 derivedCache, resolveGltfTexture);
-            std::vector<kairo::editor::RenderAssetBindings::ScenePrimitive> primitives;
-            primitives.reserve(imported.Primitives.size());
-            for (const auto& primitive : imported.Primitives)
-                primitives.push_back({ renderer.CreateMesh(primitive.Geometry),
-                    primitive.Material, primitive.LocalToAsset });
-            renderAssets.BindScene({ asset.ID }, std::move(primitives));
+            std::vector<kairo::renderer::MeshHandle> meshHandles;
+            meshHandles.reserve(imported.RenderAsset.Primitives.size());
+            for (const auto& primitive : imported.RenderAsset.Primitives)
+                meshHandles.push_back(renderer.CreateMesh(primitive.Geometry));
+            renderAssets.BindGltfScene({ asset.ID }, std::move(imported.Source),
+                imported.RenderAsset, meshHandles);
 #if defined(KAIRO_EDITOR_HAS_OFFLINE_RENDER)
-            offlineScenes.emplace(asset.ID, std::move(imported));
+            offlineScenes.emplace(asset.ID, std::move(imported.RenderAsset));
 #endif
         }
         const std::filesystem::path layoutFile = options.PersistLayout
@@ -578,6 +579,7 @@ int main(int argc, char** argv)
         if (recovered.has_value()) shell.RestoreRecoveryDrafts(*recovered);
         if (options.ViewportShading.has_value()) shell.SetViewportShading(*options.ViewportShading);
         if (options.AuthoringSurface.has_value()) state.SetAuthoringSurface(*options.AuthoringSurface);
+        kairo::editor::AnimationPreviewController animationPreview;
 
         std::uint64_t renderedFrames = 0u;
         std::optional<kairo::renderer::ViewportCapture> screenshot;
@@ -592,6 +594,7 @@ int main(int argc, char** argv)
             imgui.BeginFrame();
             shell.SetViewportTexture(imgui.ViewportTexture());
             shell.Draw();
+            animationPreview.Draw(state.SelectedEntity(), shell.RenderScene(), renderAssets);
             renderer.NativeWindow().SetCursorCaptured(shell.ViewportCursorCaptured());
             imgui.EndFrame();
             bool assetReloadRequested = false;
@@ -614,7 +617,8 @@ int main(int argc, char** argv)
             const auto camera = shell.ViewportCamera();
             renderer.SetCameraPose({ camera.Position, camera.Target, camera.Up });
             renderer.SubmitRenderScene(kairo::editor::BuildRenderScene(
-                shell.RenderScene(), renderAssets, shell.ViewportRenderLayers()));
+                shell.RenderScene(), renderAssets, animationPreview.Overrides(),
+                shell.ViewportRenderLayers()));
             renderer.SubmitDebugDraw(shell.PhysicsDebugDraw());
             renderer.SetViewportShadingMode(shell.ViewportShading());
             if (options.Screenshot.has_value() && renderedFrames == 1u)

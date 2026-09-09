@@ -8,9 +8,13 @@ import Kairo.Runtime.RealtimeSceneBridge;
 export namespace kairo::editor
 {
     using RenderMeshImport = kairo::runtime::renderbridge::RenderMeshImport;
+    using RenderGltfSceneImport = kairo::runtime::renderbridge::RenderGltfSceneImport;
     using RenderAssetBindings = kairo::runtime::renderbridge::RenderAssetBindings;
+    using SceneAnimationPlayback = kairo::runtime::renderbridge::SceneAnimationPlayback;
+    using SceneAnimationOverrides = kairo::runtime::renderbridge::SceneAnimationOverrides;
     using kairo::runtime::renderbridge::BuildRenderScene;
     using kairo::runtime::renderbridge::ImportRenderGltfScene;
+    using kairo::runtime::renderbridge::ImportRenderGltfSceneWithSource;
     using kairo::runtime::renderbridge::ImportRenderMesh;
     using kairo::runtime::renderbridge::ImportRenderTexture;
     using kairo::runtime::renderbridge::LoadRenderMaterial;
