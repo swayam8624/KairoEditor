@@ -11,7 +11,7 @@ module;
 
 export module Kairo.Editor.AnimationPreview;
 
-import Kairo.Editor.SceneRenderBridge;
+import Kairo.Runtime.RealtimeSceneBridge;
 import Kairo.EngineCore;
 
 export namespace kairo::editor
@@ -32,7 +32,7 @@ export namespace kairo::editor
     class AnimationPreviewController final
     {
     public:
-        [[nodiscard]] const SceneAnimationOverrides& Overrides() const noexcept
+        [[nodiscard]] const kairo::runtime::renderbridge::SceneAnimationOverrides& Overrides() const noexcept
         {
             return m_Overrides;
         }
@@ -45,7 +45,7 @@ export namespace kairo::editor
 
         void Draw(std::optional<kairo::engine::Entity> selected,
             const kairo::engine::Scene& scene,
-            const RenderAssetBindings& assets)
+            const kairo::runtime::renderbridge::RenderAssetBindings& assets)
         {
             ImGui::Begin("Animation Preview");
 
@@ -174,6 +174,6 @@ export namespace kairo::editor
 
     private:
         std::unordered_map<std::uint32_t, AnimationPreviewState> m_State;
-        SceneAnimationOverrides m_Overrides;
+        kairo::runtime::renderbridge::SceneAnimationOverrides m_Overrides;
     };
 }
