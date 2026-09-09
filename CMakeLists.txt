@@ -18,7 +18,7 @@ set(KAIRO_EDITOR_NATIVE_GAMEPLAY_TARGETS "" CACHE STRING
 # Immutable standalone fallback revisions. Local source directories and sibling
 # checkouts still take precedence for active workspace development.
 set(KAIRO_EDITOR_CORE_REVISION ecc4a96ef9829d7a7563aeb047a95c0638af0d1c)
-set(KAIRO_EDITOR_RENDERER_REVISION 3758270e792ff00ca8c05429a83e619f03cc4455)
+set(KAIRO_EDITOR_RENDERER_REVISION 78d99a8b1cd738dc1b3aa0b6f9ba66e3bc435fb5)
 set(KAIRO_EDITOR_REALTIME_BRIDGE_REVISION ac8591b6884de03aaca395859ce3d796a0413af5)
 set(KAIRO_EDITOR_AI_REVISION 34d6b79727ea0bf11a369244e03c32895da9bd14)
 set(KAIRO_EDITOR_JSON_REVISION 65ee68451d8eb2b5f3a30b410476ab83deb3289b)
@@ -104,10 +104,12 @@ if(KAIRO_EDITOR_BUILD_APP)
             add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../KairoRenderer" "${CMAKE_CURRENT_BINARY_DIR}/_deps/KairoRenderer")
         else()
             include(FetchContent)
+            # These are immutable commit SHAs, not moving branch names. Do not
+            # shallow-clone them: once main advances, a depth-1 clone may not
+            # contain the pinned object and checkout will fail despite a valid SHA.
             FetchContent_Declare(KairoRenderer
                 GIT_REPOSITORY https://github.com/swayam8624/KairoRenderer.git
-                GIT_TAG ${KAIRO_EDITOR_RENDERER_REVISION}
-                GIT_SHALLOW TRUE)
+                GIT_TAG ${KAIRO_EDITOR_RENDERER_REVISION})
             FetchContent_MakeAvailable(KairoRenderer)
         endif()
     endif()
@@ -120,7 +122,6 @@ if(KAIRO_EDITOR_BUILD_APP)
         FetchContent_Declare(KairoRealtimeBridgeSource
             GIT_REPOSITORY https://github.com/swayam8624/KairoGameEngine.git
             GIT_TAG ${KAIRO_EDITOR_REALTIME_BRIDGE_REVISION}
-            GIT_SHALLOW TRUE
             GIT_SUBMODULES ""
             SOURCE_SUBDIR KairoNoCMakeProject)
         FetchContent_MakeAvailable(KairoRealtimeBridgeSource)
