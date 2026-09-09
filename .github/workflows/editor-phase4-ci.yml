@@ -96,20 +96,55 @@ jobs:
           echo "CC=clang" >> "$GITHUB_ENV"
           echo "CXX=clang++" >> "$GITHUB_ENV"
       - name: Configure native editor
-        run: >-
-          cmake -S . -B build -G Ninja
-          -DCMAKE_BUILD_TYPE=Release
-          -DKAIRO_EDITOR_BUILD_APP=ON
-          -DKAIRO_EDITOR_BUILD_TESTS=ON
+        shell: bash
+        run: |
+          set +e
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DKAIRO_EDITOR_BUILD_APP=ON \
+            -DKAIRO_EDITOR_BUILD_TESTS=ON 2>&1 | tee native-configure.log
+          status=${PIPESTATUS[0]}
+          if [[ $status -ne 0 ]]; then
+            message=$(tail -n 100 native-configure.log); message=${message//'%'/'%25'}; message=${message//$'\r'/'%0D'}; message=${message//$'\n'/'%0A'}
+            echo "::error file=native-configure.log,title=Native editor configure failure::$message"
+          fi
+          exit $status
       - name: Build native editor and UI integration tests
-        run: >-
-          cmake --build build --parallel 2 --target
-          KairoEditorApp
-          KairoEditorUITests
-          KairoEditorRenderBridgeTests
-          KairoEditorPhysicsPreviewTests
+        shell: bash
+        run: |
+          set +e
+          cmake --build build --parallel 2 --target \
+            KairoEditorApp \
+            KairoEditorUITests \
+            KairoEditorRenderBridgeTests \
+            KairoEditorPhysicsPreviewTests 2>&1 | tee native-build.log
+          status=${PIPESTATUS[0]}
+          if [[ $status -ne 0 ]]; then
+            message=$(tail -n 100 native-build.log); message=${message//'%'/'%25'}; message=${message//$'\r'/'%0D'}; message=${message//$'\n'/'%0A'}
+            echo "::error file=native-build.log,title=Native editor build failure::$message"
+          fi
+          exit $status
       - name: Test native UI integration surfaces
-        run: >-
-          xvfb-run --auto-servernum --server-args="-screen 0 1280x1024x24"
-          ctest --test-dir build --output-on-failure
-          -R "KairoEditorUITests|KairoEditorRenderBridgeTests|KairoEditorPhysicsPreviewTests"
+        shell: bash
+        run: |
+          set +e
+          xvfb-run --auto-servernum --server-args="-screen 0 1280x1024x24" \
+            ctest --test-dir build --output-on-failure \
+            -R "KairoEditorUITests|KairoEditorRenderBridgeTests|KairoEditorPhysicsPreviewTests" 2>&1 | tee native-test.log
+          status=${PIPESTATUS[0]}
+          if [[ $status -ne 0 ]]; then
+            message=$(tail -n 100 native-test.log); message=${message//'%'/'%25'}; message=${message//$'\r'/'%0D'}; message=${message//$'\n'/'%0A'}
+            echo "::error file=native-test.log,title=Native editor test failure::$message"
+          fi
+          exit $status
+      - name: Upload native editor diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: editor-native-ui-diagnostics
+          path: |
+            native-configure.log
+            native-build.log
+            native-test.log
+          if-no-files-found: ignore
+          retention-days: 7
