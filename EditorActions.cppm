@@ -31,6 +31,7 @@ export namespace kairo::editor
         RotateTool,
         ScaleTool,
         TogglePlay,
+        LaunchPlayer,
         GraphAddNode,
         GraphDelete,
         GraphDuplicate,
@@ -70,6 +71,7 @@ export namespace kairo::editor
             { EditorAction::RotateTool, "Rotate Tool", "E / R" },
             { EditorAction::ScaleTool, "Scale Tool", "R / S" },
             { EditorAction::TogglePlay, "Play / Stop", "F5" },
+            { EditorAction::LaunchPlayer, "Launch in KairoPlayer", "F6" },
             { EditorAction::GraphAddNode, "Add Node", "Shift+A / Space" },
             { EditorAction::GraphDelete, "Delete Nodes", "Backspace / Delete" },
             { EditorAction::GraphDuplicate, "Duplicate Nodes", "Cmd+D" },
@@ -94,7 +96,7 @@ export namespace kairo::editor
             "save", "save-all", "new-document", "close-document", "undo", "redo",
             "duplicate", "delete-selection", "add-primitive", "focus-selection",
             "select-tool", "translate-tool", "rotate-tool", "scale-tool", "toggle-play",
-            "graph-add-node", "graph-delete", "graph-duplicate", "graph-copy", "graph-paste",
+            "launch-player", "graph-add-node", "graph-delete", "graph-duplicate", "graph-copy", "graph-paste",
             "graph-frame-selection", "graph-frame-all"
         };
         return keys.at(static_cast<std::size_t>(action));
