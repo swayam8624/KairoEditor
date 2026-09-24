@@ -1389,7 +1389,7 @@ export namespace kairo::editor
                 if (ActionButton("+", UIButtonTone::Primary, true, 25.0f)) OpenAddPrimitivePopup();
                 if (ImGui::IsItemHovered()) ImGui::SetTooltip("Add primitive (Shift+A)");
                 ImGui::SameLine();
-                if (ToolbarButton("Free", false)) m_ViewportController.Reset();
+                if (ToolbarButton("Free", false)) m_ViewportController.FreeView();
                 if (ImGui::IsItemHovered()) ImGui::SetTooltip("Return to free perspective navigation");
                 ImGui::SameLine();
                 if (ToolbarButton("Game Camera", false)) ViewSceneCamera();
@@ -1980,7 +1980,7 @@ export namespace kairo::editor
             if (ImGui::Button("Z", { axisButton, axisButton })) m_ViewportController.SnapToAxis(ViewportAxis::Front);
             if (ImGui::IsItemHovered()) ImGui::SetTooltip("Front view");
             ImGui::SameLine(0.0f, spacing);
-            if (ImGui::Button("Free", { modeButton, axisButton })) m_ViewportController.Reset();
+            if (ImGui::Button("Free", { modeButton, axisButton })) m_ViewportController.FreeView();
             if (ImGui::IsItemHovered()) ImGui::SetTooltip("Return to free perspective navigation");
             ImGui::SameLine(0.0f, spacing);
             if (ImGui::Button("Camera", { modeButton, axisButton })) ViewSceneCamera();
