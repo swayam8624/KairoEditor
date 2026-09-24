@@ -160,7 +160,12 @@ if(KAIRO_EDITOR_BUILD_APP)
         set_source_files_properties(
             ${dearimgui_SOURCE_DIR}/backends/imgui_impl_metal.mm
             detail/MetalImGuiBridge.mm PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
-        target_link_libraries(KairoDearImGui PUBLIC "-framework Metal")
+        target_link_libraries(KairoDearImGui PUBLIC
+            "-framework Foundation"
+            "-framework Metal"
+            "-framework AppKit"
+            "-framework QuartzCore"
+            "-lobjc")
     endif()
     if(WIN32)
         target_sources(KairoDearImGui PRIVATE
