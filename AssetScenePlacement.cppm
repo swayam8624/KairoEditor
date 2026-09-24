@@ -79,8 +79,10 @@ export namespace kairo::editor
 
             if (metadata.Type == kairo::assets::AssetType::Mesh)
             {
-                scene.SetMeshRenderer(entity, {
-                    kairo::assets::MeshAssetHandle{ m_Asset }, *material, true });
+                scene.SetMeshRenderer(entity, kairo::engine::MeshRendererComponent{
+                    .MeshAsset = kairo::assets::MeshAssetHandle{ m_Asset },
+                    .MaterialAsset = *material,
+                    .Visible = true });
             }
             else
             {
