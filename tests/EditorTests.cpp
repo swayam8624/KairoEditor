@@ -92,6 +92,15 @@ TEST_CASE("Editor actions and viewport navigation provide deterministic authorin
     CHECK(kairo::foundation::math::NearlyEqual(
         viewport.Pose().Target, authoredCamera.Target, 1.0e-6f));
 
+    viewport.SnapToAxis(ViewportAxis::Right);
+    const auto axisTarget = viewport.Pose().Target;
+    const auto axisDistance = viewport.Distance();
+    viewport.FreeView();
+    CHECK(kairo::foundation::math::NearlyEqual(
+        viewport.Pose().Target, axisTarget, 1.0e-6f));
+    CHECK(kairo::foundation::math::NearlyEqual(
+        viewport.Distance(), axisDistance, 1.0e-6f));
+
     viewport.Reset();
     const auto reset = viewport.Pose();
     CHECK(reset.Target == kairo::foundation::math::Vec3f{});
