@@ -225,6 +225,13 @@ namespace kairo::editor
             edited = PropertyValue(ReferenceValue{ value.TargetType, std::string(buffer.data()) });
             return true;
         }
+        case PropertyValueKind::Array:
+        {
+            const ArrayValue& value = current.Get<ArrayValue>();
+            ImGui::Text("%s: %zu item%s", label, value.Values.size(),
+                value.Values.size() == 1u ? "" : "s");
+            return false;
+        }
         }
         return false;
     }
