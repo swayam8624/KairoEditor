@@ -67,9 +67,9 @@ TEST_CASE("Engine scenes extract visible renderer draws in entity order", "[Kair
     const auto first = scene.CreateEntity("First");
     const auto hidden = scene.CreateEntity("Hidden");
     const auto second = scene.CreateEntity("Second");
-    scene.SetMeshRenderer(first, { { MeshID }, { MaterialID }, true });
-    scene.SetMeshRenderer(hidden, { { MeshID }, { MaterialID }, false });
-    scene.SetMeshRenderer(second, { { MeshID }, { MaterialID }, true });
+    scene.SetMeshRenderer(first, { { MeshID }, { MaterialID }, true, {} });
+    scene.SetMeshRenderer(hidden, { { MeshID }, { MaterialID }, false, {} });
+    scene.SetMeshRenderer(second, { { MeshID }, { MaterialID }, true, {} });
     scene.MeshRenderer(first).RenderLayers = 0x1u;
     scene.MeshRenderer(second).RenderLayers = 0x2u;
     scene.Transform(first).Local.Translation = { -2.0f, 0.0f, 0.0f };
@@ -154,7 +154,7 @@ TEST_CASE("Render asset bindings reject ambiguous and missing assets", "[KairoEd
     kairo::engine::Scene scene;
     const auto entity = scene.CreateEntity("Missing mesh");
     const auto missing = kairo::assets::AssetID::Parse("00000000-0000-4000-8000-000000000299");
-    scene.SetMeshRenderer(entity, { { missing }, { MaterialID }, true });
+    scene.SetMeshRenderer(entity, { { missing }, { MaterialID }, true, {} });
     REQUIRE_THROWS_AS(BuildRenderScene(scene, assets), std::out_of_range);
 }
 
