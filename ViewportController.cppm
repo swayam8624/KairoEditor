@@ -97,11 +97,20 @@ export namespace kairo::editor
             }
         }
 
+        /// Returns from an axis/camera-aligned view to the canonical free
+        /// perspective orientation without discarding the current focus target
+        /// or zoom distance. This is the editor equivalent of leaving an
+        /// orthographic/front/top/right inspection view.
+        void ReturnToPerspective() noexcept
+        {
+            m_Yaw = 0.60f;
+            m_Pitch = 0.31f;
+        }
+
         void Reset() noexcept
         {
             m_Target = {};
-            m_Yaw = 0.60f;
-            m_Pitch = 0.31f;
+            ReturnToPerspective();
             m_Distance = 5.0f;
         }
 
