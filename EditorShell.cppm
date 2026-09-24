@@ -38,6 +38,7 @@ import Kairo.Reflection;
 import Kairo.Foundation.Math;
 import Kairo.Renderer.DebugDraw;
 import Kairo.Renderer.Types;
+import Kairo.Renderer.RenderGraph;
 
 export namespace kairo::editor
 {
@@ -194,6 +195,14 @@ export namespace kairo::editor
 
         void SetViewportTexture(ImTextureID texture) noexcept { m_ViewportTexture = texture; }
 
+        /// Input: completed backend-neutral render-graph timings from the host.
+        /// Task: keep the Profiling workspace tied to real renderer execution
+        /// evidence without giving the ImGui shell ownership of the renderer.
+        void SetRendererProfile(const kairo::renderer::RenderGraphExecutionProfile& profile)
+        {
+            m_RendererProfile = profile;
+        }
+
         [[nodiscard]] std::pair<std::uint32_t, std::uint32_t> RequestedViewportExtent() const noexcept
         {
             return { m_RequestedViewportWidth, m_RequestedViewportHeight };
@@ -289,6 +298,7 @@ export namespace kairo::editor
         EditorAction m_ActiveTool = EditorAction::SelectTool;
         bool m_ViewportFocused = false;
         bool m_ShowPhysicsBroadphase = false;
+        kairo::renderer::RenderGraphExecutionProfile m_RendererProfile;
         kairo::renderer::ViewportShadingMode m_ViewportShading = kairo::renderer::ViewportShadingMode::Lit;
         bool m_LayoutBuilt = false;
         bool m_RebuildLayout = true;
@@ -1882,6 +1892,29 @@ export namespace kairo::editor
                 const ImGuiIO& io = ImGui::GetIO();
                 ImGui::Text("Frame %.2f ms", 1000.0f / std::max(io.Framerate, 1.0f));
                 ImGui::Text("UI %.0f FPS", io.Framerate);
+
+                ImGui::SeparatorText("Renderer");
+                ImGui::Text("Graph total %.3f ms", m_RendererProfile.TotalMilliseconds);
+                if (m_RendererProfile.Passes.empty())
+                    ImGui::TextDisabled("No completed render profile yet.");
+                else
+                    for (const auto& pass : m_RendererProfile.Passes)
+                        ImGui::Text("%s  %.3f ms", pass.Name.c_str(), pass.Milliseconds);
+
+                ImGui::SeparatorText("Physics");
+                if (!m_PhysicsPreview.Active())
+                    ImGui::TextDisabled("Physics preview inactive.");
+                else
+                {
+                    const auto& world = m_PhysicsPreview.World();
+                    const auto& profile = world.LastStepProfile();
+                    ImGui::Text("Step %.3f ms", profile.StepMs);
+                    ImGui::Text("Broadphase %.3f ms", profile.BroadphaseMs);
+                    ImGui::Text("Narrowphase %.3f ms", profile.NarrowphaseMs);
+                    ImGui::Text("Solver %.3f ms", profile.SolverMs);
+                    ImGui::Text("Bodies %zu  Colliders %zu",
+                        world.Bodies().size(), world.Colliders().size());
+                }
             }
             else if (panel == Panel::CodeEditor || panel == Panel::NodeGraph)
             {
