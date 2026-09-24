@@ -278,6 +278,11 @@ export namespace kairo::editor
             m_RequestErrorPopup = true;
         }
 
+        void ReportHostStatus(std::string message)
+        {
+            m_HostStatus = std::move(message);
+        }
+
         /// Input: stable renderer object ID, where zero denotes background.
         /// Task: apply GPU picking only when the ID still belongs to this scene.
         void ApplyViewportPick(std::uint32_t objectID)
@@ -388,6 +393,7 @@ export namespace kairo::editor
         static constexpr std::chrono::seconds AutosaveInterval{ 30 };
         std::chrono::steady_clock::time_point m_NextAutosave{};
         std::string m_RecoveryStatus;
+        std::string m_HostStatus;
         EditorKeymapSettings m_KeymapSettings;
         std::filesystem::path m_KeymapSettingsPath;
         NavigationSettings m_NavigationSettings;
@@ -743,6 +749,11 @@ export namespace kairo::editor
                 {
                     ImGui::Separator();
                     ImGui::TextDisabled("%s", m_RecoveryStatus.c_str());
+                }
+                if (!m_HostStatus.empty())
+                {
+                    ImGui::Separator();
+                    ImGui::TextDisabled("%s", m_HostStatus.c_str());
                 }
                 ImGui::EndMenuBar();
             }
