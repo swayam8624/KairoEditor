@@ -334,11 +334,14 @@ export namespace kairo::editor
         ImGuiGraphCanvas m_GraphCanvas;
         EditorInputRouter m_InputRouter;
         DiagnosticStore m_Diagnostics;
+        enum class ViewportViewMode : std::uint8_t { Free, Right, Top, Front, Camera };
+
         TransformGizmo m_TransformGizmo;
         TransformGizmoSpace m_GizmoSpace = TransformGizmoSpace::World;
         std::optional<kairo::foundation::math::Transformf> m_GizmoBefore;
         std::optional<kairo::engine::Entity> m_GizmoEntity;
         ViewportController m_ViewportController;
+        ViewportViewMode m_ViewportViewMode = ViewportViewMode::Free;
         std::optional<kairo::engine::Entity> m_ViewportSceneCamera;
         PhysicsPreview m_PhysicsPreview;
         std::optional<kairo::engine::Scene> m_RuntimeScene;
@@ -1388,7 +1391,11 @@ export namespace kairo::editor
             {
                 m_ViewportFocused = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);
                 const auto camera = m_ViewportController.Pose();
-                ImGui::TextDisabled("Perspective");
+                const char* viewportMode = m_ViewportViewMode == ViewportViewMode::Camera ? "Camera" :
+                    m_ViewportViewMode == ViewportViewMode::Right ? "Right" :
+                    m_ViewportViewMode == ViewportViewMode::Top ? "Top" :
+                    m_ViewportViewMode == ViewportViewMode::Front ? "Front" : "Free";
+                ImGui::TextDisabled("%s", viewportMode);
                 ImGui::SameLine();
                 if (ImGui::BeginCombo("##ViewportShading", kairo::renderer::Name(m_ViewportShading).data(),
                     ImGuiComboFlags_WidthFitPreview))
@@ -1703,6 +1710,7 @@ export namespace kairo::editor
                 world.Up()
             });
             m_ViewportSceneCamera = *cameraEntity;
+            m_ViewportViewMode = ViewportViewMode::Camera;
             m_ViewportRenderLayers = scene.Camera(*cameraEntity).RenderLayers;
         }
 
@@ -1738,6 +1746,7 @@ export namespace kairo::editor
             if (requested && (hovered || keyboardActive))
             {
                 m_ViewportSceneCamera.reset();
+                m_ViewportViewMode = ViewportViewMode::Free;
                 m_ViewportRenderLayers = kairo::engine::AllRenderLayers;
             }
             if (!requested)
@@ -2011,18 +2020,19 @@ export namespace kairo::editor
                 (button * 3.0f + perspectiveWidth + cameraWidth + spacing * 4.0f) - 16.0f,
                 viewportMin.y + 12.0f });
             ImGui::PushID("ViewportOrientation");
-            if (ImGui::Button("X", { button, button })) { m_ViewportSceneCamera.reset(); m_ViewportRenderLayers = kairo::engine::AllRenderLayers; m_ViewportController.SnapToAxis(ViewportAxis::Right); }
+            if (ImGui::Button("X", { button, button })) { m_ViewportSceneCamera.reset(); m_ViewportViewMode = ViewportViewMode::Right; m_ViewportRenderLayers = kairo::engine::AllRenderLayers; m_ViewportController.SnapToAxis(ViewportAxis::Right); }
             if (ImGui::IsItemHovered()) ImGui::SetTooltip("Right view");
             ImGui::SameLine(0.0f, spacing);
-            if (ImGui::Button("Y", { button, button })) { m_ViewportSceneCamera.reset(); m_ViewportRenderLayers = kairo::engine::AllRenderLayers; m_ViewportController.SnapToAxis(ViewportAxis::Top); }
+            if (ImGui::Button("Y", { button, button })) { m_ViewportSceneCamera.reset(); m_ViewportViewMode = ViewportViewMode::Top; m_ViewportRenderLayers = kairo::engine::AllRenderLayers; m_ViewportController.SnapToAxis(ViewportAxis::Top); }
             if (ImGui::IsItemHovered()) ImGui::SetTooltip("Top view");
             ImGui::SameLine(0.0f, spacing);
-            if (ImGui::Button("Z", { button, button })) { m_ViewportSceneCamera.reset(); m_ViewportRenderLayers = kairo::engine::AllRenderLayers; m_ViewportController.SnapToAxis(ViewportAxis::Front); }
+            if (ImGui::Button("Z", { button, button })) { m_ViewportSceneCamera.reset(); m_ViewportViewMode = ViewportViewMode::Front; m_ViewportRenderLayers = kairo::engine::AllRenderLayers; m_ViewportController.SnapToAxis(ViewportAxis::Front); }
             if (ImGui::IsItemHovered()) ImGui::SetTooltip("Front view");
             ImGui::SameLine(0.0f, spacing);
             if (ImGui::Button("Free", { perspectiveWidth, button }))
             {
                 m_ViewportSceneCamera.reset();
+                m_ViewportViewMode = ViewportViewMode::Free;
                 m_ViewportRenderLayers = kairo::engine::AllRenderLayers;
                 m_ViewportController.ReturnToPerspective();
             }
