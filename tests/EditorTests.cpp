@@ -80,6 +80,22 @@ TEST_CASE("Editor actions and viewport navigation provide deterministic authorin
     CHECK(viewport.Pose().Position.x > viewport.Pose().Target.x);
     viewport.SnapToAxis(ViewportAxis::Top);
     CHECK(viewport.Pose().Position.y > viewport.Pose().Target.y);
+
+    const ViewportCameraPose authoredCamera{
+        { -110.0f, 12.0f, 242.0f },
+        { -104.0f, 1.0f, 220.0f },
+        kairo::foundation::math::Vec3f::Up()
+    };
+    viewport.SetPose(authoredCamera);
+    CHECK(viewport.Pose().Position == authoredCamera.Position);
+    CHECK(viewport.Pose().Target == authoredCamera.Target);
+
+    viewport.Reset();
+    const auto reset = viewport.Pose();
+    CHECK(reset.Target == kairo::foundation::math::Vec3f{});
+    CHECK(reset.Position != authoredCamera.Position);
+    CHECK(reset.Position.y > reset.Target.y);
+
     REQUIRE_THROWS_AS(viewport.Focus({ 0.0f, 0.0f, 0.0f }, 0.0f), std::invalid_argument);
 }
 
