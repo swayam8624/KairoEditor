@@ -80,6 +80,12 @@ TEST_CASE("Editor actions and viewport navigation provide deterministic authorin
     CHECK(viewport.Pose().Position.x > viewport.Pose().Target.x);
     viewport.SnapToAxis(ViewportAxis::Top);
     CHECK(viewport.Pose().Position.y > viewport.Pose().Target.y);
+    const auto focusedTarget = viewport.Pose().Target;
+    const auto focusedDistance = viewport.Distance();
+    viewport.ResetOrientation();
+    CHECK(viewport.Pose().Target == focusedTarget);
+    CHECK(viewport.Distance() == focusedDistance);
+    CHECK(viewport.Pose().Position.y > viewport.Pose().Target.y);
 
     const ViewportCameraPose authoredCamera{
         { -110.0f, 12.0f, 242.0f },
