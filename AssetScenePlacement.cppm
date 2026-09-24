@@ -82,7 +82,8 @@ export namespace kairo::editor
                 scene.SetMeshRenderer(entity, kairo::engine::MeshRendererComponent{
                     .MeshAsset = kairo::assets::MeshAssetHandle{ m_Asset },
                     .MaterialAsset = *material,
-                    .Visible = true });
+                    .Visible = true,
+                    .AdditionalMaterialSlots = {} });
             }
             else
             {
