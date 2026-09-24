@@ -195,7 +195,10 @@ export namespace kairo::editor
                 ? scene.CreateEntityWithID(*m_Entity, m_Name)
                 : scene.CreateEntity(m_Name);
             if (!m_Entity.has_value()) m_Entity = entity;
-            scene.SetMeshRenderer(entity, { mesh, material, true });
+            scene.SetMeshRenderer(entity, kairo::engine::MeshRendererComponent{
+                .MeshAsset = mesh,
+                .MaterialAsset = material,
+                .Visible = true });
             if (m_Kind == PrimitiveKind::Plane)
                 scene.Transform(entity).Local.Scale = { 3.0f, 1.0f, 3.0f };
         }
