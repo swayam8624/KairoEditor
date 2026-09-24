@@ -732,7 +732,7 @@ int main(int argc, char** argv)
                 break;
             }
             const auto camera = shell.ViewportCamera();
-            renderer.SetCameraPose({ camera.Position, camera.Target, camera.Up });
+            renderer.SetCameraPose(camera);
             renderer.SubmitRenderScene(kairo::editor::BuildRenderScene(
                 shell.RenderScene(), renderAssets, animationPreview.Overrides(),
                 shell.ViewportRenderLayers()));
