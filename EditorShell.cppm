@@ -228,6 +228,14 @@ export namespace kairo::editor
             return std::exchange(m_RuntimeLaunchRequested, false);
         }
 
+        /// Input: a host-level failure such as runtime process launch failure.
+        /// Task: surface it in the same non-fatal editor error UI as command failures.
+        void ReportHostError(std::string message)
+        {
+            m_LastError = std::move(message);
+            m_RequestErrorPopup = true;
+        }
+
         /// Input: stable renderer object ID, where zero denotes background.
         /// Task: apply GPU picking only when the ID still belongs to this scene.
         void ApplyViewportPick(std::uint32_t objectID)
@@ -628,7 +636,11 @@ export namespace kairo::editor
             if (m_State.Mode() == EditorMode::Edit)
             {
                 if (ActionButton("Play", UIButtonTone::Primary))
-                    m_RuntimeLaunchRequested = true;
+                    RunCommand([this]
+                    {
+                        SaveAllWithDrafts();
+                        m_RuntimeLaunchRequested = true;
+                    });
                 if (ImGui::IsItemHovered())
                     ImGui::SetTooltip("Launch the project's real runtime in a separate game window");
                 ImGui::SameLine();
@@ -1591,7 +1603,11 @@ export namespace kairo::editor
             if (m_InputRouter.Consume(EditorAction::TogglePlay))
             {
                 if (m_State.Mode() == EditorMode::Edit)
-                    m_RuntimeLaunchRequested = true;
+                    RunCommand([this]
+                    {
+                        SaveAllWithDrafts();
+                        m_RuntimeLaunchRequested = true;
+                    });
                 else
                     StopPlay();
             }
