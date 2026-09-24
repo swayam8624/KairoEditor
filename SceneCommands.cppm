@@ -198,7 +198,8 @@ export namespace kairo::editor
             scene.SetMeshRenderer(entity, kairo::engine::MeshRendererComponent{
                 .MeshAsset = mesh,
                 .MaterialAsset = material,
-                .Visible = true });
+                .Visible = true,
+                .AdditionalMaterialSlots = {} });
             if (m_Kind == PrimitiveKind::Plane)
                 scene.Transform(entity).Local.Scale = { 3.0f, 1.0f, 3.0f };
         }
