@@ -88,3 +88,17 @@ collider, and contact counts; broadphase bounds can be toggled there.
 The current preview deliberately uses boxes derived from local scale. Sphere,
 capsule, mesh, joint, cloth, fluid, and particle authoring require persistent
 physics component descriptors and are not represented as misleading controls.
+
+
+## Viewport orientation and camera
+
+The viewport exposes explicit `X`, `Y`, `Z`, `Free`, and `Camera` controls.
+
+- **Free** returns from an axis-aligned view to the normal perspective editor camera.
+- **Camera / Game Camera** looks through the primary authored scene camera.
+- Clicking or hovering the rendered viewport gives it navigation ownership.
+- **RMB + WASD** or **Shift + WASD** flies the camera.
+- **Arrow keys** move the editor camera while the viewport is active.
+- **MMB** or **Option + LMB** orbits.
+- **Shift + MMB** pans.
+- Mouse wheel dollies/zooms.
