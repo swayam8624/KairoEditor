@@ -656,19 +656,19 @@ export namespace kairo::editor
         {
             if (m_State.Mode() == EditorMode::Edit)
             {
-                if (ActionButton("Play", UIButtonTone::Primary))
+                if (ActionButton("Play Game", UIButtonTone::Primary))
                     RunCommand([this]
                     {
                         SaveAllWithDrafts();
                         m_RuntimeLaunchRequested = true;
                     });
                 if (ImGui::IsItemHovered())
-                    ImGui::SetTooltip("Launch the project's real runtime in a separate game window");
+                    ImGui::SetTooltip("Launch the project's native Play executable in a separate game window");
                 ImGui::SameLine();
-                if (ActionButton("Simulate"))
+                if (ActionButton("Physics Preview"))
                     StartPlay();
                 if (ImGui::IsItemHovered())
-                    ImGui::SetTooltip("Run the isolated in-editor physics preview");
+                    ImGui::SetTooltip("Preview physics inside the editor viewport; this does not launch the game");
             }
             else
             {
@@ -711,8 +711,8 @@ export namespace kairo::editor
                     ImGui::Text("Selected: %s", m_Project.Scene().Name(*selected).Value.c_str());
                 }
                 ImGui::Separator();
-                ImGui::TextDisabled("%s", m_State.Mode() == EditorMode::Edit ? "Edit" :
-                    (m_State.Mode() == EditorMode::Play ? "Playing" : "Paused"));
+                ImGui::TextDisabled("%s", m_State.Mode() == EditorMode::Edit ? "Editor" :
+                    (m_State.Mode() == EditorMode::Play ? "Physics Preview" : "Physics Preview Paused"));
                 if (!m_RecoveryStatus.empty())
                 {
                     ImGui::Separator();
