@@ -19,7 +19,7 @@ set(KAIRO_EDITOR_NATIVE_GAMEPLAY_TARGETS "" CACHE STRING
 
 # Immutable standalone fallback revisions. Local source directories and sibling
 # checkouts still take precedence for active workspace development.
-set(KAIRO_EDITOR_CORE_REVISION d3d938b1e95cde93333a8382158fb5875e3a2e14)
+set(KAIRO_EDITOR_CORE_REVISION 092d799df16c935b3c6018d58c751a165f031140)
 set(KAIRO_EDITOR_RENDERER_REVISION cdaff5093865b020d118322ea83838063b2871a4)
 set(KAIRO_EDITOR_REALTIME_BRIDGE_REVISION 45796ee3de443340576df809f1df59dcfc2c72f3)
 set(KAIRO_EDITOR_AI_REVISION 34d6b79727ea0bf11a369244e03c32895da9bd14)
@@ -80,7 +80,7 @@ target_sources(KairoEditor PUBLIC FILE_SET CXX_MODULES BASE_DIRS ${CMAKE_CURRENT
     AuthoringDocument.cppm DocumentValidation.cppm DocumentSerialization.cppm DocumentCommands.cppm
     DocumentCompiler.cppm LogicDocumentCompiler.cppm ProjectLogicBuild.cppm ProjectDocuments.cppm GraphCanvas.cppm DocumentProjection.cppm
     AuthoringWorkspaceState.cppm
-    ProjectDescriptor.cppm ProjectRecovery.cppm ProjectSession.cppm ProjectLifecycle.cppm NativeDialogs.cppm CommandHistory.cppm CommandTransaction.cppm EditorActions.cppm EditorInputRouter.cppm KeymapSettings.cppm NavigationSettings.cppm EditorLayoutRecovery.cppm ViewportController.cppm PrimitiveTypes.cppm SceneCommands.cppm
+    ProjectDescriptor.cppm ProjectRecovery.cppm ProjectSession.cppm ProjectLifecycle.cppm RuntimePreviewProcess.cppm NativeDialogs.cppm CommandHistory.cppm CommandTransaction.cppm EditorActions.cppm EditorInputRouter.cppm KeymapSettings.cppm NavigationSettings.cppm EditorLayoutRecovery.cppm ViewportController.cppm PrimitiveTypes.cppm SceneCommands.cppm
     AssetBrowserModel.cppm AssetWorkspace.cppm AssetBrowserRuntime.cppm AssetScenePlacement.cppm SceneSelection.cppm EditorDiagnostics.cppm SceneFragment.cppm ProductionAuthoring.cppm AdvancedProductionAuthoring.cppm NativeGameplayAuthoring.cppm OfflineRenderAuthoring.cppm MaterialPreviewAuthoring.cppm ProductionSystemsAuthoring.cppm ShippingAuthoring.cppm
     AIEditorTools.cppm AIEditorSession.cppm EditorState.cppm PanelState.cppm KairoEditor.cppm)
 # KairoEditor directly imports Kairo.Assets.* modules in its production
