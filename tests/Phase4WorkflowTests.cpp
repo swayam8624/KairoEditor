@@ -71,7 +71,7 @@ TEST_CASE("Asset browser exposes import state, filtering and deletion blockers")
 
     WriteText(root / "Textures/paint.tga", "source-v2");
     const auto changedEntries = BuildAssetBrowserEntries(root, registry, imports,
-        { .Folder = "Textures", .Type = AssetType::Texture2D });
+        { .Folder = "Textures", .Search = "", .Type = AssetType::Texture2D });
     REQUIRE(changedEntries.size() == 1u);
     CHECK(changedEntries.front().State == AssetBrowserState::SourceChanged);
     std::filesystem::remove_all(root);
