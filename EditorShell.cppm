@@ -1411,15 +1411,14 @@ export namespace kairo::editor
                 if (hovered && (ImGui::IsMouseClicked(ImGuiMouseButton_Left) ||
                     ImGui::IsMouseClicked(ImGuiMouseButton_Right) ||
                     ImGui::IsMouseClicked(ImGuiMouseButton_Middle)))
-                {
                     ImGui::SetWindowFocus();
-                    m_ViewportKeyboardActive = true;
-                }
-                else if (!hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left) &&
-                    ImGui::IsAnyItemHovered())
-                {
-                    m_ViewportKeyboardActive = false;
-                }
+
+                // Keyboard navigation follows actual viewport focus/hover rather
+                // than a sticky click latch. This makes arrows and Select-mode
+                // WASD work immediately while keeping text widgets isolated.
+                m_ViewportKeyboardActive =
+                    (m_ViewportFocused || hovered) && !ImGui::GetIO().WantTextInput;
+
                 if (ImGui::BeginDragDropTarget())
                 {
                     if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("KAIRO_ASSET_ID"))
@@ -1434,23 +1433,26 @@ export namespace kairo::editor
                     }
                     ImGui::EndDragDropTarget();
                 }
-                const bool navigationClick = ImGui::GetIO().KeyAlt;
-                if (hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left) && !navigationClick)
+
+                const bool gizmoOwnsPointer = DrawTransformGizmo(viewportMin, viewportSize);
+                const bool navigationClick = ImGui::GetIO().KeyAlt ||
+                    ImGui::IsMouseDown(ImGuiMouseButton_Right) ||
+                    ImGui::IsMouseDown(ImGuiMouseButton_Middle);
+                if (hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left) &&
+                    !navigationClick && !gizmoOwnsPointer &&
+                    m_ViewportTexture != ImTextureID_Invalid)
                 {
                     ImGui::SetWindowFocus();
-                    if (m_ActiveTool == EditorAction::SelectTool && m_ViewportTexture != ImTextureID_Invalid)
-                    {
-                        const ImVec2 mouse = ImGui::GetMousePos();
-                        const auto x = static_cast<std::uint32_t>(std::clamp(
-                            std::floor((mouse.x - viewportMin.x) * framebufferScale.x), 0.0f,
-                            static_cast<float>(m_RequestedViewportWidth - 1u)));
-                        const auto y = static_cast<std::uint32_t>(std::clamp(
-                            std::floor((mouse.y - viewportMin.y) * framebufferScale.y), 0.0f,
-                            static_cast<float>(m_RequestedViewportHeight - 1u)));
-                        m_ViewportPickRequest = std::pair{ x, y };
-                    }
+                    const ImVec2 mouse = ImGui::GetMousePos();
+                    const auto x = static_cast<std::uint32_t>(std::clamp(
+                        std::floor((mouse.x - viewportMin.x) * framebufferScale.x), 0.0f,
+                        static_cast<float>(m_RequestedViewportWidth - 1u)));
+                    const auto y = static_cast<std::uint32_t>(std::clamp(
+                        std::floor((mouse.y - viewportMin.y) * framebufferScale.y), 0.0f,
+                        static_cast<float>(m_RequestedViewportHeight - 1u)));
+                    m_ViewportPickRequest = std::pair{ x, y };
                 }
-                const bool gizmoOwnsPointer = DrawTransformGizmo(viewportMin, viewportSize);
+
                 DrawOrientationGizmo(viewportMin, viewportSize);
                 HandleViewportNavigation(hovered && !gizmoOwnsPointer, m_ViewportKeyboardActive);
 
@@ -1460,7 +1462,7 @@ export namespace kairo::editor
                     m_ActiveTool == EditorAction::TranslateTool ? "MOVE" :
                     m_ActiveTool == EditorAction::RotateTool ? "ROTATE" : "SCALE");
                 ImGui::GetWindowDrawList()->AddText({ overlay.x, overlay.y + 18.0f }, IM_COL32(135, 165, 184, 190),
-                    "Click viewport | MMB/Option+LMB orbit | Shift+MMB pan | wheel dolly | RMB+WASD / Shift+WASD fly | arrows move");
+                    "Select mode: WASD/arrows move | RMB+WASD fly/look | MMB/Option+LMB orbit | Shift+MMB pan | wheel dolly");
                 const auto selected = m_State.SelectedEntity();
                 if (selected.has_value())
                 {
@@ -1606,7 +1608,17 @@ export namespace kairo::editor
                 std::pair{ EditorKey::Delete, ImGuiKey_Delete }, std::pair{ EditorKey::F5, ImGuiKey_F5 }
             };
             for (const auto [key, native] : keys)
-                if (ImGui::IsKeyPressed(native, false)) (void)m_InputRouter.Route({ { key, modifiers } });
+            {
+                const bool viewportMovementKey =
+                    context == InputContext::Scene &&
+                    m_ActiveTool == EditorAction::SelectTool &&
+                    m_ViewportNavigationActive &&
+                    modifiers == KeyModifiers::None &&
+                    (key == EditorKey::W || key == EditorKey::A ||
+                     key == EditorKey::S || key == EditorKey::D);
+                if (!viewportMovementKey && ImGui::IsKeyPressed(native, false))
+                    (void)m_InputRouter.Route({ { key, modifiers } });
+            }
 
             if (!m_Project.HasProject()) return;
             if (m_InputRouter.Consume(EditorAction::NewDocument)) RequestNewDocument();
@@ -1693,12 +1705,13 @@ export namespace kairo::editor
             const bool arrowNavigation = keyboardActive && !io.WantTextInput &&
                 (ImGui::IsKeyDown(ImGuiKey_UpArrow) || ImGui::IsKeyDown(ImGuiKey_DownArrow) ||
                  ImGui::IsKeyDown(ImGuiKey_LeftArrow) || ImGui::IsKeyDown(ImGuiKey_RightArrow));
-            const bool shiftedKeyboardFly = keyboardActive && !io.WantTextInput && io.KeyShift &&
+            const bool plainKeyboardFly = keyboardActive && !io.WantTextInput &&
+                m_ActiveTool == EditorAction::SelectTool &&
+                !io.KeyShift && !io.KeyCtrl && !io.KeySuper && !io.KeyAlt &&
                 (ImGui::IsKeyDown(ImGuiKey_W) || ImGui::IsKeyDown(ImGuiKey_A) ||
-                 ImGui::IsKeyDown(ImGuiKey_S) || ImGui::IsKeyDown(ImGuiKey_D) ||
-                 ImGui::IsKeyDown(ImGuiKey_Q) || ImGui::IsKeyDown(ImGuiKey_E));
+                 ImGui::IsKeyDown(ImGuiKey_S) || ImGui::IsKeyDown(ImGuiKey_D));
             const bool requested = optionLeft || rightMouse || middleMouse ||
-                arrowNavigation || shiftedKeyboardFly;
+                arrowNavigation || plainKeyboardFly;
             if (!requested)
             {
                 m_ViewportNavigationActive = false;
@@ -1722,7 +1735,7 @@ export namespace kairo::editor
             input.Orbit = (middleMouse && !io.KeyShift) || (optionLeft && !io.KeyShift && !io.KeyCtrl);
             input.Pan = (middleMouse && io.KeyShift) || (optionLeft && io.KeyShift);
             input.Dolly = optionLeft && io.KeyCtrl && !io.KeyShift;
-            input.Fly = rightMouse || arrowNavigation || shiftedKeyboardFly;
+            input.Fly = rightMouse || arrowNavigation || plainKeyboardFly;
             if (hovered && m_NavigationSettings.ScrollBehavior == ViewportScrollBehavior::Pan && io.MouseWheel != 0.0f)
             {
                 input.Pan = true;
@@ -1738,8 +1751,10 @@ export namespace kairo::editor
                 input.MoveRight =
                     (ImGui::IsKeyDown(ImGuiKey_D) || ImGui::IsKeyDown(ImGuiKey_RightArrow) ? 1.0f : 0.0f) -
                     (ImGui::IsKeyDown(ImGuiKey_A) || ImGui::IsKeyDown(ImGuiKey_LeftArrow) ? 1.0f : 0.0f);
-                input.MoveUp = (ImGui::IsKeyDown(ImGuiKey_E) ? 1.0f : 0.0f) -
-                    (ImGui::IsKeyDown(ImGuiKey_Q) ? 1.0f : 0.0f);
+                input.MoveUp = rightMouse
+                    ? (ImGui::IsKeyDown(ImGuiKey_E) ? 1.0f : 0.0f) -
+                      (ImGui::IsKeyDown(ImGuiKey_Q) ? 1.0f : 0.0f)
+                    : 0.0f;
                 if (!rightMouse && !optionLeft && !middleMouse)
                 {
                     input.MouseDeltaX = 0.0f;
@@ -1979,7 +1994,7 @@ export namespace kairo::editor
             if (ImGui::Button("Z", { button, button })) m_ViewportController.SnapToAxis(ViewportAxis::Front);
             if (ImGui::IsItemHovered()) ImGui::SetTooltip("Front view");
             ImGui::SameLine(0.0f, spacing);
-            if (ImGui::Button("Persp", { perspectiveWidth, button })) m_ViewportController.Reset();
+            if (ImGui::Button("Persp", { perspectiveWidth, button })) m_ViewportController.ResetOrientation();
             if (ImGui::IsItemHovered()) ImGui::SetTooltip("Return to free perspective view");
             ImGui::SameLine(0.0f, spacing);
             if (ImGui::Button("Camera", { cameraWidth, button })) ViewSceneCamera();
