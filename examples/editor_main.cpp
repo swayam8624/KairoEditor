@@ -457,6 +457,8 @@ int main(int argc, char** argv)
             kairo::assets::AssetIDHash> materialArtifacts;
         std::unordered_map<kairo::assets::AssetID, kairo::assets::TextureImportSettings,
             kairo::assets::AssetIDHash> textureSettings;
+        std::unordered_map<std::string, kairo::renderer::TextureHandle>
+            embeddedGltfTextures;
 #if defined(KAIRO_EDITOR_HAS_OFFLINE_RENDER)
         std::unordered_map<kairo::assets::AssetID, kairo::renderer::Mesh,
             kairo::assets::AssetIDHash> offlineMeshes;
@@ -579,9 +581,33 @@ int main(int argc, char** argv)
 #endif
                 return handle;
             };
+            const auto resolveEmbeddedGltfTexture =
+                [&](const kairo::assets::GltfTextureBinding& binding,
+                    kairo::assets::TextureSemantic semantic)
+            {
+                const auto fingerprint =
+                    kairo::assets::FingerprintBytes(binding.EmbeddedBytes);
+                const std::string key = fingerprint.ToHex() + ":" +
+                    std::to_string(static_cast<unsigned>(semantic));
+
+                if (const auto found = embeddedGltfTextures.find(key);
+                    found != embeddedGltfTextures.end())
+                    return found->second;
+
+                const auto texture =
+                    kairo::editor::DecodeEmbeddedGltfTexture(binding, semantic);
+                const auto handle = renderer.CreateTexture(texture);
+                embeddedGltfTextures.emplace(key, handle);
+#if defined(KAIRO_EDITOR_HAS_OFFLINE_RENDER)
+                auto offline = MakeOfflineTexture(texture, "embedded:" + key);
+                offlineTextureHandles.emplace(handle, offline);
+#endif
+                return handle;
+            };
+
             auto imported = kairo::editor::ImportRenderGltfSceneWithSource(
                 project.ProjectRoot(), { asset.ID }, project.Assets(), meshImports,
-                derivedCache, resolveGltfTexture);
+                derivedCache, resolveGltfTexture, resolveEmbeddedGltfTexture);
             std::vector<kairo::renderer::MeshHandle> meshHandles;
             meshHandles.reserve(imported.RenderAsset.Primitives.size());
             for (const auto& primitive : imported.RenderAsset.Primitives)
