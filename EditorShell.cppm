@@ -36,6 +36,7 @@ import Kairo.EngineCore;
 import Kairo.EngineCore.Reflection;
 import Kairo.Reflection;
 import Kairo.Foundation.Math;
+import Kairo.Renderer.Camera;
 import Kairo.Renderer.DebugDraw;
 import Kairo.Renderer.Types;
 import Kairo.Renderer.RenderGraph;
@@ -139,9 +140,28 @@ export namespace kairo::editor
         /// Output: current editor-owned navigation pose. The application host
         /// adapts this to KairoRenderer after UI construction, keeping ImGui
         /// input and Vulkan camera uploads in separate modules.
-        [[nodiscard]] ViewportCameraPose ViewportCamera() const noexcept
+        [[nodiscard]] kairo::renderer::CameraPose ViewportCamera() const noexcept
         {
-            return m_ViewportController.Pose();
+            const auto pose = m_ViewportController.Pose();
+            kairo::renderer::CameraPose result{
+                .Position = pose.Position,
+                .Target = pose.Target,
+                .Up = pose.Up
+            };
+            if (m_ViewportSceneCamera.has_value() &&
+                m_Project.Scene().Contains(*m_ViewportSceneCamera) &&
+                m_Project.Scene().HasCamera(*m_ViewportSceneCamera))
+            {
+                const auto& authored = m_Project.Scene().Camera(*m_ViewportSceneCamera);
+                result.Projection = authored.Projection == kairo::engine::CameraProjection::Orthographic
+                    ? kairo::renderer::CameraProjectionMode::Orthographic
+                    : kairo::renderer::CameraProjectionMode::Perspective;
+                result.VerticalFovRadians = authored.VerticalFovRadians;
+                result.OrthographicSize = authored.OrthographicSize;
+                result.NearPlane = authored.NearPlane;
+                result.FarPlane = authored.FarPlane;
+            }
+            return result;
         }
 
         [[nodiscard]] const kairo::engine::Scene& RenderScene() const noexcept
@@ -307,6 +327,7 @@ export namespace kairo::editor
         std::optional<kairo::foundation::math::Transformf> m_GizmoBefore;
         std::optional<kairo::engine::Entity> m_GizmoEntity;
         ViewportController m_ViewportController;
+        std::optional<kairo::engine::Entity> m_ViewportSceneCamera;
         PhysicsPreview m_PhysicsPreview;
         std::optional<kairo::engine::Scene> m_RuntimeScene;
         std::unique_ptr<AIEditorSession> m_AISession;
@@ -1435,23 +1456,22 @@ export namespace kairo::editor
                     }
                     ImGui::EndDragDropTarget();
                 }
+                const bool gizmoOwnsPointer = DrawTransformGizmo(viewportMin, viewportSize);
                 const bool navigationClick = ImGui::GetIO().KeyAlt;
-                if (hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left) && !navigationClick)
+                if (hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left) &&
+                    !navigationClick && !gizmoOwnsPointer &&
+                    m_ViewportTexture != ImTextureID_Invalid)
                 {
                     ImGui::SetWindowFocus();
-                    if (m_ActiveTool == EditorAction::SelectTool && m_ViewportTexture != ImTextureID_Invalid)
-                    {
-                        const ImVec2 mouse = ImGui::GetMousePos();
-                        const auto x = static_cast<std::uint32_t>(std::clamp(
-                            std::floor((mouse.x - viewportMin.x) * framebufferScale.x), 0.0f,
-                            static_cast<float>(m_RequestedViewportWidth - 1u)));
-                        const auto y = static_cast<std::uint32_t>(std::clamp(
-                            std::floor((mouse.y - viewportMin.y) * framebufferScale.y), 0.0f,
-                            static_cast<float>(m_RequestedViewportHeight - 1u)));
-                        m_ViewportPickRequest = std::pair{ x, y };
-                    }
+                    const ImVec2 mouse = ImGui::GetMousePos();
+                    const auto x = static_cast<std::uint32_t>(std::clamp(
+                        std::floor((mouse.x - viewportMin.x) * framebufferScale.x), 0.0f,
+                        static_cast<float>(m_RequestedViewportWidth - 1u)));
+                    const auto y = static_cast<std::uint32_t>(std::clamp(
+                        std::floor((mouse.y - viewportMin.y) * framebufferScale.y), 0.0f,
+                        static_cast<float>(m_RequestedViewportHeight - 1u)));
+                    m_ViewportPickRequest = std::pair{ x, y };
                 }
-                const bool gizmoOwnsPointer = DrawTransformGizmo(viewportMin, viewportSize);
                 DrawOrientationGizmo(viewportMin, viewportSize);
                 HandleViewportNavigation(hovered && !gizmoOwnsPointer, m_ViewportKeyboardActive);
 
@@ -1647,6 +1667,7 @@ export namespace kairo::editor
         {
             const auto selected = m_State.SelectedEntity();
             if (!selected.has_value()) return;
+            m_ViewportSceneCamera.reset();
             m_ViewportController.Focus(m_Project.Scene().WorldTransform(*selected).Translation);
         }
 
@@ -1668,6 +1689,7 @@ export namespace kairo::editor
                 world.Translation + world.Forward() * 5.0f,
                 world.Up()
             });
+            m_ViewportSceneCamera = *cameraEntity;
             m_ViewportRenderLayers = scene.Camera(*cameraEntity).RenderLayers;
         }
 
@@ -1707,7 +1729,10 @@ export namespace kairo::editor
                 m_ViewportNavigationCancelled = false;
             }
             if ((hovered || keyboardActive) && requested && !m_ViewportNavigationCancelled)
+            {
                 m_ViewportNavigationActive = true;
+                m_ViewportSceneCamera.reset();
+            }
             if (ImGui::IsKeyPressed(ImGuiKey_Escape, false))
             {
                 m_ViewportNavigationActive = false;
@@ -1734,6 +1759,7 @@ export namespace kairo::editor
             if (viewportKeyboard && ImGui::IsKeyPressed(ImGuiKey_Home, false))
             {
                 m_ViewportController.Reset();
+                m_ViewportSceneCamera.reset();
                 m_ViewportRenderLayers = kairo::engine::AllRenderLayers;
                 m_ViewportNavigationActive = false;
                 return;
@@ -1930,11 +1956,13 @@ export namespace kairo::editor
             if (!selected.has_value() || m_ActiveTool == EditorAction::SelectTool ||
                 m_State.Mode() != EditorMode::Edit) return false;
             using namespace kairo::foundation::math;
-            const auto camera = m_ViewportController.Pose();
+            const auto camera = ViewportCamera();
             const Mat4f view = LookAt(camera.Position, camera.Target, camera.Up);
-            Mat4f projection = Perspective(1.0471975512f,
-                viewportSize.x / std::max(viewportSize.y, 1.0f), 0.1f, 100.0f);
-            projection(1u, 1u) *= -1.0f;
+            kairo::renderer::ShowcaseCamera projectionCamera;
+            projectionCamera.SetPose(camera);
+            Mat4f projection = projectionCamera.Projection(
+                static_cast<std::uint32_t>(std::max(viewportSize.x, 1.0f)),
+                static_cast<std::uint32_t>(std::max(viewportSize.y, 1.0f)));
             const TransformGizmoOperation operation = m_ActiveTool == EditorAction::TranslateTool
                 ? TransformGizmoOperation::Translate : m_ActiveTool == EditorAction::RotateTool
                 ? TransformGizmoOperation::Rotate : TransformGizmoOperation::Scale;
@@ -1986,18 +2014,31 @@ export namespace kairo::editor
                 (button * 3.0f + perspectiveWidth + cameraWidth + spacing * 4.0f) - 16.0f,
                 viewportMin.y + 12.0f });
             ImGui::PushID("ViewportOrientation");
-            if (ImGui::Button("X", { button, button })) m_ViewportController.SnapToAxis(ViewportAxis::Right);
+            if (ImGui::Button("X", { button, button }))
+            {
+                m_ViewportSceneCamera.reset();
+                m_ViewportController.SnapToAxis(ViewportAxis::Right);
+            }
             if (ImGui::IsItemHovered()) ImGui::SetTooltip("Right view");
             ImGui::SameLine(0.0f, spacing);
-            if (ImGui::Button("Y", { button, button })) m_ViewportController.SnapToAxis(ViewportAxis::Top);
+            if (ImGui::Button("Y", { button, button }))
+            {
+                m_ViewportSceneCamera.reset();
+                m_ViewportController.SnapToAxis(ViewportAxis::Top);
+            }
             if (ImGui::IsItemHovered()) ImGui::SetTooltip("Top view");
             ImGui::SameLine(0.0f, spacing);
-            if (ImGui::Button("Z", { button, button })) m_ViewportController.SnapToAxis(ViewportAxis::Front);
+            if (ImGui::Button("Z", { button, button }))
+            {
+                m_ViewportSceneCamera.reset();
+                m_ViewportController.SnapToAxis(ViewportAxis::Front);
+            }
             if (ImGui::IsItemHovered()) ImGui::SetTooltip("Front view");
             ImGui::SameLine(0.0f, spacing);
             if (ImGui::Button("Free", { perspectiveWidth, button }))
             {
                 m_ViewportController.Reset();
+                m_ViewportSceneCamera.reset();
                 m_ViewportRenderLayers = kairo::engine::AllRenderLayers;
             }
             if (ImGui::IsItemHovered()) ImGui::SetTooltip("Free perspective view (Home)");
