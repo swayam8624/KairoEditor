@@ -24,6 +24,7 @@ import Kairo.AI;
 import Kairo.Editor.Theme;
 import Kairo.Editor.ImGuiRuntime;
 import Kairo.Editor.ImGuiShell;
+import Kairo.Editor.RuntimePreviewProcess;
 import Kairo.Editor.SceneRenderBridge;
 import Kairo.Editor.AnimationPreview;
 import Kairo.EngineCore;
@@ -288,6 +289,41 @@ namespace
         for (std::size_t index = 0u; index < capture.RGBA.size(); index += 4u)
             output.write(reinterpret_cast<const char*>(capture.RGBA.data() + index), 3);
         if (!output) throw std::runtime_error("Failed while writing viewport screenshot: " + path.string());
+    }
+}
+
+namespace
+{
+    [[nodiscard]] std::filesystem::path ResolveEditorRuntimeExecutable(
+        const kairo::editor::ProjectSession& project)
+    {
+        if (project.Descriptor().RuntimeExecutable.has_value())
+        {
+            const auto executable =
+                project.ProjectRoot() / *project.Descriptor().RuntimeExecutable;
+            std::error_code error;
+            const auto resolved = std::filesystem::weakly_canonical(executable, error);
+            if (error || !std::filesystem::is_regular_file(resolved, error) || error)
+                throw std::runtime_error(
+                    "Project runtime executable is missing. Build the project's Development target first: " +
+                    executable.string());
+            return resolved;
+        }
+
+#if defined(KAIRO_EDITOR_PLAYER_PATH)
+        const std::filesystem::path player = KAIRO_EDITOR_PLAYER_PATH;
+        std::error_code error;
+        const auto resolved = std::filesystem::weakly_canonical(player, error);
+        if (error || !std::filesystem::is_regular_file(resolved, error) || error)
+            throw std::runtime_error(
+                "KairoEditor cannot locate the generic KairoPlayer executable: " +
+                player.string());
+        return resolved;
+#else
+        throw std::runtime_error(
+            "This standalone KairoEditor build has no generic KairoPlayer path and "
+            "the project does not declare runtime-executable.");
+#endif
     }
 }
 
@@ -572,10 +608,27 @@ int main(int argc, char** argv)
         std::shared_ptr<kairo::editor::OfflineRenderService> offlineRender;
 #endif
         auto& nativeGameplayRegistry = kairo::editor::EditorNativeGameplayRegistry();
+        kairo::editor::RuntimePreviewProcess runtimePreview;
         kairo::editor::EditorShell shell(state, project, layoutPlan.ShouldRebuild(),
             std::move(keymap), keymapSettings, navigationSettings, navigationSettingsPath,
             std::move(ai.Provider), std::move(ai.Model), std::move(offlineRender),
             &nativeGameplayRegistry, &meshImports);
+        shell.SetRuntimePreviewCallbacks(
+            [&project, &runtimePreview]
+            {
+                runtimePreview.Start(
+                    ResolveEditorRuntimeExecutable(project),
+                    project.ProjectFile(),
+                    project.ProjectRoot());
+            },
+            [&runtimePreview]
+            {
+                runtimePreview.Stop();
+            },
+            [&runtimePreview]
+            {
+                return runtimePreview.Running();
+            });
         if (recovered.has_value()) shell.RestoreRecoveryDrafts(*recovered);
         if (options.ViewportShading.has_value()) shell.SetViewportShading(*options.ViewportShading);
         if (options.AuthoringSurface.has_value()) state.SetAuthoringSurface(*options.AuthoringSurface);
