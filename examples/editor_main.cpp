@@ -9,6 +9,7 @@
 #include <fstream>
 #include <iostream>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -19,6 +20,7 @@
 #if defined(_WIN32)
 #include <process.h>
 #else
+#include <fcntl.h>
 #include <spawn.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -307,6 +309,38 @@ namespace
         return true;
     }
 
+    std::mutex g_RuntimeStatusMutex;
+    bool g_RuntimeProcessActive = false;
+    std::optional<std::string> g_RuntimeFailure;
+
+    [[nodiscard]] bool RuntimeProcessActive()
+    {
+        std::scoped_lock lock(g_RuntimeStatusMutex);
+        return g_RuntimeProcessActive;
+    }
+
+    void RecordRuntimeStarted()
+    {
+        std::scoped_lock lock(g_RuntimeStatusMutex);
+        if (g_RuntimeProcessActive)
+            throw std::logic_error("A Kairo project runtime is already running.");
+        g_RuntimeProcessActive = true;
+        g_RuntimeFailure.reset();
+    }
+
+    void RecordRuntimeFinished(std::optional<std::string> failure)
+    {
+        std::scoped_lock lock(g_RuntimeStatusMutex);
+        g_RuntimeProcessActive = false;
+        if (failure.has_value()) g_RuntimeFailure = std::move(failure);
+    }
+
+    [[nodiscard]] std::optional<std::string> TakeRuntimeFailure()
+    {
+        std::scoped_lock lock(g_RuntimeStatusMutex);
+        return std::exchange(g_RuntimeFailure, std::nullopt);
+    }
+
     [[nodiscard]] std::filesystem::path ResolveRuntimeExecutable(
         const kairo::editor::ProjectSession& project,
         const std::filesystem::path& editorExecutable)
@@ -360,6 +394,9 @@ namespace
     void LaunchProjectRuntime(const kairo::editor::ProjectSession& project,
         const std::filesystem::path& editorExecutable)
     {
+        if (RuntimeProcessActive())
+            throw std::logic_error("The project runtime is already running.");
+
         const auto executable = ResolveRuntimeExecutable(project, editorExecutable);
         const auto descriptor = project.ProjectFile();
         std::string executableText = executable.string();
@@ -371,11 +408,52 @@ namespace
         if (child == -1)
             throw std::runtime_error(
                 "Cannot launch project runtime: " + executableText);
-        std::thread([child]
+        RecordRuntimeStarted();
+        std::thread([child, executableText]
         {
-            (void)_cwait(nullptr, child, _WAIT_CHILD);
+            int statusCode = 0;
+            if (_cwait(&statusCode, child, _WAIT_CHILD) == -1)
+            {
+                RecordRuntimeFinished(
+                    "Kairo runtime process wait failed for " + executableText + ".");
+                return;
+            }
+            if (statusCode != 0)
+            {
+                RecordRuntimeFinished(
+                    "Kairo runtime exited with status " + std::to_string(statusCode) +
+                    ": " + executableText);
+                return;
+            }
+            RecordRuntimeFinished(std::nullopt);
         }).detach();
 #else
+        const auto runtimeLog = project.ProjectRoot() / ".kairo" / "runtime.log";
+        std::filesystem::create_directories(runtimeLog.parent_path());
+        const int logDescriptor = ::open(runtimeLog.c_str(),
+            O_CREAT | O_WRONLY | O_TRUNC, 0644);
+        if (logDescriptor < 0)
+            throw std::system_error(errno, std::generic_category(),
+                "Cannot create Kairo runtime log " + runtimeLog.string());
+
+        posix_spawn_file_actions_t actions{};
+        int actionStatus = posix_spawn_file_actions_init(&actions);
+        if (actionStatus == 0)
+            actionStatus = posix_spawn_file_actions_adddup2(
+                &actions, logDescriptor, STDOUT_FILENO);
+        if (actionStatus == 0)
+            actionStatus = posix_spawn_file_actions_adddup2(
+                &actions, logDescriptor, STDERR_FILENO);
+        if (actionStatus == 0)
+            actionStatus = posix_spawn_file_actions_addclose(&actions, logDescriptor);
+        if (actionStatus != 0)
+        {
+            posix_spawn_file_actions_destroy(&actions);
+            ::close(logDescriptor);
+            throw std::system_error(actionStatus, std::generic_category(),
+                "Cannot configure Kairo runtime output capture");
+        }
+
         pid_t child = 0;
         char* childArguments[] = {
             executableText.data(),
@@ -383,14 +461,45 @@ namespace
             nullptr
         };
         const int status = posix_spawn(
-            &child, executableText.c_str(), nullptr, nullptr, childArguments, environ);
+            &child, executableText.c_str(), &actions, nullptr, childArguments, environ);
+        posix_spawn_file_actions_destroy(&actions);
+        ::close(logDescriptor);
         if (status != 0)
             throw std::system_error(status, std::generic_category(),
                 "Cannot launch project runtime " + executableText);
-        std::thread([child]
+
+        RecordRuntimeStarted();
+        std::thread([child, executableText, runtimeLog]
         {
             int statusCode = 0;
-            while (waitpid(child, &statusCode, 0) < 0 && errno == EINTR) {}
+            pid_t waited = 0;
+            do { waited = waitpid(child, &statusCode, 0); }
+            while (waited < 0 && errno == EINTR);
+
+            if (waited < 0)
+            {
+                RecordRuntimeFinished(
+                    "Kairo runtime process wait failed for " + executableText +
+                    ". Log: " + runtimeLog.string());
+                return;
+            }
+            if (WIFEXITED(statusCode) && WEXITSTATUS(statusCode) == 0)
+            {
+                RecordRuntimeFinished(std::nullopt);
+                return;
+            }
+
+            std::string reason;
+            if (WIFEXITED(statusCode))
+                reason = "exit status " + std::to_string(WEXITSTATUS(statusCode));
+            else if (WIFSIGNALED(statusCode))
+                reason = "signal " + std::to_string(WTERMSIG(statusCode));
+            else
+                reason = "an abnormal process status";
+
+            RecordRuntimeFinished(
+                "Kairo runtime exited with " + reason + ": " + executableText +
+                ". Log: " + runtimeLog.string());
         }).detach();
 #endif
     }
@@ -700,6 +809,8 @@ int main(int argc, char** argv)
             shell.SetViewportTexture(imgui.ViewportTexture());
             shell.SetRendererProfile(renderer.LastFrameProfile());
             shell.Draw();
+            if (auto runtimeFailure = TakeRuntimeFailure(); runtimeFailure.has_value())
+                shell.ReportHostError(std::move(*runtimeFailure));
             if (shell.TakeRuntimeLaunchRequest())
             {
                 try
