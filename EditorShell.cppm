@@ -1354,8 +1354,9 @@ export namespace kairo::editor
                 ImGuiWindowFlags_NoScrollWithMouse))
             {
                 m_ViewportFocused = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);
+                if (m_ViewportFocused) m_ViewportKeyboardActive = true;
                 const auto camera = m_ViewportController.Pose();
-                ImGui::TextDisabled("Perspective");
+                ImGui::TextDisabled("Free 3D");
                 ImGui::SameLine();
                 if (ImGui::BeginCombo("##ViewportShading", kairo::renderer::Name(m_ViewportShading).data(),
                     ImGuiComboFlags_WidthFitPreview))
@@ -1460,7 +1461,7 @@ export namespace kairo::editor
                     m_ActiveTool == EditorAction::TranslateTool ? "MOVE" :
                     m_ActiveTool == EditorAction::RotateTool ? "ROTATE" : "SCALE");
                 ImGui::GetWindowDrawList()->AddText({ overlay.x, overlay.y + 18.0f }, IM_COL32(135, 165, 184, 190),
-                    "Click viewport | MMB/Option+LMB orbit | Shift+MMB pan | wheel dolly | RMB+WASD / Shift+WASD fly | arrows move");
+                    "MMB/Option+LMB orbit | Shift+MMB pan | wheel dolly | RMB+WASD fly | arrows move | Home free view | C camera");
                 const auto selected = m_State.SelectedEntity();
                 if (selected.has_value())
                 {
@@ -1690,15 +1691,16 @@ export namespace kairo::editor
             const bool optionLeft = io.KeyAlt && ImGui::IsMouseDown(ImGuiMouseButton_Left);
             const bool rightMouse = ImGui::IsMouseDown(ImGuiMouseButton_Right);
             const bool middleMouse = ImGui::IsMouseDown(ImGuiMouseButton_Middle);
-            const bool arrowNavigation = keyboardActive && !io.WantTextInput &&
+            const bool viewportKeyboard = keyboardActive && !io.WantTextInput;
+            const bool arrowNavigation = viewportKeyboard &&
                 (ImGui::IsKeyDown(ImGuiKey_UpArrow) || ImGui::IsKeyDown(ImGuiKey_DownArrow) ||
                  ImGui::IsKeyDown(ImGuiKey_LeftArrow) || ImGui::IsKeyDown(ImGuiKey_RightArrow));
-            const bool shiftedKeyboardFly = keyboardActive && !io.WantTextInput && io.KeyShift &&
+            const bool shiftedKeyboardFly = viewportKeyboard && io.KeyShift &&
                 (ImGui::IsKeyDown(ImGuiKey_W) || ImGui::IsKeyDown(ImGuiKey_A) ||
                  ImGui::IsKeyDown(ImGuiKey_S) || ImGui::IsKeyDown(ImGuiKey_D) ||
                  ImGui::IsKeyDown(ImGuiKey_Q) || ImGui::IsKeyDown(ImGuiKey_E));
-            const bool requested = optionLeft || rightMouse || middleMouse ||
-                arrowNavigation || shiftedKeyboardFly;
+            const bool requested = optionLeft || (hovered && rightMouse) ||
+                (hovered && middleMouse) || arrowNavigation || shiftedKeyboardFly;
             if (!requested)
             {
                 m_ViewportNavigationActive = false;
@@ -1728,6 +1730,20 @@ export namespace kairo::editor
                 input.Pan = true;
                 input.MouseDeltaX = io.MouseWheelH * 24.0f;
                 input.MouseDeltaY = io.MouseWheel * 24.0f;
+            }
+            if (viewportKeyboard && ImGui::IsKeyPressed(ImGuiKey_Home, false))
+            {
+                m_ViewportController.Reset();
+                m_ViewportRenderLayers = kairo::engine::AllRenderLayers;
+                m_ViewportNavigationActive = false;
+                return;
+            }
+            if (viewportKeyboard && ImGui::IsKeyPressed(ImGuiKey_C, false) &&
+                !io.KeyCtrl && !io.KeySuper && !io.KeyAlt)
+            {
+                ViewSceneCamera();
+                m_ViewportNavigationActive = false;
+                return;
             }
             if (input.Fly)
             {
@@ -1964,7 +1980,7 @@ export namespace kairo::editor
         {
             constexpr float button = 26.0f;
             constexpr float spacing = 2.0f;
-            constexpr float perspectiveWidth = 52.0f;
+            constexpr float perspectiveWidth = 48.0f;
             constexpr float cameraWidth = 58.0f;
             ImGui::SetCursorScreenPos({ viewportMin.x + viewportSize.x -
                 (button * 3.0f + perspectiveWidth + cameraWidth + spacing * 4.0f) - 16.0f,
@@ -1979,11 +1995,15 @@ export namespace kairo::editor
             if (ImGui::Button("Z", { button, button })) m_ViewportController.SnapToAxis(ViewportAxis::Front);
             if (ImGui::IsItemHovered()) ImGui::SetTooltip("Front view");
             ImGui::SameLine(0.0f, spacing);
-            if (ImGui::Button("Persp", { perspectiveWidth, button })) m_ViewportController.Reset();
-            if (ImGui::IsItemHovered()) ImGui::SetTooltip("Return to free perspective view");
+            if (ImGui::Button("Free", { perspectiveWidth, button }))
+            {
+                m_ViewportController.Reset();
+                m_ViewportRenderLayers = kairo::engine::AllRenderLayers;
+            }
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip("Free perspective view (Home)");
             ImGui::SameLine(0.0f, spacing);
             if (ImGui::Button("Camera", { cameraWidth, button })) ViewSceneCamera();
-            if (ImGui::IsItemHovered()) ImGui::SetTooltip("Look through the primary scene camera");
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip("Look through the primary scene camera (C)");
             ImGui::PopID();
         }
 
