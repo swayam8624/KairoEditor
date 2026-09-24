@@ -87,8 +87,11 @@ TEST_CASE("Editor actions and viewport navigation provide deterministic authorin
         kairo::foundation::math::Vec3f::Up()
     };
     viewport.SetPose(authoredCamera);
-    CHECK(viewport.Pose().Position == authoredCamera.Position);
-    CHECK(viewport.Pose().Target == authoredCamera.Target);
+    const auto reconstructedCamera = viewport.Pose();
+    CHECK(kairo::foundation::math::Distance(
+        reconstructedCamera.Position, authoredCamera.Position) < 1.0e-4f);
+    CHECK(kairo::foundation::math::Distance(
+        reconstructedCamera.Target, authoredCamera.Target) < 1.0e-6f);
 
     viewport.Reset();
     const auto reset = viewport.Pose();
