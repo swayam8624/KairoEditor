@@ -1160,7 +1160,7 @@ TEST_CASE("Project sessions create save and reopen complete projects", "[KairoEd
         "builtin/default-material", "kairo.builtin", 1u, {} });
     auto& scene = session.EditScene();
     const auto cube = scene.CreateEntityWithID({ 27u }, "Saved Cube");
-    scene.SetMeshRenderer(cube, { { mesh }, { material }, true });
+    scene.SetMeshRenderer(cube, { { mesh }, { material }, true, {} });
     const auto document = session.CreateDocument(DocumentKind::Logic,
         "Player Logic", "Logic/Player.kdoc");
     AuthoringDocument& logic = session.EditDocument(document);
@@ -1516,7 +1516,7 @@ TEST_CASE("Scene commands restore stable entities and merge Inspector edits", "[
     const auto logic = project.CreateDocument(
         DocumentKind::Logic, "Command Logic", "Logic/Command.kdoc");
     auto& authoredScene = project.EditScene();
-    kairo::engine::MeshRendererComponent renderer{ { mesh }, { material }, false };
+    kairo::engine::MeshRendererComponent renderer{ { mesh }, { material }, false, {} };
     renderer.AdditionalMaterialSlots = { { materialTwo } };
     renderer.CastShadows = false;
     renderer.RenderLayers = 0x21u;
@@ -1616,7 +1616,7 @@ TEST_CASE("Duplicate entity command preserves complete subtrees across undo and 
     const auto mesh = kairo::assets::AssetID::Parse("00000000-0000-4000-8000-000000000451");
     const auto material = kairo::assets::AssetID::Parse("00000000-0000-4000-8000-000000000452");
     const auto materialTwo = kairo::assets::AssetID::Parse("00000000-0000-4000-8000-000000000453");
-    kairo::engine::MeshRendererComponent sourceRenderer{ { mesh }, { material }, false };
+    kairo::engine::MeshRendererComponent sourceRenderer{ { mesh }, { material }, false, {} };
     sourceRenderer.AdditionalMaterialSlots = { { materialTwo } };
     sourceRenderer.ReceiveShadows = false;
     sourceRenderer.RenderLayers = 0x45u;
