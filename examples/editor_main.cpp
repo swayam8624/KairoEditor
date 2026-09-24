@@ -296,65 +296,32 @@ namespace
         if (!output) throw std::runtime_error("Failed while writing viewport screenshot: " + path.string());
     }
 
-    [[nodiscard]] bool IsWithinRoot(const std::filesystem::path& root,
-        const std::filesystem::path& candidate) noexcept
-    {
-        auto rootIt = root.begin();
-        auto candidateIt = candidate.begin();
-        for (; rootIt != root.end(); ++rootIt, ++candidateIt)
-            if (candidateIt == candidate.end() || *candidateIt != *rootIt)
-                return false;
-        return true;
-    }
-
     [[nodiscard]] std::filesystem::path ResolveRuntimeExecutable(
         const kairo::editor::ProjectSession& project,
         const std::filesystem::path& editorExecutable)
     {
-        std::error_code error;
-        if (project.Descriptor().PlayExecutable.has_value())
-        {
-            const auto root = std::filesystem::weakly_canonical(project.ProjectRoot(), error);
-            if (error) throw std::runtime_error(
-                "Cannot resolve project root for Play: " + error.message());
-            const auto candidate = std::filesystem::weakly_canonical(
-                root / *project.Descriptor().PlayExecutable, error);
-            if (error || !IsWithinRoot(root, candidate))
-                throw std::runtime_error(
-                    "Project Play executable escapes or cannot be resolved inside the project.");
-            if (!std::filesystem::is_regular_file(candidate, error) || error)
-                throw std::runtime_error(
-                    "Project Play executable is missing. Build the game first: " +
-                    candidate.string());
-            return candidate;
-        }
-
+        std::optional<std::filesystem::path> fallback;
         if (const char* overridePath = std::getenv("KAIRO_PLAYER_EXECUTABLE");
             overridePath != nullptr && *overridePath != '\0')
         {
-            const auto candidate = std::filesystem::weakly_canonical(overridePath, error);
-            if (!error && std::filesystem::is_regular_file(candidate, error) && !error)
-                return candidate;
-            throw std::runtime_error(
-                "KAIRO_PLAYER_EXECUTABLE does not name a runnable file.");
+            fallback = std::filesystem::path(overridePath);
         }
-
-        const auto editor = std::filesystem::weakly_canonical(editorExecutable, error);
-        if (!error)
+        else
         {
-            const auto buildRoot = editor.parent_path().parent_path().parent_path();
+            std::error_code error;
+            const auto editor = std::filesystem::weakly_canonical(editorExecutable, error);
+            if (!error)
+            {
+                const auto buildRoot = editor.parent_path().parent_path().parent_path();
 #if defined(_WIN32)
-            const auto candidate = buildRoot / "Runtime" / "KairoPlayer" / "KairoPlayer.exe";
+                fallback = buildRoot / "Runtime" / "KairoPlayer" / "KairoPlayer.exe";
 #else
-            const auto candidate = buildRoot / "Runtime" / "KairoPlayer" / "KairoPlayer";
+                fallback = buildRoot / "Runtime" / "KairoPlayer" / "KairoPlayer";
 #endif
-            if (std::filesystem::is_regular_file(candidate, error) && !error)
-                return candidate;
+            }
         }
-
-        throw std::runtime_error(
-            "No project Play executable is configured and KairoPlayer could not be located. "
-            "Set play-executable in the .kproject or KAIRO_PLAYER_EXECUTABLE.");
+        return kairo::editor::ResolveProjectRuntimeExecutable(
+            project.ProjectRoot(), project.Descriptor(), fallback);
     }
 
     void LaunchProjectRuntime(const kairo::editor::ProjectSession& project,
