@@ -1,4 +1,5 @@
 #include <charconv>
+#include <cerrno>
 #include <cmath>
 #include <cstddef>
 #include <cstdlib>
@@ -12,11 +13,16 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <system_error>
+#include <thread>
 #include <unordered_map>
 #if defined(_WIN32)
 #include <process.h>
 #else
+#include <spawn.h>
+#include <sys/wait.h>
 #include <unistd.h>
+extern char** environ;
 #endif
 
 import Kairo.Editor;
@@ -288,6 +294,105 @@ namespace
         for (std::size_t index = 0u; index < capture.RGBA.size(); index += 4u)
             output.write(reinterpret_cast<const char*>(capture.RGBA.data() + index), 3);
         if (!output) throw std::runtime_error("Failed while writing viewport screenshot: " + path.string());
+    }
+
+    [[nodiscard]] bool IsWithinRoot(const std::filesystem::path& root,
+        const std::filesystem::path& candidate) noexcept
+    {
+        auto rootIt = root.begin();
+        auto candidateIt = candidate.begin();
+        for (; rootIt != root.end(); ++rootIt, ++candidateIt)
+            if (candidateIt == candidate.end() || *candidateIt != *rootIt)
+                return false;
+        return true;
+    }
+
+    [[nodiscard]] std::filesystem::path ResolveRuntimeExecutable(
+        const kairo::editor::ProjectSession& project,
+        const std::filesystem::path& editorExecutable)
+    {
+        std::error_code error;
+        if (project.Descriptor().PlayExecutable.has_value())
+        {
+            const auto root = std::filesystem::weakly_canonical(project.ProjectRoot(), error);
+            if (error) throw std::runtime_error(
+                "Cannot resolve project root for Play: " + error.message());
+            const auto candidate = std::filesystem::weakly_canonical(
+                root / *project.Descriptor().PlayExecutable, error);
+            if (error || !IsWithinRoot(root, candidate))
+                throw std::runtime_error(
+                    "Project Play executable escapes or cannot be resolved inside the project.");
+            if (!std::filesystem::is_regular_file(candidate, error) || error)
+                throw std::runtime_error(
+                    "Project Play executable is missing. Build the game first: " +
+                    candidate.string());
+            return candidate;
+        }
+
+        if (const char* overridePath = std::getenv("KAIRO_PLAYER_EXECUTABLE");
+            overridePath != nullptr && *overridePath != '\0')
+        {
+            const auto candidate = std::filesystem::weakly_canonical(overridePath, error);
+            if (!error && std::filesystem::is_regular_file(candidate, error) && !error)
+                return candidate;
+            throw std::runtime_error(
+                "KAIRO_PLAYER_EXECUTABLE does not name a runnable file.");
+        }
+
+        const auto editor = std::filesystem::weakly_canonical(editorExecutable, error);
+        if (!error)
+        {
+            const auto buildRoot = editor.parent_path().parent_path().parent_path();
+#if defined(_WIN32)
+            const auto candidate = buildRoot / "Runtime" / "KairoPlayer" / "KairoPlayer.exe";
+#else
+            const auto candidate = buildRoot / "Runtime" / "KairoPlayer" / "KairoPlayer";
+#endif
+            if (std::filesystem::is_regular_file(candidate, error) && !error)
+                return candidate;
+        }
+
+        throw std::runtime_error(
+            "No project Play executable is configured and KairoPlayer could not be located. "
+            "Set play-executable in the .kproject or KAIRO_PLAYER_EXECUTABLE.");
+    }
+
+    void LaunchProjectRuntime(const kairo::editor::ProjectSession& project,
+        const std::filesystem::path& editorExecutable)
+    {
+        const auto executable = ResolveRuntimeExecutable(project, editorExecutable);
+        const auto descriptor = project.ProjectFile();
+        std::string executableText = executable.string();
+        std::string descriptorText = descriptor.string();
+
+#if defined(_WIN32)
+        const intptr_t child = _spawnl(_P_NOWAIT, executableText.c_str(),
+            executableText.c_str(), descriptorText.c_str(), static_cast<char*>(nullptr));
+        if (child == -1)
+            throw std::runtime_error(
+                "Cannot launch project runtime: " + executableText);
+        std::thread([child]
+        {
+            (void)_cwait(nullptr, child, _WAIT_CHILD);
+        }).detach();
+#else
+        pid_t child = 0;
+        char* childArguments[] = {
+            executableText.data(),
+            descriptorText.data(),
+            nullptr
+        };
+        const int status = posix_spawn(
+            &child, executableText.c_str(), nullptr, nullptr, childArguments, environ);
+        if (status != 0)
+            throw std::system_error(status, std::generic_category(),
+                "Cannot launch project runtime " + executableText);
+        std::thread([child]
+        {
+            int statusCode = 0;
+            while (waitpid(child, &statusCode, 0) < 0 && errno == EINTR) {}
+        }).detach();
+#endif
     }
 }
 
@@ -595,6 +700,17 @@ int main(int argc, char** argv)
             shell.SetViewportTexture(imgui.ViewportTexture());
             shell.SetRendererProfile(renderer.LastFrameProfile());
             shell.Draw();
+            if (shell.TakeRuntimeLaunchRequest())
+            {
+                try
+                {
+                    LaunchProjectRuntime(project, std::filesystem::absolute(argv[0]));
+                }
+                catch (const std::exception& error)
+                {
+                    shell.ReportHostError(error.what());
+                }
+            }
             animationPreview.Draw(state.SelectedEntity(), shell.RenderScene(), renderAssets);
             renderer.NativeWindow().SetCursorCaptured(shell.ViewportCursorCaptured());
             imgui.EndFrame();
