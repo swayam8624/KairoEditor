@@ -1,0 +1,33 @@
+schema: kairo.research-track.v1
+track: R5
+title: Reversible AI-native authoring
+state: hypothesis
+problem: AI-assisted editor actions can be fast but unsafe when changes are opaque, difficult to verify or difficult to undo.
+hypothesis: Typed plan-preview-approve-verify-undo transactions can reduce harmful authoring errors while retaining useful completion speed.
+baselines:
+  - direct_ai_action
+  - manual_authoring
+  - ai_with_undo_only
+  - ai_with_preview_only
+workloads:
+  - scene_edit_tasks
+  - material_edit_tasks
+  - asset_import_repair
+  - gameplay_parameter_edits
+metrics:
+  - successful_task_rate
+  - unsafe_change_rate
+  - rollback_success_rate
+  - user_correction_count
+  - completion_time
+  - approval_rejection_rate
+ablations:
+  - no_preview
+  - no_verification
+  - no_typed_plan
+  - no_atomic_undo
+failure_cases:
+  - ambiguous_intent
+  - multi_asset_edits
+  - stale_scene_state
+falsification: Reject if safety/error outcomes do not improve over direct AI action without unacceptable completion-time cost.
