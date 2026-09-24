@@ -54,8 +54,10 @@ Bindings** removes overrides while retaining the selected profile.
 | Orbit | `Option` + left drag, or middle mouse drag |
 | Pan | `Shift+Option` + left drag, or `Shift` + middle mouse drag |
 | Dolly / zoom | `Control+Option` + left drag, or two-finger scroll / wheel |
-| Fly navigation | right drag to look; `W`/`A`/`S`/`D` move and `Q`/`E` descend/ascend |
+| Fly navigation | in Select mode, `W`/`A`/`S`/`D` or arrows move; right drag adds mouse-look and `Q`/`E` descend/ascend |
 | Transform selected entity | choose a transform tool, then left-drag inside the viewport |
+| Return from X/Y/Z or camera view | click **Persp** or choose **View > Free Perspective** |
+| View through scene camera | click **Camera** or choose **View > Primary Scene Camera** |
 
 `R` is the scale-tool binding used by the current Unreal-style toolbar. `E`
 selects rotation. This resolves the Blender `R` versus Unreal `R` conflict
