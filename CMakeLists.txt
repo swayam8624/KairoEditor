@@ -163,7 +163,8 @@ if(KAIRO_EDITOR_BUILD_APP)
         if(CMAKE_OBJCXX_COMPILER_ID STREQUAL "Clang" AND
            CMAKE_OBJCXX_COMPILER_VERSION VERSION_GREATER_EQUAL 23)
             list(APPEND _kairo_editor_metal_compile_options
-                -fno-objc-msgsend-selector-stubs)
+                -fno-objc-msgsend-selector-stubs
+            -fno-objc-msgsend-class-selector-stubs)
         endif()
         set(_kairo_imgui_metal_compile_options
             ${_kairo_editor_metal_compile_options}
