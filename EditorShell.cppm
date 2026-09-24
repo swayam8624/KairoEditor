@@ -1452,7 +1452,9 @@ export namespace kairo::editor
                 }
                 const bool gizmoOwnsPointer = DrawTransformGizmo(viewportMin, viewportSize);
                 DrawOrientationGizmo(viewportMin, viewportSize);
-                HandleViewportNavigation(hovered && !gizmoOwnsPointer, m_ViewportKeyboardActive);
+                HandleViewportNavigation(
+                    hovered && !gizmoOwnsPointer,
+                    (m_ViewportFocused || m_ViewportKeyboardActive) && !gizmoOwnsPointer);
 
                 const ImVec2 overlay = { viewportMin.x + 12.0f, viewportMin.y + 12.0f };
                 ImGui::GetWindowDrawList()->AddText(overlay, IM_COL32(210, 225, 238, 210),
@@ -1460,7 +1462,7 @@ export namespace kairo::editor
                     m_ActiveTool == EditorAction::TranslateTool ? "MOVE" :
                     m_ActiveTool == EditorAction::RotateTool ? "ROTATE" : "SCALE");
                 ImGui::GetWindowDrawList()->AddText({ overlay.x, overlay.y + 18.0f }, IM_COL32(135, 165, 184, 190),
-                    "Click viewport | MMB/Option+LMB orbit | Shift+MMB pan | wheel dolly | RMB+WASD / Shift+WASD fly | arrows move");
+                    "Click viewport | MMB/Option+LMB orbit | Shift+MMB pan | wheel dolly | RMB+WASD fly | arrows move | Free exits X/Y/Z");
                 const auto selected = m_State.SelectedEntity();
                 if (selected.has_value())
                 {
@@ -1979,8 +1981,10 @@ export namespace kairo::editor
             if (ImGui::Button("Z", { button, button })) m_ViewportController.SnapToAxis(ViewportAxis::Front);
             if (ImGui::IsItemHovered()) ImGui::SetTooltip("Front view");
             ImGui::SameLine(0.0f, spacing);
-            if (ImGui::Button("Persp", { perspectiveWidth, button })) m_ViewportController.Reset();
-            if (ImGui::IsItemHovered()) ImGui::SetTooltip("Return to free perspective view");
+            if (ImGui::Button("Free", { perspectiveWidth, button }))
+                m_ViewportController.ReturnToPerspective();
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("Return to free perspective view while preserving focus and zoom");
             ImGui::SameLine(0.0f, spacing);
             if (ImGui::Button("Camera", { cameraWidth, button })) ViewSceneCamera();
             if (ImGui::IsItemHovered()) ImGui::SetTooltip("Look through the primary scene camera");
