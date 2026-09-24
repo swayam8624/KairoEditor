@@ -182,7 +182,9 @@ export namespace kairo::editor
         bool m_GlfwInitialized = false;
         bool m_VulkanInitialized = false;
         bool m_OpenGLInitialized = false;
+#if defined(KAIRO_EDITOR_HAS_METAL_UI)
         bool m_MetalInitialized = false;
+#endif
 #if defined(KAIRO_EDITOR_HAS_D3D12_UI)
         bool m_Direct3D12Initialized = false;
 #endif
