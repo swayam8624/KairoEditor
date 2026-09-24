@@ -1919,7 +1919,7 @@ export namespace kairo::editor
             const auto camera = m_ViewportController.Pose();
             const Mat4f view = LookAt(camera.Position, camera.Target, camera.Up);
             Mat4f projection = Perspective(1.0471975512f,
-                viewportSize.x / std::max(viewportSize.y, 1.0f), 0.1f, 100.0f);
+                viewportSize.x / std::max(viewportSize.y, 1.0f), 0.1f, 10000.0f);
             projection(1u, 1u) *= -1.0f;
             const TransformGizmoOperation operation = m_ActiveTool == EditorAction::TranslateTool
                 ? TransformGizmoOperation::Translate : m_ActiveTool == EditorAction::RotateTool
