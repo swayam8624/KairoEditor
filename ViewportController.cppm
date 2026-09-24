@@ -105,6 +105,16 @@ export namespace kairo::editor
             m_Distance = 5.0f;
         }
 
+        /// Returns from an axis/camera view to a free three-quarter perspective
+        /// without discarding the current focus point or zoom distance. This is
+        /// intentionally different from Reset(), which is a full world-origin
+        /// reset useful for tests and explicit "home" behavior.
+        void ResetOrientation() noexcept
+        {
+            m_Yaw = 0.60f;
+            m_Pitch = 0.31f;
+        }
+
         /// Input: finite point to inspect and a positive preferred distance.
         /// Output: camera target changes while retaining a stable orientation.
         /// Task: implement the F / frame-selection workflow without guessing an
