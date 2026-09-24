@@ -13,6 +13,7 @@ export namespace kairo::editor
     using SceneAnimationPlayback = kairo::runtime::renderbridge::SceneAnimationPlayback;
     using SceneAnimationOverrides = kairo::runtime::renderbridge::SceneAnimationOverrides;
     using kairo::runtime::renderbridge::BuildRenderScene;
+    using kairo::runtime::renderbridge::DecodeEmbeddedGltfTexture;
     using kairo::runtime::renderbridge::ImportRenderGltfScene;
     using kairo::runtime::renderbridge::ImportRenderGltfSceneWithSource;
     using kairo::runtime::renderbridge::ImportRenderMesh;
