@@ -84,6 +84,16 @@ export namespace kairo::editor
                     m_NativeGameplay->Load(m_NativeGameplayPath);
             }
             kairo::engine::RegisterEngineCoreReflection(m_Reflection);
+
+            // Start where the authored game actually is. Large imported worlds
+            // must not open with the editor orbit camera stranded at world origin.
+            if (m_Project.Scene().PrimaryCamera().has_value() ||
+                !m_Project.Scene().CameraEntities().empty())
+                ViewSceneCamera();
+            else if (const auto entities = m_Project.Scene().Entities(); !entities.empty())
+                m_ViewportController.Focus(
+                    m_Project.Scene().WorldTransform(entities.front()).Translation, 8.0f);
+
             m_NextAutosave = std::chrono::steady_clock::now() + AutosaveInterval;
             if (const auto active = m_Project.Documents().ActiveID(); active.has_value())
             {
