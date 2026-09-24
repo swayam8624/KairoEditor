@@ -284,6 +284,47 @@ namespace
         return options;
     }
 
+    [[nodiscard]] kairo::renderer::DebugDrawList BuildEditorDebugDraw(
+        const kairo::editor::ViewportCameraPose& camera,
+        const kairo::renderer::DebugDrawList& physics)
+    {
+        using kairo::foundation::math::Vec3f;
+
+        kairo::renderer::DebugDrawList debug;
+        for (const auto& line : physics.Lines())
+            debug.AddLine(line.A, line.B, line.Color);
+
+        const float distance = std::max((camera.Position - camera.Target).Length(), 0.001f);
+        const float decade = std::pow(10.0f, std::floor(std::log10(distance)));
+        const float step = std::clamp(decade * 0.25f, 0.25f, 100.0f);
+        constexpr int halfLines = 20;
+
+        const float centerX = std::round(camera.Target.x / step) * step;
+        const float centerZ = std::round(camera.Target.z / step) * step;
+        const float extent = step * static_cast<float>(halfLines);
+        const kairo::renderer::DebugColor minor{ 0.34f, 0.39f, 0.44f, 0.42f };
+        const kairo::renderer::DebugColor major{ 0.48f, 0.54f, 0.60f, 0.62f };
+
+        for (int index = -halfLines; index <= halfLines; ++index)
+        {
+            const float offset = static_cast<float>(index) * step;
+            const bool majorLine = (index % 5) == 0;
+            const auto color = majorLine ? major : minor;
+            debug.AddLine(
+                { centerX - extent, 0.0f, centerZ + offset },
+                { centerX + extent, 0.0f, centerZ + offset },
+                color);
+            debug.AddLine(
+                { centerX + offset, 0.0f, centerZ - extent },
+                { centerX + offset, 0.0f, centerZ + extent },
+                color);
+        }
+
+        const float axisScale = std::max(step * 4.0f, 2.0f);
+        debug.AddAxes({ 0.0f, 0.0f, 0.0f }, axisScale);
+        return debug;
+    }
+
     void WriteCapture(const std::filesystem::path& path,
         const kairo::renderer::ViewportCapture& capture)
     {
@@ -847,7 +888,9 @@ int main(int argc, char** argv)
             renderer.SubmitRenderScene(kairo::editor::BuildRenderScene(
                 shell.RenderScene(), renderAssets, animationPreview.Overrides(),
                 shell.ViewportRenderLayers()));
-            renderer.SubmitDebugDraw(shell.PhysicsDebugDraw());
+            const auto editorDebug = BuildEditorDebugDraw(
+                camera, shell.PhysicsDebugDraw());
+            renderer.SubmitDebugDraw(editorDebug);
             renderer.SetViewportShadingMode(shell.ViewportShading());
             if (options.Screenshot.has_value() && renderedFrames == 1u)
                 renderer.RequestViewportCapture();
