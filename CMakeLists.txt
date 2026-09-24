@@ -12,6 +12,8 @@ option(KAIRO_EDITOR_BUILD_APP "Build the Vulkan Dear ImGui editor application" $
 option(KAIRO_EDITOR_BUILD_AI_CLOUD_PROVIDER "Build the optional cloud provider for the editor host" OFF)
 set(KAIRO_EDITOR_UI_FONT_PATH "" CACHE FILEPATH "Optional UI TTF font for the native editor")
 set(KAIRO_EDITOR_MONO_FONT_PATH "" CACHE FILEPATH "Optional monospace TTF font for the native editor")
+set(KAIRO_EDITOR_SHARED_CONTENT_PROJECT "" CACHE FILEPATH
+    "Optional shared-content Kairo project used by integration smoke tests")
 set(KAIRO_EDITOR_NATIVE_GAMEPLAY_TARGETS "" CACHE STRING
     "Semicolon-separated CMake targets that register project native gameplay types with KairoEditor")
 
@@ -297,22 +299,27 @@ if(KAIRO_EDITOR_BUILD_TESTS)
             --frames 3 --no-layout-persistence --viewport-mode lighting
             --screenshot ${CMAKE_CURRENT_BINARY_DIR}/artifacts/editor-lighting.ppm)
         set_tests_properties(KairoEditorViewportLightingScreenshot PROPERTIES TIMEOUT 20 SKIP_RETURN_CODE 77)
-        if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../Samples/SharedContentShowcase/Project.kproject")
+        set(_kairo_editor_shared_content_project "${KAIRO_EDITOR_SHARED_CONTENT_PROJECT}")
+        if(NOT _kairo_editor_shared_content_project)
+            set(_kairo_editor_shared_content_project
+                "${CMAKE_CURRENT_SOURCE_DIR}/../Samples/SharedContentShowcase/Project.kproject")
+        endif()
+        if(EXISTS "${_kairo_editor_shared_content_project}")
             add_test(NAME KairoEditorSharedContentSmoke COMMAND KairoEditorApp
-                --project ${CMAKE_CURRENT_SOURCE_DIR}/../Samples/SharedContentShowcase/Project.kproject
+                --project "${_kairo_editor_shared_content_project}"
                 --frames 3 --no-layout-persistence
                 --screenshot ${CMAKE_CURRENT_BINARY_DIR}/artifacts/shared-content-editor.ppm)
             set_tests_properties(KairoEditorSharedContentSmoke PROPERTIES TIMEOUT 20 SKIP_RETURN_CODE 77)
             if(NOT WIN32)
                 add_test(NAME KairoEditorOpenGLSharedContentSmoke COMMAND KairoEditorApp
-                    --project ${CMAKE_CURRENT_SOURCE_DIR}/../Samples/SharedContentShowcase/Project.kproject
+                    --project "${_kairo_editor_shared_content_project}"
                     --renderer opengl --frames 3 --no-layout-persistence
                     --screenshot ${CMAKE_CURRENT_BINARY_DIR}/artifacts/shared-content-opengl.ppm)
                 set_tests_properties(KairoEditorOpenGLSharedContentSmoke PROPERTIES
                     TIMEOUT 20 SKIP_RETURN_CODE 77)
                 if(APPLE)
                     add_test(NAME KairoEditorMetalSharedContentSmoke COMMAND KairoEditorApp
-                        --project ${CMAKE_CURRENT_SOURCE_DIR}/../Samples/SharedContentShowcase/Project.kproject
+                        --project "${_kairo_editor_shared_content_project}"
                         --renderer metal --frames 3 --no-layout-persistence
                         --screenshot ${CMAKE_CURRENT_BINARY_DIR}/artifacts/shared-content-metal.ppm)
                     set_tests_properties(KairoEditorMetalSharedContentSmoke PROPERTIES
@@ -321,7 +328,7 @@ if(KAIRO_EDITOR_BUILD_TESTS)
             endif()
             if(WIN32)
                 add_test(NAME KairoEditorDirect3D12SharedContentSmoke COMMAND KairoEditorApp
-                    --project ${CMAKE_CURRENT_SOURCE_DIR}/../Samples/SharedContentShowcase/Project.kproject
+                    --project "${_kairo_editor_shared_content_project}"
                     --renderer d3d12 --frames 3 --no-layout-persistence
                     --screenshot ${CMAKE_CURRENT_BINARY_DIR}/artifacts/shared-content-d3d12.ppm)
                 set_tests_properties(KairoEditorDirect3D12SharedContentSmoke PROPERTIES
