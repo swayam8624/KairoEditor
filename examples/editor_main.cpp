@@ -593,6 +593,7 @@ int main(int argc, char** argv)
                 shell.ApplyViewportPick(*picked);
             imgui.BeginFrame();
             shell.SetViewportTexture(imgui.ViewportTexture());
+            shell.SetRendererProfile(renderer.LastFrameProfile());
             shell.Draw();
             animationPreview.Draw(state.SelectedEntity(), shell.RenderScene(), renderAssets);
             renderer.NativeWindow().SetCursorCaptured(shell.ViewportCursorCaptured());
