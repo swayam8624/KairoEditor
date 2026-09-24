@@ -26,6 +26,7 @@ extern char** environ;
 #endif
 
 import Kairo.Editor;
+import Kairo.Assets;
 import Kairo.AI;
 import Kairo.Editor.Theme;
 import Kairo.Editor.ImGuiRuntime;
