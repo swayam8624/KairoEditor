@@ -202,6 +202,7 @@ if(KAIRO_EDITOR_BUILD_APP)
         ImGuiReflectionInspector.cppm AnimationPreview.cppm EditorShell.cppm)
     target_link_libraries(KairoEditorImGui PUBLIC
         KairoEditor KairoRenderer KairoRealtimeRenderBridge KairoDearImGui Kairo::ImGuizmo)
+    set_property(TARGET KairoEditorImGui PROPERTY COMPILE_WARNING_AS_ERROR ON)
     target_compile_definitions(KairoEditorImGui PRIVATE
         KAIRO_EDITOR_HAS_OPENGL_UI=1)
     if(APPLE)
@@ -218,6 +219,7 @@ if(KAIRO_EDITOR_BUILD_APP)
         SceneRenderBridge.cppm)
     target_link_libraries(KairoEditorRendererBridge PUBLIC
         KairoEditor KairoRenderer KairoRealtimeRenderBridge)
+    set_property(TARGET KairoEditorRendererBridge PROPERTY COMPILE_WARNING_AS_ERROR ON)
 
     add_library(KairoEditorPhysics)
     target_sources(KairoEditorPhysics PUBLIC FILE_SET CXX_MODULES BASE_DIRS ${CMAKE_CURRENT_SOURCE_DIR} FILES
@@ -226,6 +228,7 @@ if(KAIRO_EDITOR_BUILD_APP)
         message(FATAL_ERROR "KairoEditor physics preview requires KairoRendererPhysicsDebug. Enable KAIRO_RENDERER_BUILD_PHYSICS_BRIDGE.")
     endif()
     target_link_libraries(KairoEditorPhysics PUBLIC KairoEditor KairoRendererPhysicsDebug)
+    set_property(TARGET KairoEditorPhysics PROPERTY COMPILE_WARNING_AS_ERROR ON)
     target_link_libraries(KairoEditorImGui PUBLIC KairoEditorPhysics)
     if(KAIRO_EDITOR_UI_FONT_PATH)
         target_compile_definitions(KairoEditorImGui PRIVATE
@@ -238,6 +241,7 @@ if(KAIRO_EDITOR_BUILD_APP)
 
     add_executable(KairoEditorApp examples/editor_main.cpp)
     target_link_libraries(KairoEditorApp PRIVATE KairoEditorImGui KairoEditorRendererBridge)
+    set_property(TARGET KairoEditorApp PROPERTY COMPILE_WARNING_AS_ERROR ON)
     foreach(native_target IN LISTS KAIRO_EDITOR_NATIVE_GAMEPLAY_TARGETS)
         if(NOT TARGET ${native_target})
             message(FATAL_ERROR
