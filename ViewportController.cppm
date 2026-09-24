@@ -105,6 +105,16 @@ export namespace kairo::editor
             m_Distance = 5.0f;
         }
 
+        /// Return from an axis-aligned inspection view to the normal free
+        /// perspective orientation without abandoning the current scene target.
+        /// Large imported worlds may live hundreds of units from world origin,
+        /// so this deliberately preserves target and distance.
+        void FreeView() noexcept
+        {
+            m_Yaw = 0.60f;
+            m_Pitch = 0.31f;
+        }
+
         /// Input: finite point to inspect and a positive preferred distance.
         /// Output: camera target changes while retaining a stable orientation.
         /// Task: implement the F / frame-selection workflow without guessing an

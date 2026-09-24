@@ -1388,6 +1388,12 @@ export namespace kairo::editor
                 ImGui::SameLine();
                 if (ActionButton("+", UIButtonTone::Primary, true, 25.0f)) OpenAddPrimitivePopup();
                 if (ImGui::IsItemHovered()) ImGui::SetTooltip("Add primitive (Shift+A)");
+                ImGui::SameLine();
+                if (ToolbarButton("Free", false)) m_ViewportController.FreeView();
+                if (ImGui::IsItemHovered()) ImGui::SetTooltip("Return to free perspective navigation");
+                ImGui::SameLine();
+                if (ToolbarButton("Game Camera", false)) ViewSceneCamera();
+                if (ImGui::IsItemHovered()) ImGui::SetTooltip("Look through the primary authored camera");
                 DrawPrimitivePopup();
 
                 const ImVec2 viewportMin = ImGui::GetCursorScreenPos();
@@ -1407,6 +1413,11 @@ export namespace kairo::editor
                         IM_COL32(230, 125, 125, 255), "Viewport texture unavailable");
                 }
                 const bool hovered = ImGui::IsItemHovered();
+                if (hovered) m_ViewportFocused = true;
+                if (hovered && (ImGui::IsMouseClicked(ImGuiMouseButton_Left) ||
+                    ImGui::IsMouseClicked(ImGuiMouseButton_Right) ||
+                    ImGui::IsMouseClicked(ImGuiMouseButton_Middle)))
+                    ImGui::SetWindowFocus();
                 if (ImGui::BeginDragDropTarget())
                 {
                     if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("KAIRO_ASSET_ID"))
@@ -1447,7 +1458,7 @@ export namespace kairo::editor
                     m_ActiveTool == EditorAction::TranslateTool ? "MOVE" :
                     m_ActiveTool == EditorAction::RotateTool ? "ROTATE" : "SCALE");
                 ImGui::GetWindowDrawList()->AddText({ overlay.x, overlay.y + 18.0f }, IM_COL32(135, 165, 184, 190),
-                    "MMB/Option+LMB orbit  Shift+MMB pan  wheel dolly  RMB+WASD or Shift+WASD fly  arrows move");
+                    "Orbit: MMB/Option+LMB  Pan: Shift+MMB  Fly: RMB+WASD or Shift+WASD  Arrows: move  Wheel: zoom");
                 const auto selected = m_State.SelectedEntity();
                 if (selected.has_value())
                 {
@@ -1674,13 +1685,17 @@ export namespace kairo::editor
         void HandleViewportNavigation(bool hovered)
         {
             const ImGuiIO& io = ImGui::GetIO();
-            const bool optionLeft = io.KeyAlt && ImGui::IsMouseDown(ImGuiMouseButton_Left);
-            const bool rightMouse = ImGui::IsMouseDown(ImGuiMouseButton_Right);
-            const bool middleMouse = ImGui::IsMouseDown(ImGuiMouseButton_Middle);
-            const bool arrowNavigation = m_ViewportFocused && !io.WantTextInput &&
+            const bool viewportActive = hovered || m_ViewportFocused;
+            const bool optionLeft = viewportActive && io.KeyAlt &&
+                ImGui::IsMouseDown(ImGuiMouseButton_Left);
+            const bool rightMouse = viewportActive &&
+                ImGui::IsMouseDown(ImGuiMouseButton_Right);
+            const bool middleMouse = viewportActive &&
+                ImGui::IsMouseDown(ImGuiMouseButton_Middle);
+            const bool arrowNavigation = viewportActive && !io.WantTextInput &&
                 (ImGui::IsKeyDown(ImGuiKey_UpArrow) || ImGui::IsKeyDown(ImGuiKey_DownArrow) ||
                  ImGui::IsKeyDown(ImGuiKey_LeftArrow) || ImGui::IsKeyDown(ImGuiKey_RightArrow));
-            const bool shiftedKeyboardFly = m_ViewportFocused && !io.WantTextInput && io.KeyShift &&
+            const bool shiftedKeyboardFly = viewportActive && !io.WantTextInput && io.KeyShift &&
                 (ImGui::IsKeyDown(ImGuiKey_W) || ImGui::IsKeyDown(ImGuiKey_A) ||
                  ImGui::IsKeyDown(ImGuiKey_S) || ImGui::IsKeyDown(ImGuiKey_D) ||
                  ImGui::IsKeyDown(ImGuiKey_Q) || ImGui::IsKeyDown(ImGuiKey_E));
@@ -1904,7 +1919,7 @@ export namespace kairo::editor
             const auto camera = m_ViewportController.Pose();
             const Mat4f view = LookAt(camera.Position, camera.Target, camera.Up);
             Mat4f projection = Perspective(1.0471975512f,
-                viewportSize.x / std::max(viewportSize.y, 1.0f), 0.1f, 100.0f);
+                viewportSize.x / std::max(viewportSize.y, 1.0f), 0.1f, 10000.0f);
             projection(1u, 1u) *= -1.0f;
             const TransformGizmoOperation operation = m_ActiveTool == EditorAction::TranslateTool
                 ? TransformGizmoOperation::Translate : m_ActiveTool == EditorAction::RotateTool
@@ -1949,24 +1964,26 @@ export namespace kairo::editor
 
         void DrawOrientationGizmo(ImVec2 viewportMin, ImVec2 viewportSize)
         {
-            constexpr float button = 26.0f;
+            constexpr float axisButton = 26.0f;
+            constexpr float modeButton = 54.0f;
             constexpr float spacing = 2.0f;
+            const float totalWidth = axisButton * 3.0f + modeButton * 2.0f + spacing * 4.0f;
             ImGui::SetCursorScreenPos({ viewportMin.x + viewportSize.x -
-                button * 5.0f - spacing * 4.0f - 16.0f, viewportMin.y + 12.0f });
+                totalWidth - 16.0f, viewportMin.y + 12.0f });
             ImGui::PushID("ViewportOrientation");
-            if (ImGui::Button("X", { button, button })) m_ViewportController.SnapToAxis(ViewportAxis::Right);
+            if (ImGui::Button("X", { axisButton, axisButton })) m_ViewportController.SnapToAxis(ViewportAxis::Right);
             if (ImGui::IsItemHovered()) ImGui::SetTooltip("Right view");
             ImGui::SameLine(0.0f, spacing);
-            if (ImGui::Button("Y", { button, button })) m_ViewportController.SnapToAxis(ViewportAxis::Top);
+            if (ImGui::Button("Y", { axisButton, axisButton })) m_ViewportController.SnapToAxis(ViewportAxis::Top);
             if (ImGui::IsItemHovered()) ImGui::SetTooltip("Top view");
             ImGui::SameLine(0.0f, spacing);
-            if (ImGui::Button("Z", { button, button })) m_ViewportController.SnapToAxis(ViewportAxis::Front);
+            if (ImGui::Button("Z", { axisButton, axisButton })) m_ViewportController.SnapToAxis(ViewportAxis::Front);
             if (ImGui::IsItemHovered()) ImGui::SetTooltip("Front view");
             ImGui::SameLine(0.0f, spacing);
-            if (ImGui::Button("P", { button, button })) m_ViewportController.Reset();
-            if (ImGui::IsItemHovered()) ImGui::SetTooltip("Return to free perspective view");
+            if (ImGui::Button("Free", { modeButton, axisButton })) m_ViewportController.FreeView();
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip("Return to free perspective navigation");
             ImGui::SameLine(0.0f, spacing);
-            if (ImGui::Button("C", { button, button })) ViewSceneCamera();
+            if (ImGui::Button("Camera", { modeButton, axisButton })) ViewSceneCamera();
             if (ImGui::IsItemHovered()) ImGui::SetTooltip("Look through the primary scene camera");
             ImGui::PopID();
         }
