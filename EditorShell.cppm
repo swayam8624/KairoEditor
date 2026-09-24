@@ -1435,26 +1435,26 @@ export namespace kairo::editor
                     ImGui::EndDragDropTarget();
                 }
                 const bool navigationClick = ImGui::GetIO().KeyAlt;
-                if (hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left) && !navigationClick)
+                const bool gizmoOwnsPointer = DrawTransformGizmo(viewportMin, viewportSize);
+                const bool orientationOwnsPointer = DrawOrientationGizmo(viewportMin, viewportSize);
+                if (hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left) &&
+                    !navigationClick && !gizmoOwnsPointer && !orientationOwnsPointer &&
+                    m_ViewportTexture != ImTextureID_Invalid)
                 {
                     ImGui::SetWindowFocus();
-                    if (m_ActiveTool == EditorAction::SelectTool && m_ViewportTexture != ImTextureID_Invalid)
-                    {
-                        const ImVec2 mouse = ImGui::GetMousePos();
-                        const auto x = static_cast<std::uint32_t>(std::clamp(
-                            std::floor((mouse.x - viewportMin.x) * framebufferScale.x), 0.0f,
-                            static_cast<float>(m_RequestedViewportWidth - 1u)));
-                        const auto y = static_cast<std::uint32_t>(std::clamp(
-                            std::floor((mouse.y - viewportMin.y) * framebufferScale.y), 0.0f,
-                            static_cast<float>(m_RequestedViewportHeight - 1u)));
-                        m_ViewportPickRequest = std::pair{ x, y };
-                    }
+                    const ImVec2 mouse = ImGui::GetMousePos();
+                    const auto x = static_cast<std::uint32_t>(std::clamp(
+                        std::floor((mouse.x - viewportMin.x) * framebufferScale.x), 0.0f,
+                        static_cast<float>(m_RequestedViewportWidth - 1u)));
+                    const auto y = static_cast<std::uint32_t>(std::clamp(
+                        std::floor((mouse.y - viewportMin.y) * framebufferScale.y), 0.0f,
+                        static_cast<float>(m_RequestedViewportHeight - 1u)));
+                    m_ViewportPickRequest = std::pair{ x, y };
                 }
-                const bool gizmoOwnsPointer = DrawTransformGizmo(viewportMin, viewportSize);
-                DrawOrientationGizmo(viewportMin, viewportSize);
                 HandleViewportNavigation(
-                    hovered && !gizmoOwnsPointer,
-                    (m_ViewportFocused || m_ViewportKeyboardActive) && !gizmoOwnsPointer);
+                    hovered && !gizmoOwnsPointer && !orientationOwnsPointer,
+                    (m_ViewportFocused || m_ViewportKeyboardActive) &&
+                        !gizmoOwnsPointer && !orientationOwnsPointer);
 
                 const ImVec2 overlay = { viewportMin.x + 12.0f, viewportMin.y + 12.0f };
                 ImGui::GetWindowDrawList()->AddText(overlay, IM_COL32(210, 225, 238, 210),
@@ -1962,7 +1962,7 @@ export namespace kairo::editor
             return result.Active || result.Hovered;
         }
 
-        void DrawOrientationGizmo(ImVec2 viewportMin, ImVec2 viewportSize)
+        [[nodiscard]] bool DrawOrientationGizmo(ImVec2 viewportMin, ImVec2 viewportSize)
         {
             constexpr float button = 26.0f;
             constexpr float spacing = 2.0f;
@@ -1987,8 +1987,11 @@ export namespace kairo::editor
                 ImGui::SetTooltip("Return to free perspective view while preserving focus and zoom");
             ImGui::SameLine(0.0f, spacing);
             if (ImGui::Button("Camera", { cameraWidth, button })) ViewSceneCamera();
-            if (ImGui::IsItemHovered()) ImGui::SetTooltip("Look through the primary scene camera");
+            const bool cameraHovered = ImGui::IsItemHovered();
+            if (cameraHovered) ImGui::SetTooltip("Look through the primary scene camera");
+            const bool ownsPointer = cameraHovered || ImGui::IsAnyItemActive();
             ImGui::PopID();
+            return ownsPointer;
         }
 
         void DrawToolPanel(Panel panel)
