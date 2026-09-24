@@ -17,6 +17,13 @@ KairoMath -> KairoEngineCore -> KairoEditor
                            -> KairoPhysicsEngine (play-mode backend)
 ```
 
+The Profiling workspace now uses the same live engine evidence as the runtime:
+its Statistics panel shows UI/frame time, the selected renderer's completed
+render-graph total and per-pass CPU timings, plus PhysicsPreview total,
+broadphase, narrowphase and solver timings with active body/collider counts.
+The Editor receives renderer telemetry as a snapshot and does not own renderer
+or physics resources.
+
 The current foundation provides a tested, backend-neutral editor state model:
 
 - validated entity selection and stale-selection recovery
