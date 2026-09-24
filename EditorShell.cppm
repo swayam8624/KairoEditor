@@ -221,6 +221,13 @@ export namespace kairo::editor
             return std::exchange(m_ProjectTransitionRequest, std::nullopt);
         }
 
+        /// Output: one host-level request to launch the project's real runtime.
+        /// Play is intentionally distinct from the in-editor physics simulation.
+        [[nodiscard]] bool TakeRuntimeLaunchRequest() noexcept
+        {
+            return std::exchange(m_RuntimeLaunchRequested, false);
+        }
+
         /// Input: stable renderer object ID, where zero denotes background.
         /// Task: apply GPU picking only when the ID still belongs to this scene.
         void ApplyViewportPick(std::uint32_t objectID)
@@ -349,6 +356,7 @@ export namespace kairo::editor
         bool m_RequestNewProjectPopup = false;
         bool m_RequestUnsavedProjectPopup = false;
         std::optional<std::filesystem::path> m_ProjectTransitionRequest;
+        bool m_RuntimeLaunchRequested = false;
         RecentProjects m_RecentProjects;
         bool m_RecentProjectsLoaded = false;
 
@@ -619,7 +627,15 @@ export namespace kairo::editor
         {
             if (m_State.Mode() == EditorMode::Edit)
             {
-                if (ActionButton("Play", UIButtonTone::Primary)) StartPlay();
+                if (ActionButton("Play", UIButtonTone::Primary))
+                    m_RuntimeLaunchRequested = true;
+                if (ImGui::IsItemHovered())
+                    ImGui::SetTooltip("Launch the project's real runtime in a separate game window");
+                ImGui::SameLine();
+                if (ActionButton("Simulate"))
+                    StartPlay();
+                if (ImGui::IsItemHovered())
+                    ImGui::SetTooltip("Run the isolated in-editor physics preview");
             }
             else
             {
@@ -1409,7 +1425,7 @@ export namespace kairo::editor
                     m_ActiveTool == EditorAction::TranslateTool ? "MOVE" :
                     m_ActiveTool == EditorAction::RotateTool ? "ROTATE" : "SCALE");
                 ImGui::GetWindowDrawList()->AddText({ overlay.x, overlay.y + 18.0f }, IM_COL32(135, 165, 184, 190),
-                    "Option+LMB orbit  Shift+Option+LMB pan  Ctrl+Option+LMB dolly  RMB+WASD fly");
+                    "MMB/Option+LMB orbit  Shift+MMB pan  wheel dolly  RMB+WASD or Shift+WASD fly  arrows move");
                 const auto selected = m_State.SelectedEntity();
                 if (selected.has_value())
                 {
@@ -1574,7 +1590,10 @@ export namespace kairo::editor
             else if (m_InputRouter.Consume(EditorAction::Undo) && history.CanUndo()) RunCommand([&history] { history.Undo(); });
             if (m_InputRouter.Consume(EditorAction::TogglePlay))
             {
-                if (m_State.Mode() == EditorMode::Edit) StartPlay(); else StopPlay();
+                if (m_State.Mode() == EditorMode::Edit)
+                    m_RuntimeLaunchRequested = true;
+                else
+                    StopPlay();
             }
             if (context == InputContext::Scene) DispatchSceneActions();
             if (context == InputContext::Graph)
@@ -1588,7 +1607,28 @@ export namespace kairo::editor
         {
             const auto selected = m_State.SelectedEntity();
             if (!selected.has_value()) return;
-            m_ViewportController.Focus(m_Project.Scene().Transform(*selected).Local.Translation);
+            m_ViewportController.Focus(m_Project.Scene().WorldTransform(*selected).Translation);
+        }
+
+        void ViewSceneCamera()
+        {
+            const auto& scene = m_Project.Scene();
+            auto cameraEntity = scene.PrimaryCamera();
+            if (!cameraEntity.has_value())
+            {
+                const auto cameras = scene.CameraEntities();
+                if (!cameras.empty()) cameraEntity = cameras.front();
+            }
+            if (!cameraEntity.has_value())
+                return;
+
+            const auto world = scene.WorldTransform(*cameraEntity);
+            m_ViewportController.SetPose({
+                world.Translation,
+                world.Translation + world.Forward() * 5.0f,
+                world.Up()
+            });
+            m_ViewportRenderLayers = scene.Camera(*cameraEntity).RenderLayers;
         }
 
         void StartPlay()
@@ -1611,13 +1651,21 @@ export namespace kairo::editor
             const bool optionLeft = io.KeyAlt && ImGui::IsMouseDown(ImGuiMouseButton_Left);
             const bool rightMouse = ImGui::IsMouseDown(ImGuiMouseButton_Right);
             const bool middleMouse = ImGui::IsMouseDown(ImGuiMouseButton_Middle);
-            const bool requested = optionLeft || rightMouse || middleMouse;
+            const bool arrowNavigation = m_ViewportFocused && !io.WantTextInput &&
+                (ImGui::IsKeyDown(ImGuiKey_UpArrow) || ImGui::IsKeyDown(ImGuiKey_DownArrow) ||
+                 ImGui::IsKeyDown(ImGuiKey_LeftArrow) || ImGui::IsKeyDown(ImGuiKey_RightArrow));
+            const bool shiftedKeyboardFly = m_ViewportFocused && !io.WantTextInput && io.KeyShift &&
+                (ImGui::IsKeyDown(ImGuiKey_W) || ImGui::IsKeyDown(ImGuiKey_A) ||
+                 ImGui::IsKeyDown(ImGuiKey_S) || ImGui::IsKeyDown(ImGuiKey_D) ||
+                 ImGui::IsKeyDown(ImGuiKey_Q) || ImGui::IsKeyDown(ImGuiKey_E));
+            const bool requested = optionLeft || rightMouse || middleMouse ||
+                arrowNavigation || shiftedKeyboardFly;
             if (!requested)
             {
                 m_ViewportNavigationActive = false;
                 m_ViewportNavigationCancelled = false;
             }
-            if (hovered && requested && !m_ViewportNavigationCancelled)
+            if ((hovered || m_ViewportFocused) && requested && !m_ViewportNavigationCancelled)
                 m_ViewportNavigationActive = true;
             if (ImGui::IsKeyPressed(ImGuiKey_Escape, false))
             {
@@ -1635,22 +1683,29 @@ export namespace kairo::editor
             input.Orbit = (middleMouse && !io.KeyShift) || (optionLeft && !io.KeyShift && !io.KeyCtrl);
             input.Pan = (middleMouse && io.KeyShift) || (optionLeft && io.KeyShift);
             input.Dolly = optionLeft && io.KeyCtrl && !io.KeyShift;
-            input.Fly = rightMouse;
+            input.Fly = rightMouse || arrowNavigation || shiftedKeyboardFly;
             if (hovered && m_NavigationSettings.ScrollBehavior == ViewportScrollBehavior::Pan && io.MouseWheel != 0.0f)
             {
                 input.Pan = true;
                 input.MouseDeltaX = io.MouseWheelH * 24.0f;
                 input.MouseDeltaY = io.MouseWheel * 24.0f;
             }
-            if (rightMouse)
+            if (input.Fly)
             {
-                ImGui::SetMouseCursor(ImGuiMouseCursor_None);
-                input.MoveForward = (ImGui::IsKeyDown(ImGuiKey_W) ? 1.0f : 0.0f) -
-                    (ImGui::IsKeyDown(ImGuiKey_S) ? 1.0f : 0.0f);
-                input.MoveRight = (ImGui::IsKeyDown(ImGuiKey_D) ? 1.0f : 0.0f) -
-                    (ImGui::IsKeyDown(ImGuiKey_A) ? 1.0f : 0.0f);
+                if (rightMouse) ImGui::SetMouseCursor(ImGuiMouseCursor_None);
+                input.MoveForward =
+                    (ImGui::IsKeyDown(ImGuiKey_W) || ImGui::IsKeyDown(ImGuiKey_UpArrow) ? 1.0f : 0.0f) -
+                    (ImGui::IsKeyDown(ImGuiKey_S) || ImGui::IsKeyDown(ImGuiKey_DownArrow) ? 1.0f : 0.0f);
+                input.MoveRight =
+                    (ImGui::IsKeyDown(ImGuiKey_D) || ImGui::IsKeyDown(ImGuiKey_RightArrow) ? 1.0f : 0.0f) -
+                    (ImGui::IsKeyDown(ImGuiKey_A) || ImGui::IsKeyDown(ImGuiKey_LeftArrow) ? 1.0f : 0.0f);
                 input.MoveUp = (ImGui::IsKeyDown(ImGuiKey_E) ? 1.0f : 0.0f) -
                     (ImGui::IsKeyDown(ImGuiKey_Q) ? 1.0f : 0.0f);
+                if (!rightMouse && !optionLeft && !middleMouse)
+                {
+                    input.MouseDeltaX = 0.0f;
+                    input.MouseDeltaY = 0.0f;
+                }
             }
             m_ViewportController.Update(input, m_NavigationSettings);
 
@@ -1869,17 +1924,24 @@ export namespace kairo::editor
         void DrawOrientationGizmo(ImVec2 viewportMin, ImVec2 viewportSize)
         {
             constexpr float button = 26.0f;
-            ImGui::SetCursorScreenPos({ viewportMin.x + viewportSize.x - button * 3.0f - 16.0f,
-                viewportMin.y + 12.0f });
+            constexpr float spacing = 2.0f;
+            ImGui::SetCursorScreenPos({ viewportMin.x + viewportSize.x -
+                button * 5.0f - spacing * 4.0f - 16.0f, viewportMin.y + 12.0f });
             ImGui::PushID("ViewportOrientation");
             if (ImGui::Button("X", { button, button })) m_ViewportController.SnapToAxis(ViewportAxis::Right);
             if (ImGui::IsItemHovered()) ImGui::SetTooltip("Right view");
-            ImGui::SameLine(0.0f, 2.0f);
+            ImGui::SameLine(0.0f, spacing);
             if (ImGui::Button("Y", { button, button })) m_ViewportController.SnapToAxis(ViewportAxis::Top);
             if (ImGui::IsItemHovered()) ImGui::SetTooltip("Top view");
-            ImGui::SameLine(0.0f, 2.0f);
+            ImGui::SameLine(0.0f, spacing);
             if (ImGui::Button("Z", { button, button })) m_ViewportController.SnapToAxis(ViewportAxis::Front);
             if (ImGui::IsItemHovered()) ImGui::SetTooltip("Front view");
+            ImGui::SameLine(0.0f, spacing);
+            if (ImGui::Button("P", { button, button })) m_ViewportController.Reset();
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip("Return to free perspective view");
+            ImGui::SameLine(0.0f, spacing);
+            if (ImGui::Button("C", { button, button })) ViewSceneCamera();
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip("Look through the primary scene camera");
             ImGui::PopID();
         }
 
