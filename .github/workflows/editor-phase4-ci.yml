@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - agent/**
+      - fix/viewport-navigation-play
   pull_request:
 
 permissions:
