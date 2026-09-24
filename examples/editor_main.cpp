@@ -324,7 +324,8 @@ namespace
             project.ProjectRoot(), project.Descriptor(), fallback);
     }
 
-    void LaunchProjectRuntime(const kairo::editor::ProjectSession& project,
+    [[nodiscard]] std::filesystem::path LaunchProjectRuntime(
+        const kairo::editor::ProjectSession& project,
         const std::filesystem::path& editorExecutable)
     {
         const auto executable = ResolveRuntimeExecutable(project, editorExecutable);
@@ -360,6 +361,7 @@ namespace
             while (waitpid(child, &statusCode, 0) < 0 && errno == EINTR) {}
         }).detach();
 #endif
+        return executable;
     }
 }
 
@@ -671,7 +673,10 @@ int main(int argc, char** argv)
             {
                 try
                 {
-                    LaunchProjectRuntime(project, std::filesystem::absolute(argv[0]));
+                    const auto launched = LaunchProjectRuntime(
+                        project, std::filesystem::absolute(argv[0]));
+                    shell.ReportHostStatus(
+                        "Runtime launched: " + launched.filename().string());
                 }
                 catch (const std::exception& error)
                 {
