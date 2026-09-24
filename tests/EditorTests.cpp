@@ -105,6 +105,38 @@ TEST_CASE("Editor actions and viewport navigation provide deterministic authorin
     REQUIRE_THROWS_AS(viewport.Focus({ 0.0f, 0.0f, 0.0f }, 0.0f), std::invalid_argument);
 }
 
+TEST_CASE("Project Play resolution prefers authored native runtime and rejects escapes",
+    "[KairoEditor][Project][Play]")
+{
+    const auto root = std::filesystem::temp_directory_path() /
+        ("kairo-play-" + kairo::assets::GenerateAssetID().ToString());
+    std::filesystem::create_directories(root / "Build/Development");
+    std::filesystem::create_directories(root / "fallback");
+
+    const auto native = root / "Build/Development/Game";
+    const auto generic = root / "fallback/KairoPlayer";
+    std::ofstream(native).put('\n');
+    std::ofstream(generic).put('\n');
+
+    kairo::engine::ProjectDescriptor descriptor;
+    descriptor.Name = "Play Test";
+    descriptor.PlayExecutable = "Build/Development/Game";
+    CHECK(ResolveProjectRuntimeExecutable(root, descriptor, generic) ==
+        std::filesystem::weakly_canonical(native));
+
+    descriptor.PlayExecutable.reset();
+    CHECK(ResolveProjectRuntimeExecutable(root, descriptor, generic) ==
+        std::filesystem::weakly_canonical(generic));
+
+    descriptor.PlayExecutable = "../outside";
+    REQUIRE_THROWS(ResolveProjectRuntimeExecutable(root, descriptor, generic));
+
+    descriptor.PlayExecutable = "Build/Development/Missing";
+    REQUIRE_THROWS(ResolveProjectRuntimeExecutable(root, descriptor, generic));
+
+    std::filesystem::remove_all(root);
+}
+
 TEST_CASE("Navigation settings persist strict trackpad and fly preferences",
     "[KairoEditor][Input][Settings]")
 {
