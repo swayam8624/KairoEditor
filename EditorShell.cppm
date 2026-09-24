@@ -493,6 +493,16 @@ export namespace kairo::editor
             }
             if (ImGui::BeginMenu("View"))
             {
+                if (ImGui::MenuItem("Free Perspective"))
+                {
+                    m_ViewportController.ResetOrientation();
+                    m_ViewportRenderLayers = kairo::engine::AllRenderLayers;
+                }
+                if (ImGui::MenuItem("Primary Scene Camera"))
+                    ViewSceneCamera();
+                if (ImGui::MenuItem("Frame Selection", "F"))
+                    FocusSelection();
+                ImGui::Separator();
                 for (std::uint8_t value = 0u; value < static_cast<std::uint8_t>(Panel::Count); ++value)
                 {
                     const Panel panel = static_cast<Panel>(value);
@@ -1985,16 +1995,32 @@ export namespace kairo::editor
                 (button * 3.0f + perspectiveWidth + cameraWidth + spacing * 4.0f) - 16.0f,
                 viewportMin.y + 12.0f });
             ImGui::PushID("ViewportOrientation");
-            if (ImGui::Button("X", { button, button })) m_ViewportController.SnapToAxis(ViewportAxis::Right);
+            if (ImGui::Button("X", { button, button }))
+            {
+                m_ViewportController.SnapToAxis(ViewportAxis::Right);
+                m_ViewportRenderLayers = kairo::engine::AllRenderLayers;
+            }
             if (ImGui::IsItemHovered()) ImGui::SetTooltip("Right view");
             ImGui::SameLine(0.0f, spacing);
-            if (ImGui::Button("Y", { button, button })) m_ViewportController.SnapToAxis(ViewportAxis::Top);
+            if (ImGui::Button("Y", { button, button }))
+            {
+                m_ViewportController.SnapToAxis(ViewportAxis::Top);
+                m_ViewportRenderLayers = kairo::engine::AllRenderLayers;
+            }
             if (ImGui::IsItemHovered()) ImGui::SetTooltip("Top view");
             ImGui::SameLine(0.0f, spacing);
-            if (ImGui::Button("Z", { button, button })) m_ViewportController.SnapToAxis(ViewportAxis::Front);
+            if (ImGui::Button("Z", { button, button }))
+            {
+                m_ViewportController.SnapToAxis(ViewportAxis::Front);
+                m_ViewportRenderLayers = kairo::engine::AllRenderLayers;
+            }
             if (ImGui::IsItemHovered()) ImGui::SetTooltip("Front view");
             ImGui::SameLine(0.0f, spacing);
-            if (ImGui::Button("Persp", { perspectiveWidth, button })) m_ViewportController.ResetOrientation();
+            if (ImGui::Button("Persp", { perspectiveWidth, button }))
+            {
+                m_ViewportController.ResetOrientation();
+                m_ViewportRenderLayers = kairo::engine::AllRenderLayers;
+            }
             if (ImGui::IsItemHovered()) ImGui::SetTooltip("Return to free perspective view");
             ImGui::SameLine(0.0f, spacing);
             if (ImGui::Button("Camera", { cameraWidth, button })) ViewSceneCamera();
