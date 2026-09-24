@@ -1427,7 +1427,7 @@ export namespace kairo::editor
                 if (hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left) && !navigationClick)
                 {
                     ImGui::SetWindowFocus();
-                    if (m_ActiveTool == EditorAction::SelectTool && m_ViewportTexture != ImTextureID_Invalid)
+                    if (m_ViewportTexture != ImTextureID_Invalid)
                     {
                         const ImVec2 mouse = ImGui::GetMousePos();
                         const auto x = static_cast<std::uint32_t>(std::clamp(
