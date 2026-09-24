@@ -731,8 +731,7 @@ int main(int argc, char** argv)
                 projectTransition = std::move(transition);
                 break;
             }
-            const auto camera = shell.ViewportCamera();
-            renderer.SetCameraPose({ camera.Position, camera.Target, camera.Up });
+            renderer.SetCameraPose(shell.ViewportRendererCamera());
             renderer.SubmitRenderScene(kairo::editor::BuildRenderScene(
                 shell.RenderScene(), renderAssets, animationPreview.Overrides(),
                 shell.ViewportRenderLayers()));
