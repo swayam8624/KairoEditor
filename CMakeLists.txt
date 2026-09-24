@@ -160,8 +160,11 @@ if(KAIRO_EDITOR_BUILD_APP)
             ${dearimgui_SOURCE_DIR}/backends/imgui_impl_metal.mm
             detail/MetalImGuiBridge.mm)
         set_source_files_properties(
-            ${dearimgui_SOURCE_DIR}/backends/imgui_impl_metal.mm
-            detail/MetalImGuiBridge.mm PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
+            ${dearimgui_SOURCE_DIR}/backends/imgui_impl_metal.mm PROPERTIES
+            COMPILE_OPTIONS "-fobjc-arc;-fno-objc-msgsend-selector-stubs;-Wno-deprecated-declarations")
+        set_source_files_properties(
+            detail/MetalImGuiBridge.mm PROPERTIES
+            COMPILE_OPTIONS "-fobjc-arc;-fno-objc-msgsend-selector-stubs")
         target_link_libraries(KairoDearImGui PUBLIC
             "-framework Foundation"
             "-framework Metal"
@@ -189,6 +192,9 @@ if(KAIRO_EDITOR_BUILD_APP)
     add_library(Kairo::ImGuizmo ALIAS KairoImGuizmo)
     target_include_directories(KairoImGuizmo PUBLIC ${imguizmo_SOURCE_DIR}/src)
     target_link_libraries(KairoImGuizmo PUBLIC KairoDearImGui)
+    if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+        target_compile_options(KairoImGuizmo PRIVATE -Wno-nested-anon-types)
+    endif()
 
     add_library(KairoEditorImGui)
     target_sources(KairoEditorImGui PUBLIC FILE_SET CXX_MODULES BASE_DIRS ${CMAKE_CURRENT_SOURCE_DIR} FILES
@@ -251,8 +257,16 @@ if(KAIRO_EDITOR_BUILD_TESTS)
     FetchContent_MakeAvailable(Catch2)
     add_executable(KairoEditorTests tests/EditorTests.cpp tests/AssetWorkspaceTests.cpp tests/AssetBrowserRuntimeTests.cpp tests/ProductionAuthoringTests.cpp tests/AdvancedProductionAuthoringTests.cpp tests/ProductionSystemsAuthoringTests.cpp)
     target_link_libraries(KairoEditorTests PRIVATE KairoEditor Catch2::Catch2WithMain)
+    if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+        target_compile_options(KairoEditorTests PRIVATE -Wno-c2y-extensions)
+    endif()
+    set_property(TARGET KairoEditorTests PROPERTY COMPILE_WARNING_AS_ERROR ON)
     add_executable(KairoEditorPhase4Tests tests/Phase4WorkflowTests.cpp)
     target_link_libraries(KairoEditorPhase4Tests PRIVATE KairoEditor Catch2::Catch2WithMain)
+    if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+        target_compile_options(KairoEditorPhase4Tests PRIVATE -Wno-c2y-extensions)
+    endif()
+    set_property(TARGET KairoEditorPhase4Tests PROPERTY COMPILE_WARNING_AS_ERROR ON)
     enable_testing()
     add_test(NAME KairoEditorTests COMMAND KairoEditorTests)
     add_test(NAME KairoEditorPhase4Tests COMMAND KairoEditorPhase4Tests)
@@ -271,12 +285,24 @@ if(KAIRO_EDITOR_BUILD_TESTS)
     if(TARGET KairoEditorApp)
         add_executable(KairoEditorRenderBridgeTests tests/SceneRenderBridgeTests.cpp)
         target_link_libraries(KairoEditorRenderBridgeTests PRIVATE KairoEditorRendererBridge Catch2::Catch2WithMain)
+        if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+            target_compile_options(KairoEditorRenderBridgeTests PRIVATE -Wno-c2y-extensions)
+        endif()
+        set_property(TARGET KairoEditorRenderBridgeTests PROPERTY COMPILE_WARNING_AS_ERROR ON)
         add_test(NAME KairoEditorRenderBridgeTests COMMAND KairoEditorRenderBridgeTests)
         add_executable(KairoEditorUITests tests/KairoUITests.cpp)
         target_link_libraries(KairoEditorUITests PRIVATE KairoEditorImGui Catch2::Catch2WithMain)
+        if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+            target_compile_options(KairoEditorUITests PRIVATE -Wno-c2y-extensions)
+        endif()
+        set_property(TARGET KairoEditorUITests PROPERTY COMPILE_WARNING_AS_ERROR ON)
         add_test(NAME KairoEditorUITests COMMAND KairoEditorUITests)
         add_executable(KairoEditorPhysicsPreviewTests tests/PhysicsPreviewTests.cpp)
         target_link_libraries(KairoEditorPhysicsPreviewTests PRIVATE KairoEditorPhysics Catch2::Catch2WithMain)
+        if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+            target_compile_options(KairoEditorPhysicsPreviewTests PRIVATE -Wno-c2y-extensions)
+        endif()
+        set_property(TARGET KairoEditorPhysicsPreviewTests PROPERTY COMPILE_WARNING_AS_ERROR ON)
         add_test(NAME KairoEditorPhysicsPreviewTests COMMAND KairoEditorPhysicsPreviewTests)
         add_test(NAME KairoEditorNativeSmoke COMMAND KairoEditorApp
             --project ${CMAKE_CURRENT_SOURCE_DIR}/examples/StarterProject/Project.kproject
