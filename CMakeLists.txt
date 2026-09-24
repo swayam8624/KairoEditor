@@ -159,12 +159,21 @@ if(KAIRO_EDITOR_BUILD_APP)
         target_sources(KairoDearImGui PRIVATE
             ${dearimgui_SOURCE_DIR}/backends/imgui_impl_metal.mm
             detail/MetalImGuiBridge.mm)
+        set(_kairo_editor_metal_compile_options -fobjc-arc)
+        if(CMAKE_OBJCXX_COMPILER_ID STREQUAL "Clang" AND
+           CMAKE_OBJCXX_COMPILER_VERSION VERSION_GREATER_EQUAL 23)
+            list(APPEND _kairo_editor_metal_compile_options
+                -fno-objc-msgsend-selector-stubs)
+        endif()
+        set(_kairo_imgui_metal_compile_options
+            ${_kairo_editor_metal_compile_options}
+            -Wno-deprecated-declarations)
         set_source_files_properties(
             ${dearimgui_SOURCE_DIR}/backends/imgui_impl_metal.mm PROPERTIES
-            COMPILE_OPTIONS "-fobjc-arc;-fno-objc-msgsend-selector-stubs;-Wno-deprecated-declarations")
+            COMPILE_OPTIONS "${_kairo_imgui_metal_compile_options}")
         set_source_files_properties(
             detail/MetalImGuiBridge.mm PROPERTIES
-            COMPILE_OPTIONS "-fobjc-arc;-fno-objc-msgsend-selector-stubs")
+            COMPILE_OPTIONS "${_kairo_editor_metal_compile_options}")
         target_link_libraries(KairoDearImGui PUBLIC
             "-framework Foundation"
             "-framework Metal"
