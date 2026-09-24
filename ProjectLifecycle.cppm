@@ -6,6 +6,7 @@ module;
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <system_error>
@@ -19,6 +20,57 @@ import Kairo.Editor.ProjectDescriptor;
 
 export namespace kairo::editor
 {
+    [[nodiscard]] inline bool IsWithinProjectRoot(
+        const std::filesystem::path& root,
+        const std::filesystem::path& candidate) noexcept
+    {
+        auto rootIt = root.begin();
+        auto candidateIt = candidate.begin();
+        for (; rootIt != root.end(); ++rootIt, ++candidateIt)
+            if (candidateIt == candidate.end() || *candidateIt != *rootIt)
+                return false;
+        return true;
+    }
+
+    /// Resolves the executable used by Editor Play. A project-authored
+    /// play-executable always wins over a host fallback and is constrained to
+    /// the project root. The pure resolution contract is shared with tests so
+    /// the UI cannot silently regress to generic KairoPlayer.
+    [[nodiscard]] inline std::filesystem::path ResolveProjectRuntimeExecutable(
+        const std::filesystem::path& projectRoot,
+        const ProjectDescriptor& descriptor,
+        const std::optional<std::filesystem::path>& fallback = std::nullopt)
+    {
+        std::error_code error;
+        const auto root = std::filesystem::weakly_canonical(projectRoot, error);
+        if (error || !std::filesystem::is_directory(root))
+            throw std::runtime_error("Cannot resolve project root for Play.");
+
+        if (descriptor.PlayExecutable.has_value())
+        {
+            const auto candidate = std::filesystem::weakly_canonical(
+                root / *descriptor.PlayExecutable, error);
+            if (error || !IsWithinProjectRoot(root, candidate))
+                throw std::runtime_error(
+                    "Project Play executable escapes or cannot be resolved inside the project.");
+            if (!std::filesystem::is_regular_file(candidate, error) || error)
+                throw std::runtime_error(
+                    "Project Play executable is missing. Build the game first: " +
+                    candidate.string());
+            return candidate;
+        }
+
+        if (fallback.has_value())
+        {
+            const auto candidate = std::filesystem::weakly_canonical(*fallback, error);
+            if (!error && std::filesystem::is_regular_file(candidate, error) && !error)
+                return candidate;
+        }
+
+        throw std::runtime_error(
+            "No project Play executable is configured and no runnable KairoPlayer fallback was found.");
+    }
+
     [[nodiscard]] inline std::filesystem::path DefaultRecentProjectsPath()
     {
 #if defined(_WIN32)
