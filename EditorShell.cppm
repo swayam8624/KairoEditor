@@ -1710,9 +1710,16 @@ export namespace kairo::editor
         void HandleViewportNavigation(bool hovered, bool keyboardActive)
         {
             const ImGuiIO& io = ImGui::GetIO();
-            const bool optionLeft = io.KeyAlt && ImGui::IsMouseDown(ImGuiMouseButton_Left);
-            const bool rightMouse = ImGui::IsMouseDown(ImGuiMouseButton_Right);
-            const bool middleMouse = ImGui::IsMouseDown(ImGuiMouseButton_Middle);
+            // The navigation gesture starts inside the viewport; a
+            // gesture already underway may continue beyond its bounds.
+            // Do not steal Alt+LMB or RMB from unrelated ImGui controls.
+            const bool pointerOwned = hovered || m_ViewportNavigationActive;
+            const bool optionLeft = pointerOwned && io.KeyAlt &&
+                ImGui::IsMouseDown(ImGuiMouseButton_Left);
+            const bool rightMouse = pointerOwned &&
+                ImGui::IsMouseDown(ImGuiMouseButton_Right);
+            const bool middleMouse = pointerOwned &&
+                ImGui::IsMouseDown(ImGuiMouseButton_Middle);
             const bool viewportKeyboard = keyboardActive && !io.WantTextInput;
             const bool arrowNavigation = viewportKeyboard &&
                 (ImGui::IsKeyDown(ImGuiKey_UpArrow) || ImGui::IsKeyDown(ImGuiKey_DownArrow) ||
@@ -1758,7 +1765,7 @@ export namespace kairo::editor
             }
             if (viewportKeyboard && ImGui::IsKeyPressed(ImGuiKey_Home, false))
             {
-                m_ViewportController.Reset();
+                m_ViewportController.FreeView();
                 m_ViewportSceneCamera.reset();
                 m_ViewportRenderLayers = kairo::engine::AllRenderLayers;
                 m_ViewportNavigationActive = false;
@@ -2037,7 +2044,7 @@ export namespace kairo::editor
             ImGui::SameLine(0.0f, spacing);
             if (ImGui::Button("Free", { perspectiveWidth, button }))
             {
-                m_ViewportController.Reset();
+                m_ViewportController.FreeView();
                 m_ViewportSceneCamera.reset();
                 m_ViewportRenderLayers = kairo::engine::AllRenderLayers;
             }
