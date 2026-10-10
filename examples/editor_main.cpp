@@ -17,6 +17,7 @@
 #include <system_error>
 #include <thread>
 #include <unordered_map>
+#include <utility>
 #if defined(_WIN32)
 #include <process.h>
 #else
@@ -36,6 +37,7 @@ import Kairo.Editor.SceneRenderBridge;
 import Kairo.Editor.AnimationPreview;
 import Kairo.EngineCore;
 import Kairo.Renderer;
+import Kairo.Foundation.Math.Vector;
 #if defined(KAIRO_EDITOR_HAS_OFFLINE_RENDER)
 import Kairo.Runtime.RenderBridge.EditorOfflineService;
 import Kairo.Runtime.RenderBridge.SceneSnapshot;
