@@ -105,6 +105,14 @@ export namespace kairo::editor
             m_Distance = 5.0f;
         }
 
+        /// Restore a free perspective WITHOUT losing the point the user was
+        /// inspecting. This matters for imported levels far from (0,0,0).
+        void FreeView() noexcept
+        {
+            m_Yaw = 0.60f;
+            m_Pitch = 0.31f;
+        }
+
         /// Input: finite point to inspect and a positive preferred distance.
         /// Output: camera target changes while retaining a stable orientation.
         /// Task: implement the F / frame-selection workflow without guessing an
