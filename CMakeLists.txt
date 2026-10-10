@@ -155,15 +155,15 @@ if(KAIRO_EDITOR_BUILD_APP)
         ${dearimgui_SOURCE_DIR}/backends/imgui_impl_vulkan.cpp)
     target_sources(KairoDearImGui PRIVATE
         ${dearimgui_SOURCE_DIR}/backends/imgui_impl_opengl3.cpp)
-    if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-        # Pinned upstream Dear ImGui's Vulkan backend sets
-        # g_FunctionsLoaded without subsequently reading it in this build
-        # configuration. Keep the narrowly scoped upstream diagnostic from
-        # violating KAIRO's exact-head zero-warning native acceptance gate;
-        # do not disable warnings for any Kairo-authored source.
+    if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND
+       CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 23)
+        # The pinned upstream Vulkan backend sets g_FunctionsLoaded but does
+        # not read it in our build configuration. Upstream Clang 23 diagnoses
+        # this as -Wunused-but-set-global (older Clang does not recognize
+        # that exact flag). Scope the exception to this third-party source.
         set_source_files_properties(
             ${dearimgui_SOURCE_DIR}/backends/imgui_impl_vulkan.cpp
-            PROPERTIES COMPILE_OPTIONS "-Wno-unused-but-set-variable")
+            PROPERTIES COMPILE_OPTIONS "-Wno-unused-but-set-global")
     endif()
     if(APPLE)
         target_sources(KairoDearImGui PRIVATE
