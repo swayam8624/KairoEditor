@@ -140,10 +140,15 @@ export namespace kairo::editor
             {
                 const float xDirection = settings.InvertOrbitX ? -1.0f : 1.0f;
                 const float yDirection = settings.InvertOrbitY ? -1.0f : 1.0f;
+                // Limit a single delayed frame's raw mouse movement. GLFW cursor
+                // capture transitions and macOS trackpad bursts can otherwise
+                // jump several turns before the following frame is drawn.
+                const float mouseX = std::clamp(input.MouseDeltaX, -120.0f, 120.0f);
+                const float mouseY = std::clamp(input.MouseDeltaY, -120.0f, 120.0f);
                 m_Yaw = std::remainder(
-                    m_Yaw - input.MouseDeltaX * settings.OrbitSensitivity * xDirection,
+                    m_Yaw - mouseX * settings.OrbitSensitivity * xDirection,
                     6.28318530717958647692f);
-                m_Pitch = std::clamp(m_Pitch - input.MouseDeltaY * settings.OrbitSensitivity * yDirection,
+                m_Pitch = std::clamp(m_Pitch - mouseY * settings.OrbitSensitivity * yDirection,
                     -1.52f, 1.52f);
             }
             const ViewportCameraPose pose = Pose();
@@ -160,7 +165,11 @@ export namespace kairo::editor
                 m_Distance = std::clamp(m_Distance * std::exp(-input.WheelDelta * 0.13f), 0.15f, 5000.0f);
             if (input.Fly)
             {
-                const float speed = std::max(1.0f, m_Distance) * settings.FlySpeed * input.DeltaSeconds;
+                // Flight speed grows sublinearly with camera distance, avoiding
+                // runaway WASD motion while looking at a large imported scene.
+                // Cap delta time after stalls or tab/window switches.
+                const float speed = std::sqrt(std::max(1.0f, m_Distance)) *
+                    settings.FlySpeed * std::min(input.DeltaSeconds, 0.05f);
                 // Do not let diagonal fly input (W+D, W+E, W+D+E) move
                 // faster than one normalized axis. Reject non-finite axes
                 // before reaching this point to protect distant world views.
