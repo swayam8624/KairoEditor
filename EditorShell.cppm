@@ -1714,6 +1714,9 @@ export namespace kairo::editor
             // gesture already underway may continue beyond its bounds.
             // Do not steal Alt+LMB or RMB from unrelated ImGui controls.
             const bool pointerOwned = hovered || m_ViewportNavigationActive;
+            // Keep MMB/RMB navigation alive after the pointer crosses the image edge.
+            // A new gesture may only begin over the viewport; the owned drag can
+            // continue outside without toggling the camera back to the scene view.
             const bool optionLeft = pointerOwned && io.KeyAlt &&
                 ImGui::IsMouseDown(ImGuiMouseButton_Left);
             const bool rightMouse = pointerOwned &&
@@ -1728,8 +1731,8 @@ export namespace kairo::editor
                 (ImGui::IsKeyDown(ImGuiKey_W) || ImGui::IsKeyDown(ImGuiKey_A) ||
                  ImGui::IsKeyDown(ImGuiKey_S) || ImGui::IsKeyDown(ImGuiKey_D) ||
                  ImGui::IsKeyDown(ImGuiKey_Q) || ImGui::IsKeyDown(ImGuiKey_E));
-            const bool requested = optionLeft || (hovered && rightMouse) ||
-                (hovered && middleMouse) || arrowNavigation || shiftedKeyboardFly;
+            const bool requested = optionLeft || rightMouse || middleMouse ||
+                arrowNavigation || shiftedKeyboardFly;
             if (!requested)
             {
                 m_ViewportNavigationActive = false;
