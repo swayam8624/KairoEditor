@@ -180,6 +180,13 @@ export namespace kairo::editor
             return m_ViewportFlyCursorCaptured;
         }
 
+        // Used BEFORE Dear ImGui starts its next frame: viewport-owned keys
+        // must never activate previously focused menu/toolbar widgets.
+        [[nodiscard]] bool ViewportKeyboardActive() const noexcept
+        {
+            return m_ViewportKeyboardActive;
+        }
+
         [[nodiscard]] std::uint64_t ViewportRenderLayers() const noexcept
         {
             return m_ViewportRenderLayers;
@@ -377,7 +384,7 @@ export namespace kairo::editor
         std::filesystem::path m_KeymapSettingsPath;
         NavigationSettings m_NavigationSettings;
         std::filesystem::path m_NavigationSettingsPath;
-        bool m_ViewportNavigationActive = false;
+        bool m_ViewportPointerNavigationActive = false;
         bool m_ViewportNavigationCancelled = false;
         bool m_ViewportFlyCursorCaptured = false;
         std::uint64_t m_ViewportRenderLayers = kairo::engine::AllRenderLayers;
@@ -1375,7 +1382,8 @@ export namespace kairo::editor
                 ImGuiWindowFlags_NoScrollWithMouse))
             {
                 m_ViewportFocused = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);
-                if (m_ViewportFocused) m_ViewportKeyboardActive = true;
+                if (!m_ViewportFocused && !m_ViewportPointerNavigationActive)
+                    m_ViewportKeyboardActive = false;
                 const auto camera = m_ViewportController.Pose();
                 ImGui::TextDisabled("Free 3D");
                 ImGui::SameLine();
@@ -1437,9 +1445,12 @@ export namespace kairo::editor
                     ImGui::SetWindowFocus();
                     m_ViewportKeyboardActive = true;
                 }
-                else if (!hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left) &&
-                    ImGui::IsAnyItemHovered())
+                else if (!hovered && (ImGui::IsMouseClicked(ImGuiMouseButton_Left) ||
+                    ImGui::IsMouseClicked(ImGuiMouseButton_Right) ||
+                    ImGui::IsMouseClicked(ImGuiMouseButton_Middle)))
                 {
+                    // Clicking a toolbar button or another editor panel returns
+                    // keyboard control to normal widgets/shortcuts.
                     m_ViewportKeyboardActive = false;
                 }
                 if (ImGui::BeginDragDropTarget())
@@ -1481,7 +1492,7 @@ export namespace kairo::editor
                     m_ActiveTool == EditorAction::TranslateTool ? "MOVE" :
                     m_ActiveTool == EditorAction::RotateTool ? "ROTATE" : "SCALE");
                 ImGui::GetWindowDrawList()->AddText({ overlay.x, overlay.y + 18.0f }, IM_COL32(135, 165, 184, 190),
-                    "MMB/Option+LMB orbit | Shift+MMB pan | wheel dolly | RMB+WASD fly | Shift+WASD / arrows move | Home free | C camera");
+                    "Click scene to focus | MMB / Option+LMB orbit | Shift+MMB pan | RMB look | WASD move | Q/E up/down | F focus | wheel zoom");
                 const auto selected = m_State.SelectedEntity();
                 if (selected.has_value())
                 {
@@ -1605,9 +1616,14 @@ export namespace kairo::editor
         void RouteAndDispatchInput()
         {
             const ImGuiIO& io = ImGui::GetIO();
+            const bool viewportOwnsKeyboard = m_ViewportKeyboardActive &&
+                m_ViewportFocused && !io.WantTextInput &&
+                !ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId);
             const InputContext context = io.WantTextInput ? InputContext::Text :
+                ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId)
+                    ? InputContext::Modal :
                 m_GraphCanvas.Focused() ? InputContext::Graph :
-                m_ViewportFocused ? InputContext::Scene : InputContext::Global;
+                viewportOwnsKeyboard ? InputContext::Scene : InputContext::Global;
             m_InputRouter.BeginFrame();
             m_InputRouter.SetContext(context);
             const KeyModifiers modifiers =
@@ -1627,7 +1643,9 @@ export namespace kairo::editor
                 std::pair{ EditorKey::Delete, ImGuiKey_Delete }, std::pair{ EditorKey::F5, ImGuiKey_F5 }
             };
             for (const auto [key, native] : keys)
-                if (ImGui::IsKeyPressed(native, false)) (void)m_InputRouter.Route({ { key, modifiers } });
+                if (ImGui::IsKeyPressed(native, false) &&
+                    ShouldRouteWorldKeyAsAction(key, viewportOwnsKeyboard, modifiers))
+                    (void)m_InputRouter.Route({ { key, modifiers } });
 
             if (!m_Project.HasProject()) return;
             if (m_InputRouter.Consume(EditorAction::NewDocument)) RequestNewDocument();
@@ -1710,61 +1728,78 @@ export namespace kairo::editor
         void HandleViewportNavigation(bool hovered, bool keyboardActive)
         {
             const ImGuiIO& io = ImGui::GetIO();
-            // The navigation gesture starts inside the viewport; a
-            // gesture already underway may continue beyond its bounds.
-            // Do not steal Alt+LMB or RMB from unrelated ImGui controls.
-            const bool pointerOwned = hovered || m_ViewportNavigationActive;
-            // Keep MMB/RMB navigation alive after the pointer crosses the image edge.
-            // A new gesture may only begin over the viewport; the owned drag can
-            // continue outside without toggling the camera back to the scene view.
-            const bool optionLeft = pointerOwned && io.KeyAlt &&
-                ImGui::IsMouseDown(ImGuiMouseButton_Left);
-            const bool rightMouse = pointerOwned &&
-                ImGui::IsMouseDown(ImGuiMouseButton_Right);
-            const bool middleMouse = pointerOwned &&
-                ImGui::IsMouseDown(ImGuiMouseButton_Middle);
-            const bool viewportKeyboard = keyboardActive && !io.WantTextInput;
-            const bool arrowNavigation = viewportKeyboard &&
-                (ImGui::IsKeyDown(ImGuiKey_UpArrow) || ImGui::IsKeyDown(ImGuiKey_DownArrow) ||
-                 ImGui::IsKeyDown(ImGuiKey_LeftArrow) || ImGui::IsKeyDown(ImGuiKey_RightArrow));
-            const bool shiftedKeyboardFly = viewportKeyboard && io.KeyShift &&
-                (ImGui::IsKeyDown(ImGuiKey_W) || ImGui::IsKeyDown(ImGuiKey_A) ||
-                 ImGui::IsKeyDown(ImGuiKey_S) || ImGui::IsKeyDown(ImGuiKey_D) ||
-                 ImGui::IsKeyDown(ImGuiKey_Q) || ImGui::IsKeyDown(ImGuiKey_E));
-            const bool requested = optionLeft || rightMouse || middleMouse ||
-                arrowNavigation || shiftedKeyboardFly;
-            if (!requested)
+            const bool leftDown = ImGui::IsMouseDown(ImGuiMouseButton_Left);
+            const bool rightDown = ImGui::IsMouseDown(ImGuiMouseButton_Right);
+            const bool middleDown = ImGui::IsMouseDown(ImGuiMouseButton_Middle);
+            const bool optionLeft = io.KeyAlt && leftDown;
+            const bool pointerHeld = optionLeft || rightDown || middleDown;
+            if (!pointerHeld)
             {
-                m_ViewportNavigationActive = false;
+                m_ViewportPointerNavigationActive = false;
                 m_ViewportNavigationCancelled = false;
             }
-            if ((hovered || keyboardActive) && requested && !m_ViewportNavigationCancelled)
+
+            // A camera drag must BEGIN on the scene image, not on a floating
+            // inspector, button, toolbar, or other window. Once owned, it can
+            // continue beyond the image's edge without releasing mid-drag.
+            const bool pointerStarts = hovered &&
+                ((io.KeyAlt && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) ||
+                 ImGui::IsMouseClicked(ImGuiMouseButton_Right) ||
+                 ImGui::IsMouseClicked(ImGuiMouseButton_Middle));
+            if (pointerStarts && !m_ViewportNavigationCancelled)
+                m_ViewportPointerNavigationActive = true;
+
+            if (ImGui::IsKeyPressed(ImGuiKey_Escape, false) &&
+                m_ViewportPointerNavigationActive)
             {
-                m_ViewportNavigationActive = true;
-                m_ViewportSceneCamera.reset();
-            }
-            if (ImGui::IsKeyPressed(ImGuiKey_Escape, false))
-            {
-                m_ViewportNavigationActive = false;
+                m_ViewportPointerNavigationActive = false;
                 m_ViewportNavigationCancelled = true;
             }
-            m_ViewportFlyCursorCaptured = m_ViewportNavigationActive && rightMouse;
-            if (!hovered && !m_ViewportNavigationActive) return;
+
+            const bool pointerNavigation = m_ViewportPointerNavigationActive &&
+                !m_ViewportNavigationCancelled && pointerHeld;
+            const bool pointerFly = pointerNavigation && rightDown;
+            m_ViewportFlyCursorCaptured = pointerFly;
+
+            // A focused scene image owns unmodified WASD/QE and arrow keys,
+            // even WITHOUT RMB/Shift. Do not move a world while typing into an
+            // inspector, selecting a menu, or holding Cmd/Ctrl shortcuts.
+            const bool viewportKeyboard = keyboardActive && m_ViewportFocused &&
+                !io.WantTextInput && !io.KeySuper && !io.KeyCtrl && !io.KeyAlt &&
+                !ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId);
+            const bool keyboardMove = viewportKeyboard &&
+                (ImGui::IsKeyDown(ImGuiKey_W) || ImGui::IsKeyDown(ImGuiKey_A) ||
+                 ImGui::IsKeyDown(ImGuiKey_S) || ImGui::IsKeyDown(ImGuiKey_D) ||
+                 ImGui::IsKeyDown(ImGuiKey_Q) || ImGui::IsKeyDown(ImGuiKey_E) ||
+                 ImGui::IsKeyDown(ImGuiKey_UpArrow) ||
+                 ImGui::IsKeyDown(ImGuiKey_DownArrow) ||
+                 ImGui::IsKeyDown(ImGuiKey_LeftArrow) ||
+                 ImGui::IsKeyDown(ImGuiKey_RightArrow));
+            const bool wheel = hovered && io.MouseWheel != 0.0f;
+            if (pointerNavigation || keyboardMove || wheel)
+                m_ViewportSceneCamera.reset();
+
+            if (!pointerNavigation && !keyboardMove && !hovered) return;
+
             ViewportInput input;
-            input.MouseDeltaX = io.MouseDelta.x;
-            input.MouseDeltaY = io.MouseDelta.y;
-            input.WheelDelta = hovered && m_NavigationSettings.ScrollBehavior == ViewportScrollBehavior::Dolly
-                ? io.MouseWheel : 0.0f;
-            input.DeltaSeconds = io.DeltaTime;
-            // Escape cancels navigation for the remainder of this drag.
-            // No camera motion or cursor capture is allowed until release.
-            const bool navigating = m_ViewportNavigationActive && !m_ViewportNavigationCancelled;
-            input.Orbit = navigating && ((middleMouse && !io.KeyShift) ||
-                (optionLeft && !io.KeyShift && !io.KeyCtrl));
-            input.Pan = navigating && ((middleMouse && io.KeyShift) || (optionLeft && io.KeyShift));
-            input.Dolly = navigating && optionLeft && io.KeyCtrl && !io.KeyShift;
-            input.Fly = navigating && (rightMouse || arrowNavigation || shiftedKeyboardFly);
-            if (hovered && m_NavigationSettings.ScrollBehavior == ViewportScrollBehavior::Pan && io.MouseWheel != 0.0f)
+            // Skip the click frame: switching GLFW cursor modes otherwise
+            // generates a spurious large delta and a visible camera jump.
+            const float deltaX = pointerStarts ? 0.0f :
+                std::clamp(io.MouseDelta.x, -120.0f, 120.0f);
+            const float deltaY = pointerStarts ? 0.0f :
+                std::clamp(io.MouseDelta.y, -120.0f, 120.0f);
+            input.MouseDeltaX = deltaX;
+            input.MouseDeltaY = deltaY;
+            input.DeltaSeconds = std::clamp(io.DeltaTime, 0.0f, 0.05f);
+            input.Orbit = pointerNavigation && !io.KeyShift &&
+                (middleDown || (optionLeft && !io.KeyCtrl));
+            input.Pan = pointerNavigation &&
+                ((middleDown && io.KeyShift) || (optionLeft && io.KeyShift));
+            input.Dolly = pointerNavigation && optionLeft && io.KeyCtrl && !io.KeyShift;
+            input.Fly = pointerFly || keyboardMove;
+            if (wheel && m_NavigationSettings.ScrollBehavior == ViewportScrollBehavior::Dolly)
+                input.WheelDelta = io.MouseWheel;
+            if (wheel && m_NavigationSettings.ScrollBehavior == ViewportScrollBehavior::Pan)
             {
                 input.Pan = true;
                 input.MouseDeltaX = io.MouseWheelH * 24.0f;
@@ -1775,35 +1810,32 @@ export namespace kairo::editor
                 m_ViewportController.FreeView();
                 m_ViewportSceneCamera.reset();
                 m_ViewportRenderLayers = kairo::engine::AllRenderLayers;
-                m_ViewportNavigationActive = false;
                 return;
             }
-            if (viewportKeyboard && ImGui::IsKeyPressed(ImGuiKey_C, false) &&
-                !io.KeyCtrl && !io.KeySuper && !io.KeyAlt)
+            if (viewportKeyboard && ImGui::IsKeyPressed(ImGuiKey_C, false))
             {
                 ViewSceneCamera();
-                m_ViewportNavigationActive = false;
                 return;
             }
             if (input.Fly)
             {
-                if (rightMouse) ImGui::SetMouseCursor(ImGuiMouseCursor_None);
+                if (pointerFly) ImGui::SetMouseCursor(ImGuiMouseCursor_None);
                 input.MoveForward =
                     (ImGui::IsKeyDown(ImGuiKey_W) || ImGui::IsKeyDown(ImGuiKey_UpArrow) ? 1.0f : 0.0f) -
                     (ImGui::IsKeyDown(ImGuiKey_S) || ImGui::IsKeyDown(ImGuiKey_DownArrow) ? 1.0f : 0.0f);
                 input.MoveRight =
                     (ImGui::IsKeyDown(ImGuiKey_D) || ImGui::IsKeyDown(ImGuiKey_RightArrow) ? 1.0f : 0.0f) -
                     (ImGui::IsKeyDown(ImGuiKey_A) || ImGui::IsKeyDown(ImGuiKey_LeftArrow) ? 1.0f : 0.0f);
-                input.MoveUp = (ImGui::IsKeyDown(ImGuiKey_E) ? 1.0f : 0.0f) -
+                input.MoveUp =
+                    (ImGui::IsKeyDown(ImGuiKey_E) ? 1.0f : 0.0f) -
                     (ImGui::IsKeyDown(ImGuiKey_Q) ? 1.0f : 0.0f);
-                if (!rightMouse && !optionLeft && !middleMouse)
+                if (!pointerFly)
                 {
                     input.MouseDeltaX = 0.0f;
                     input.MouseDeltaY = 0.0f;
                 }
             }
             m_ViewportController.Update(input, m_NavigationSettings);
-
         }
 
         void PersistNavigationSettings()
