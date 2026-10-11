@@ -741,6 +741,7 @@ int main(int argc, char** argv)
         std::optional<pid_t> launchedRuntime;
         std::chrono::steady_clock::time_point runtimeLaunchedAt{};
 #endif
+        bool viewportCursorCaptured = false;
         while (!renderer.NativeWindow().ShouldClose() && (!options.FrameLimit.has_value() || renderedFrames < *options.FrameLimit))
         {
             renderer.NativeWindow().PollEvents();
@@ -817,7 +818,14 @@ int main(int argc, char** argv)
                 }
             }
             animationPreview.Draw(state.SelectedEntity(), shell.RenderScene(), renderAssets);
-            renderer.NativeWindow().SetCursorCaptured(shell.ViewportCursorCaptured());
+            const bool wantsCursorCapture = shell.ViewportCursorCaptured();
+            if (wantsCursorCapture != viewportCursorCaptured)
+            {
+                // GLFW cursor disabling is a state transition, not a per-frame
+                // command. Repeating it can reset relative mouse sampling.
+                renderer.NativeWindow().SetCursorCaptured(wantsCursorCapture);
+                viewportCursorCaptured = wantsCursorCapture;
+            }
             imgui.EndFrame();
             bool assetReloadRequested = false;
             for (const auto& request : shell.TakeAssetBrowserRequests())
