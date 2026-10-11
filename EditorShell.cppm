@@ -363,6 +363,8 @@ export namespace kairo::editor
             'O', 'f', 'f', 'l', 'i', 'n', 'e', '.', 'p', 'p', 'm', '\0' };
         int m_NativeGameplayType = 0;
         EditorAction m_ActiveTool = EditorAction::SelectTool;
+        enum class ViewportDragTool : std::uint8_t { Pick, Orbit, Pan, Zoom };
+        ViewportDragTool m_ViewportDragTool = ViewportDragTool::Pick;
         bool m_ViewportFocused = false;
         bool m_ViewportKeyboardActive = false;
         bool m_ShowPhysicsBroadphase = false;
@@ -1439,6 +1441,27 @@ export namespace kairo::editor
                 if (ActionButton("+", UIButtonTone::Primary, true, 25.0f)) OpenAddPrimitivePopup();
                 if (ImGui::IsItemHovered()) ImGui::SetTooltip("Add primitive (Shift+A)");
                 DrawPrimitivePopup();
+                ImGui::SameLine();
+                constexpr std::array dragToolLabels{ "Pick", "Orbit", "Pan", "Zoom" };
+                const auto currentDrag = static_cast<std::size_t>(m_ViewportDragTool);
+                if (ImGui::BeginCombo("##ViewDragTool", dragToolLabels.at(currentDrag),
+                    ImGuiComboFlags_WidthFitPreview))
+                {
+                    for (std::size_t index = 0u; index < dragToolLabels.size(); ++index)
+                    {
+                        const bool selected = index == currentDrag;
+                        if (ImGui::Selectable(dragToolLabels[index], selected))
+                        {
+                            m_ViewportDragTool = static_cast<ViewportDragTool>(index);
+                            m_ViewportPointerNavigationActive = false;
+                            m_ViewportNavigationCancelled = false;
+                        }
+                        if (selected) ImGui::SetItemDefaultFocus();
+                    }
+                    ImGui::EndCombo();
+                }
+                if (ImGui::IsItemHovered())
+                    ImGui::SetTooltip("Scene left-drag: Pick objects, Orbit the view, Pan the view or Zoom. Trackpad-friendly, no middle button required.");
 
                 const ImVec2 viewportMin = ImGui::GetCursorScreenPos();
                 const ImVec2 viewportSize = ImGui::GetContentRegionAvail();
@@ -1486,10 +1509,12 @@ export namespace kairo::editor
                     }
                     ImGui::EndDragDropTarget();
                 }
-                const bool gizmoOwnsPointer = DrawTransformGizmo(viewportMin, viewportSize);
+                const bool gizmoOwnsPointer = m_ViewportDragTool == ViewportDragTool::Pick &&
+                    DrawTransformGizmo(viewportMin, viewportSize);
                 const bool navigationClick = ImGui::GetIO().KeyAlt;
                 if (hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left) &&
-                    !navigationClick && !gizmoOwnsPointer &&
+                    !navigationClick && m_ViewportDragTool == ViewportDragTool::Pick &&
+                    !gizmoOwnsPointer &&
                     m_ViewportTexture != ImTextureID_Invalid)
                 {
                     ImGui::SetWindowFocus();
@@ -1506,7 +1531,9 @@ export namespace kairo::editor
                 // The transform gizmo must not monopolize MMB/RMB camera motion
                 // merely because the cursor overlaps a rotation/scale handle.
                 // LMB manipulation still belongs to the gizmo unless Alt is held.
-                const bool cameraDrag = ImGui::IsMouseDown(ImGuiMouseButton_Middle) ||
+                const bool cameraDrag = (m_ViewportDragTool != ViewportDragTool::Pick &&
+                    ImGui::IsMouseDown(ImGuiMouseButton_Left)) ||
+                    ImGui::IsMouseDown(ImGuiMouseButton_Middle) ||
                     ImGui::IsMouseDown(ImGuiMouseButton_Right) ||
                     (ImGui::GetIO().KeyAlt && ImGui::IsMouseDown(ImGuiMouseButton_Left));
                 HandleViewportNavigation(hovered && (!gizmoOwnsPointer || cameraDrag),
@@ -1518,7 +1545,7 @@ export namespace kairo::editor
                     m_ActiveTool == EditorAction::TranslateTool ? "MOVE" :
                     m_ActiveTool == EditorAction::RotateTool ? "ROTATE" : "SCALE");
                 ImGui::GetWindowDrawList()->AddText({ overlay.x, overlay.y + 18.0f }, IM_COL32(135, 165, 184, 190),
-                    "Click scene to focus | MMB / Option+LMB orbit | Shift+MMB pan | RMB look | WASD move | Q/E up/down | F focus | wheel zoom");
+                    "Drag mode: Pick / Orbit / Pan / Zoom | MMB orbit | RMB free-look | WASD move | Q/E height | F focus | wheel zoom");
                 const auto selected = m_State.SelectedEntity();
                 if (selected.has_value())
                 {
@@ -1763,7 +1790,8 @@ export namespace kairo::editor
             const bool rightDown = ImGui::IsMouseDown(ImGuiMouseButton_Right);
             const bool middleDown = ImGui::IsMouseDown(ImGuiMouseButton_Middle);
             const bool optionLeft = io.KeyAlt && leftDown;
-            const bool pointerHeld = optionLeft || rightDown || middleDown;
+            const bool plainLeftDrag = m_ViewportDragTool != ViewportDragTool::Pick && leftDown;
+            const bool pointerHeld = optionLeft || plainLeftDrag || rightDown || middleDown;
             if (!pointerHeld)
             {
                 m_ViewportPointerNavigationActive = false;
@@ -1774,7 +1802,8 @@ export namespace kairo::editor
             // inspector, button, toolbar, or other window. Once owned, it can
             // continue beyond the image's edge without releasing mid-drag.
             const bool pointerStarts = hovered &&
-                ((io.KeyAlt && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) ||
+                (((io.KeyAlt || m_ViewportDragTool != ViewportDragTool::Pick) &&
+                  ImGui::IsMouseClicked(ImGuiMouseButton_Left)) ||
                  ImGui::IsMouseClicked(ImGuiMouseButton_Right) ||
                  ImGui::IsMouseClicked(ImGuiMouseButton_Middle));
             if (pointerStarts && !m_ViewportNavigationCancelled)
@@ -1823,11 +1852,15 @@ export namespace kairo::editor
             input.MouseDeltaX = deltaX;
             input.MouseDeltaY = deltaY;
             input.DeltaSeconds = std::clamp(io.DeltaTime, 0.0f, 0.05f);
-            input.Orbit = pointerNavigation && !io.KeyShift &&
-                (middleDown || (optionLeft && !io.KeyCtrl));
+            input.Orbit = pointerNavigation &&
+                ((m_ViewportDragTool == ViewportDragTool::Orbit && leftDown && !io.KeyAlt) ||
+                 (!io.KeyShift && (middleDown || (optionLeft && !io.KeyCtrl))));
             input.Pan = pointerNavigation &&
-                ((middleDown && io.KeyShift) || (optionLeft && io.KeyShift));
-            input.Dolly = pointerNavigation && optionLeft && io.KeyCtrl && !io.KeyShift;
+                ((m_ViewportDragTool == ViewportDragTool::Pan && leftDown && !io.KeyAlt) ||
+                 (middleDown && io.KeyShift) || (optionLeft && io.KeyShift));
+            input.Dolly = pointerNavigation &&
+                ((m_ViewportDragTool == ViewportDragTool::Zoom && leftDown && !io.KeyAlt) ||
+                 (optionLeft && io.KeyCtrl && !io.KeyShift));
             input.Fly = pointerFly || keyboardMove;
             if (wheel && m_NavigationSettings.ScrollBehavior == ViewportScrollBehavior::Dolly)
                 input.WheelDelta = io.MouseWheel;
@@ -1919,6 +1952,7 @@ export namespace kairo::editor
             }
             if (!ImGui::BeginPopupModal("Navigation Controls", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) return;
             ImGui::TextUnformatted("3D viewport");
+            ImGui::BulletText("Viewport drag-mode selector: Pick, Orbit, Pan, Zoom; left-drag with no modifiers");
             ImGui::BulletText("Option + left drag: orbit");
             ImGui::BulletText("Shift + Option + left drag: pan");
             ImGui::BulletText("Control + Option + left drag: dolly");
