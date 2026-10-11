@@ -136,6 +136,10 @@ export namespace kairo::editor
                 !std::isfinite(input.MoveUp) || input.DeltaSeconds < 0.0f)
                 throw std::invalid_argument("Viewport input must be finite with non-negative delta time.");
             using namespace kairo::foundation::math;
+            // Orbit moves the camera around its target; RMB free-look must keep
+            // the physical camera position fixed and turn its target instead.
+            // Reusing orbit rotation for free-look made every turn move sideways.
+            const Vec3f cameraBeforeRotation = Pose().Position;
             if (input.Orbit || input.Fly)
             {
                 const float xDirection = settings.InvertOrbitX ? -1.0f : 1.0f;
@@ -150,6 +154,12 @@ export namespace kairo::editor
                     6.28318530717958647692f);
                 m_Pitch = std::clamp(m_Pitch - mouseY * settings.OrbitSensitivity * yDirection,
                     -1.52f, 1.52f);
+                if (input.Fly && !input.Orbit)
+                {
+                    // Move the pivot by the inverse of the would-be orbital
+                    // displacement, so the camera position does not move.
+                    m_Target += cameraBeforeRotation - Pose().Position;
+                }
             }
             const ViewportCameraPose pose = Pose();
             const Vec3f forward = SafeNormalize(pose.Target - pose.Position, Vec3f::Forward());
