@@ -150,6 +150,15 @@ export namespace kairo::editor
                 .Target = pose.Target,
                 .Up = pose.Up
             };
+            if (!m_ViewportSceneCamera.has_value() && m_ViewportNavigationProjection.has_value())
+            {
+                const auto& saved = *m_ViewportNavigationProjection;
+                result.Projection = saved.Projection;
+                result.VerticalFovRadians = saved.VerticalFovRadians;
+                result.OrthographicSize = saved.OrthographicSize;
+                result.NearPlane = saved.NearPlane;
+                result.FarPlane = saved.FarPlane;
+            }
             if (m_ViewportSceneCamera.has_value() &&
                 m_Project.Scene().Contains(*m_ViewportSceneCamera) &&
                 m_Project.Scene().HasCamera(*m_ViewportSceneCamera))
@@ -337,6 +346,9 @@ export namespace kairo::editor
         std::optional<kairo::engine::Entity> m_GizmoEntity;
         ViewportController m_ViewportController;
         std::optional<kairo::engine::Entity> m_ViewportSceneCamera;
+        // Keep authored FOV and clipping when first orbiting a scene camera.
+        // Otherwise the first mouse pixel switches to default FOV (visible pop).
+        std::optional<kairo::renderer::CameraPose> m_ViewportNavigationProjection;
         PhysicsPreview m_PhysicsPreview;
         std::optional<kairo::engine::Scene> m_RuntimeScene;
         std::unique_ptr<AIEditorSession> m_AISession;
@@ -1711,6 +1723,9 @@ export namespace kairo::editor
             });
             m_ViewportSceneCamera = *cameraEntity;
             m_ViewportRenderLayers = scene.Camera(*cameraEntity).RenderLayers;
+            // Cache this lens independently of the authored scene. Free-flight
+            // must not abruptly jump from 50-degree FOV to 60-degree FOV.
+            m_ViewportNavigationProjection = ViewportCamera();
         }
 
         void StartPlay()
@@ -1811,6 +1826,7 @@ export namespace kairo::editor
             {
                 m_ViewportController.FreeView();
                 m_ViewportSceneCamera.reset();
+                m_ViewportNavigationProjection.reset();
                 m_ViewportRenderLayers = kairo::engine::AllRenderLayers;
                 return;
             }
@@ -2087,6 +2103,7 @@ export namespace kairo::editor
             {
                 m_ViewportController.FreeView();
                 m_ViewportSceneCamera.reset();
+                m_ViewportNavigationProjection.reset();
                 m_ViewportRenderLayers = kairo::engine::AllRenderLayers;
             }
             if (ImGui::IsItemHovered()) ImGui::SetTooltip("Free perspective view (Home)");
