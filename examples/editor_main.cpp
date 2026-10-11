@@ -748,7 +748,7 @@ int main(int argc, char** argv)
                 screenshot = std::move(capture);
             if (const auto picked = renderer.TakeViewportPickResult(); picked.has_value())
                 shell.ApplyViewportPick(*picked);
-            imgui.BeginFrame();
+            imgui.BeginFrame(shell.ViewportKeyboardActive());
             shell.SetViewportTexture(imgui.ViewportTexture());
             shell.SetRendererProfile(renderer.LastFrameProfile());
             shell.Draw();
