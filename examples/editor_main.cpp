@@ -28,6 +28,7 @@ extern char** environ;
 #endif
 
 import Kairo.Editor;
+import Kairo.Editor.ProjectLogicBuild;
 import Kairo.AI;
 import Kairo.Editor.Theme;
 import Kairo.Editor.ImGuiRuntime;
@@ -769,6 +770,12 @@ int main(int argc, char** argv)
             {
                 try
                 {
+                    // Saving scene and logic documents is not compilation.
+                    // KairoPlayer validates source-bound bytecode at startup;
+                    // skipping this gate can cause an immediate invisible exit.
+                    const auto built = kairo::editor::BuildProjectLogic(project.ProjectFile());
+                    std::cout << "Play: compiled " << built.size()
+                              << " attached logic artifact(s).\n";
 #if !defined(_WIN32)
                     if (launchedRuntime.has_value())
                         throw std::runtime_error("The game is already running. Close it before launching Play again.");
