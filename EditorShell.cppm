@@ -1840,7 +1840,7 @@ export namespace kairo::editor
             if (pointerNavigation || keyboardMove || wheel)
                 m_ViewportSceneCamera.reset();
 
-            if (!pointerNavigation && !keyboardMove && !hovered) return;
+            if (!pointerNavigation && !keyboardMove && !hovered && !viewportKeyboard) return;
 
             ViewportInput input;
             // Skip the click frame: switching GLFW cursor modes otherwise
