@@ -67,13 +67,13 @@ TEST_CASE("Viewport orbit pan and six-axis movement remain isolated from scene t
     viewport.Update({ .MouseDeltaX = 75.0f, .MouseDeltaY = -36.0f, .Orbit = true });
     const auto orbited = viewport.Pose();
     CHECK(orbited.Position != first.Position);
-    CHECK(Distance(orbited.Position, orbited.Target) == Catch::Approx(distance).margin(0.001));
+    CHECK(std::abs(Distance(orbited.Position, orbited.Target) - distance) < 0.001f);
     CHECK(orbited.Target == first.Target);
 
     viewport.Update({ .MouseDeltaX = 20.0f, .MouseDeltaY = -10.0f, .Pan = true });
     const auto panned = viewport.Pose();
     CHECK(panned.Target != orbited.Target);
-    CHECK(Distance(panned.Position, panned.Target) == Catch::Approx(distance).margin(0.001));
+    CHECK(std::abs(Distance(panned.Position, panned.Target) - distance) < 0.001f);
 
     viewport.Reset();
     const auto beforeKeys = viewport.Pose();
@@ -82,7 +82,7 @@ TEST_CASE("Viewport orbit pan and six-axis movement remain isolated from scene t
     const auto moved = viewport.Pose();
     CHECK(moved.Target != beforeKeys.Target);
     CHECK(moved.Position != beforeKeys.Position);
-    CHECK(Distance(moved.Position, moved.Target) == Catch::Approx(distance).margin(0.001));
+    CHECK(std::abs(Distance(moved.Position, moved.Target) - distance) < 0.001f);
 
     // A 2-second window stall must never teleport the free camera.
     ViewportController stalled;
