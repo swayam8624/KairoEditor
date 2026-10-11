@@ -1756,10 +1756,14 @@ export namespace kairo::editor
             input.WheelDelta = hovered && m_NavigationSettings.ScrollBehavior == ViewportScrollBehavior::Dolly
                 ? io.MouseWheel : 0.0f;
             input.DeltaSeconds = io.DeltaTime;
-            input.Orbit = (middleMouse && !io.KeyShift) || (optionLeft && !io.KeyShift && !io.KeyCtrl);
-            input.Pan = (middleMouse && io.KeyShift) || (optionLeft && io.KeyShift);
-            input.Dolly = optionLeft && io.KeyCtrl && !io.KeyShift;
-            input.Fly = rightMouse || arrowNavigation || shiftedKeyboardFly;
+            // Escape cancels navigation for the remainder of this drag.
+            // No camera motion or cursor capture is allowed until release.
+            const bool navigating = m_ViewportNavigationActive && !m_ViewportNavigationCancelled;
+            input.Orbit = navigating && ((middleMouse && !io.KeyShift) ||
+                (optionLeft && !io.KeyShift && !io.KeyCtrl));
+            input.Pan = navigating && ((middleMouse && io.KeyShift) || (optionLeft && io.KeyShift));
+            input.Dolly = navigating && optionLeft && io.KeyCtrl && !io.KeyShift;
+            input.Fly = navigating && (rightMouse || arrowNavigation || shiftedKeyboardFly);
             if (hovered && m_NavigationSettings.ScrollBehavior == ViewportScrollBehavior::Pan && io.MouseWheel != 0.0f)
             {
                 input.Pan = true;
