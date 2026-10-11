@@ -1,5 +1,6 @@
 #include <charconv>
 #include <cerrno>
+#include <chrono>
 #include <cmath>
 #include <cstddef>
 #include <cstdlib>
@@ -19,6 +20,7 @@
 #if defined(_WIN32)
 #include <process.h>
 #else
+#include <fcntl.h>
 #include <spawn.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -26,6 +28,7 @@ extern char** environ;
 #endif
 
 import Kairo.Editor;
+import Kairo.Editor.ProjectLogicBuild;
 import Kairo.AI;
 import Kairo.Editor.Theme;
 import Kairo.Editor.ImGuiRuntime;
@@ -357,17 +360,39 @@ namespace
             "Set play-executable in the .kproject or KAIRO_PLAYER_EXECUTABLE.");
     }
 
-    void LaunchProjectRuntime(const kairo::editor::ProjectSession& project,
-        const std::filesystem::path& editorExecutable)
+    [[nodiscard]] std::intptr_t LaunchProjectRuntime(const kairo::editor::ProjectSession& project,
+        const std::filesystem::path& editorExecutable,
+        std::optional<kairo::renderer::GraphicsBackend> backendOverride)
     {
         const auto executable = ResolveRuntimeExecutable(project, editorExecutable);
         const auto descriptor = project.ProjectFile();
         std::string executableText = executable.string();
         std::string descriptorText = descriptor.string();
+        // Explicit editor renderer preference applies to the Play child too.
+        // Without this, the editor can display with OpenGL while Play silently
+        // attempts the project default (possibly unsupported) backend.
+        std::string backendText;
+        if (backendOverride.has_value() && !project.Descriptor().PlayExecutable.has_value())
+        {
+            switch (*backendOverride)
+            {
+                case kairo::renderer::GraphicsBackend::Automatic: backendText = "auto"; break;
+                case kairo::renderer::GraphicsBackend::Vulkan: backendText = "vulkan"; break;
+                case kairo::renderer::GraphicsBackend::Metal: backendText = "metal"; break;
+                case kairo::renderer::GraphicsBackend::Direct3D12: backendText = "d3d12"; break;
+                case kairo::renderer::GraphicsBackend::OpenGL: backendText = "opengl"; break;
+            }
+        }
+        // Custom project-owned Play executables have their own argv contracts.
+        backendOverride = backendText.empty() ? std::nullopt : backendOverride;
 
 #if defined(_WIN32)
-        const intptr_t child = _spawnl(_P_NOWAIT, executableText.c_str(),
-            executableText.c_str(), descriptorText.c_str(), static_cast<char*>(nullptr));
+        const intptr_t child = backendOverride.has_value()
+            ? _spawnl(_P_NOWAIT, executableText.c_str(), executableText.c_str(),
+                descriptorText.c_str(), "--renderer", backendText.c_str(),
+                static_cast<char*>(nullptr))
+            : _spawnl(_P_NOWAIT, executableText.c_str(), executableText.c_str(),
+                descriptorText.c_str(), static_cast<char*>(nullptr));
         if (child == -1)
             throw std::runtime_error(
                 "Cannot launch project runtime: " + executableText);
@@ -375,23 +400,46 @@ namespace
         {
             (void)_cwait(nullptr, child, _WAIT_CHILD);
         }).detach();
+        return 0;
 #else
         pid_t child = 0;
         char* childArguments[] = {
             executableText.data(),
             descriptorText.data(),
+            backendOverride.has_value() ? const_cast<char*>("--renderer") : nullptr,
+            backendOverride.has_value() ? backendText.data() : nullptr,
             nullptr
         };
-        const int status = posix_spawn(
-            &child, executableText.c_str(), nullptr, nullptr, childArguments, environ);
+        const auto logPath = project.ProjectRoot() / ".kairo" / "logs" / "player-last-run.log";
+        std::filesystem::create_directories(logPath.parent_path());
+        const int logFd = ::open(logPath.c_str(), O_CREAT | O_WRONLY | O_TRUNC, 0600);
+        if (logFd < 0)
+            throw std::system_error(errno, std::generic_category(),
+                "Cannot create KairoPlayer log " + logPath.string());
+
+        posix_spawn_file_actions_t actions{};
+        int status = posix_spawn_file_actions_init(&actions);
+        if (status == 0)
+        {
+            status = posix_spawn_file_actions_adddup2(&actions, logFd, STDOUT_FILENO);
+            if (status == 0)
+                status = posix_spawn_file_actions_adddup2(&actions, logFd, STDERR_FILENO);
+            if (status == 0)
+                status = posix_spawn_file_actions_addclose(&actions, logFd);
+            if (status == 0)
+                status = posix_spawn(&child, executableText.c_str(), &actions,
+                    nullptr, childArguments, environ);
+            posix_spawn_file_actions_destroy(&actions);
+        }
+        ::close(logFd);
         if (status != 0)
             throw std::system_error(status, std::generic_category(),
-                "Cannot launch project runtime " + executableText);
-        std::thread([child]
-        {
-            int statusCode = 0;
-            while (waitpid(child, &statusCode, 0) < 0 && errno == EINTR) {}
-        }).detach();
+                "Cannot launch KairoPlayer " + executableText);
+        std::cout << "KairoPlayer launched (PID " << child
+                  << "); diagnostics: " << logPath << '\n';
+        // The editor frame loop polls this PID. Do not detach a waitpid thread
+        // that silently throws away a startup failure and leaves no game window.
+        return static_cast<std::intptr_t>(child);
 #endif
     }
 }
@@ -689,6 +737,11 @@ int main(int argc, char** argv)
         std::uint64_t renderedFrames = 0u;
         std::optional<kairo::renderer::ViewportCapture> screenshot;
         std::optional<std::filesystem::path> projectTransition;
+#if !defined(_WIN32)
+        std::optional<pid_t> launchedRuntime;
+        std::chrono::steady_clock::time_point runtimeLaunchedAt{};
+#endif
+        bool viewportCursorCaptured = false;
         while (!renderer.NativeWindow().ShouldClose() && (!options.FrameLimit.has_value() || renderedFrames < *options.FrameLimit))
         {
             renderer.NativeWindow().PollEvents();
@@ -696,15 +749,68 @@ int main(int argc, char** argv)
                 screenshot = std::move(capture);
             if (const auto picked = renderer.TakeViewportPickResult(); picked.has_value())
                 shell.ApplyViewportPick(*picked);
-            imgui.BeginFrame();
+            imgui.BeginFrame(shell.ViewportKeyboardActive());
             shell.SetViewportTexture(imgui.ViewportTexture());
             shell.SetRendererProfile(renderer.LastFrameProfile());
             shell.Draw();
+#if !defined(_WIN32)
+            if (launchedRuntime.has_value())
+            {
+                int childStatus = 0;
+                const pid_t completed = waitpid(*launchedRuntime, &childStatus, WNOHANG);
+                if (completed == *launchedRuntime || (completed < 0 && errno != EINTR))
+                {
+                    const bool quickExit = std::chrono::steady_clock::now() -
+                        runtimeLaunchedAt < std::chrono::seconds(2);
+                    const bool success = completed > 0 &&
+                        WIFEXITED(childStatus) && WEXITSTATUS(childStatus) == 0;
+                    launchedRuntime.reset();
+                    if (!success || quickExit)
+                    {
+                        const auto logPath = project.ProjectRoot() / ".kairo" /
+                            "logs" / "player-last-run.log";
+                        std::ifstream log(logPath);
+                        std::string excerpt;
+                        std::string line;
+                        while (std::getline(log, line))
+                        {
+                            excerpt += line + '\n';
+                            if (excerpt.size() > 2400u)
+                                excerpt.erase(0u, excerpt.size() - 2400u);
+                        }
+                        std::string detail = success
+                            ? "KairoPlayer closed immediately without staying in Play mode."
+                            : "KairoPlayer failed to start or exited with an error.";
+                        if (completed > 0 && WIFEXITED(childStatus))
+                            detail += " Exit status: " +
+                                std::to_string(WEXITSTATUS(childStatus)) + ".";
+                        detail += "\nLog: " + logPath.string();
+                        if (!excerpt.empty()) detail += "\n\n" + excerpt;
+                        shell.ReportHostError(std::move(detail));
+                    }
+                }
+            }
+#endif
             if (shell.TakeRuntimeLaunchRequest())
             {
                 try
                 {
-                    LaunchProjectRuntime(project, std::filesystem::absolute(argv[0]));
+                    // Saving scene and logic documents is not compilation.
+                    // KairoPlayer validates source-bound bytecode at startup;
+                    // skipping this gate can cause an immediate invisible exit.
+                    const auto built = kairo::editor::BuildProjectLogic(project.ProjectFile());
+                    std::cout << "Play: compiled " << built.size()
+                              << " attached logic artifact(s).\n";
+#if !defined(_WIN32)
+                    if (launchedRuntime.has_value())
+                        throw std::runtime_error("The game is already running. Close it before launching Play again.");
+                    launchedRuntime = static_cast<pid_t>(LaunchProjectRuntime(
+                        project, std::filesystem::absolute(argv[0]), options.BackendOverride));
+                    runtimeLaunchedAt = std::chrono::steady_clock::now();
+#else
+                    (void)LaunchProjectRuntime(project, std::filesystem::absolute(argv[0]),
+                        options.BackendOverride);
+#endif
                 }
                 catch (const std::exception& error)
                 {
@@ -712,7 +818,14 @@ int main(int argc, char** argv)
                 }
             }
             animationPreview.Draw(state.SelectedEntity(), shell.RenderScene(), renderAssets);
-            renderer.NativeWindow().SetCursorCaptured(shell.ViewportCursorCaptured());
+            const bool wantsCursorCapture = shell.ViewportCursorCaptured();
+            if (wantsCursorCapture != viewportCursorCaptured)
+            {
+                // GLFW cursor disabling is a state transition, not a per-frame
+                // command. Repeating it can reset relative mouse sampling.
+                renderer.NativeWindow().SetCursorCaptured(wantsCursorCapture);
+                viewportCursorCaptured = wantsCursorCapture;
+            }
             imgui.EndFrame();
             bool assetReloadRequested = false;
             for (const auto& request : shell.TakeAssetBrowserRequests())

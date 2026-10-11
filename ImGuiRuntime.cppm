@@ -1,6 +1,7 @@
 module;
 
 #include <imgui.h>
+#include <ImGuizmo.h>
 #include <imgui_impl_glfw.h>
 #include <imgui_impl_vulkan.h>
 #if defined(KAIRO_EDITOR_HAS_OPENGL_UI)
@@ -85,7 +86,7 @@ export namespace kairo::editor
         ImGuiRuntime(const ImGuiRuntime&) = delete;
         ImGuiRuntime& operator=(const ImGuiRuntime&) = delete;
 
-        void BeginFrame()
+        void BeginFrame(bool viewportOwnsKeyboard = false)
         {
             if (m_Backend == kairo::renderer::GraphicsBackend::Vulkan)
             {
@@ -106,7 +107,17 @@ export namespace kairo::editor
 #endif
             else throw std::logic_error("Dear ImGui backend was not initialized.");
             ImGui_ImplGlfw_NewFrame();
+            // Dear ImGui's keyboard navigation can activate focused buttons
+            // on Space/arrow keys while a person is flying through the world.
+            // Preserve keyboard navigation elsewhere (including dialogs).
+            ImGuiIO& io = ImGui::GetIO();
+            if (viewportOwnsKeyboard)
+                io.ConfigFlags &= ~ImGuiConfigFlags_NavEnableKeyboard;
+            else
+                io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
             ImGui::NewFrame();
+            // ImGuizmo needs its own per-frame initialization before scene tools.
+            ImGuizmo::BeginFrame();
         }
 
         void EndFrame() { ImGui::Render(); }

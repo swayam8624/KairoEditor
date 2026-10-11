@@ -4,6 +4,7 @@ module;
 #include <ImGuizmo.h>
 
 #include <array>
+#include <cmath>
 #include <cstdint>
 
 export module Kairo.Editor.TransformGizmo;
@@ -67,8 +68,26 @@ export namespace kairo::editor
             {
                 const Mat4f matrix = FromColumnMajor(model);
                 transform.Translation = ExtractTranslation(matrix);
-                transform.Scale = ExtractScale(matrix);
-                transform.Rotation = FromMatrix4(matrix).Normalized();
+                // ImGuizmo returns a TRS matrix. Quaternion conversion requires a
+                // rotation-only basis; feeding non-uniform scale to FromMatrix4
+                // changes the orientation when the user rotates a scaled object.
+                const Vec3f magnitude = ExtractScale(matrix);
+                transform.Scale = {
+                    std::copysign(magnitude.x, frame.Transform.Scale.x),
+                    std::copysign(magnitude.y, frame.Transform.Scale.y),
+                    std::copysign(magnitude.z, frame.Transform.Scale.z)
+                };
+                Mat4f rotationOnly = matrix;
+                const std::array axisScale{
+                    transform.Scale.x, transform.Scale.y, transform.Scale.z
+                };
+                for (std::size_t column = 0u; column < 3u; ++column)
+                {
+                    if (std::abs(axisScale[column]) < 1.0e-6f) continue;
+                    for (std::size_t row = 0u; row < 3u; ++row)
+                        rotationOnly(row, column) /= axisScale[column];
+                }
+                transform.Rotation = FromMatrix4(rotationOnly).Normalized();
             }
             return { transform, changed, ImGuizmo::IsUsing(), ImGuizmo::IsOver() };
         }

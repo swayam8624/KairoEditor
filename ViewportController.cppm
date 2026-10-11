@@ -78,7 +78,7 @@ export namespace kairo::editor
             m_Target = pose.Target;
             m_Distance = std::clamp(distance, 0.15f, 5000.0f);
             m_Yaw = std::atan2(direction.x, direction.z);
-            m_Pitch = std::asin(std::clamp(direction.y, -1.0f, 1.0f));
+            m_Pitch = std::clamp(std::asin(std::clamp(direction.y, -1.0f, 1.0f)), -1.52f, 1.52f);
         }
 
         /// Input: one canonical world axis view.
@@ -92,8 +92,9 @@ export namespace kairo::editor
                 case ViewportAxis::Back: m_Yaw = Pi; m_Pitch = 0.0f; break;
                 case ViewportAxis::Right: m_Yaw = Pi * 0.5f; m_Pitch = 0.0f; break;
                 case ViewportAxis::Left: m_Yaw = -Pi * 0.5f; m_Pitch = 0.0f; break;
-                case ViewportAxis::Top: m_Yaw = 0.0f; m_Pitch = Pi * 0.5f; break;
-                case ViewportAxis::Bottom: m_Yaw = 0.0f; m_Pitch = -Pi * 0.5f; break;
+                // Avoid looking exactly along world up: LookAt would have no stable right vector.
+                case ViewportAxis::Top: m_Yaw = 0.0f; m_Pitch = 1.52f; break;
+                case ViewportAxis::Bottom: m_Yaw = 0.0f; m_Pitch = -1.52f; break;
             }
         }
 
@@ -135,20 +136,38 @@ export namespace kairo::editor
                 !std::isfinite(input.MoveUp) || input.DeltaSeconds < 0.0f)
                 throw std::invalid_argument("Viewport input must be finite with non-negative delta time.");
             using namespace kairo::foundation::math;
+            // Orbit moves the camera around its target; RMB free-look must keep
+            // the physical camera position fixed and turn its target instead.
+            // Reusing orbit rotation for free-look made every turn move sideways.
+            const Vec3f cameraBeforeRotation = Pose().Position;
             if (input.Orbit || input.Fly)
             {
                 const float xDirection = settings.InvertOrbitX ? -1.0f : 1.0f;
                 const float yDirection = settings.InvertOrbitY ? -1.0f : 1.0f;
+                // Limit a single delayed frame's raw mouse movement. GLFW cursor
+                // capture transitions and macOS trackpad bursts can otherwise
+                // jump several turns before the following frame is drawn.
+                const float mouseX = std::clamp(input.MouseDeltaX, -120.0f, 120.0f);
+                const float mouseY = std::clamp(input.MouseDeltaY, -120.0f, 120.0f);
                 m_Yaw = std::remainder(
-                    m_Yaw - input.MouseDeltaX * settings.OrbitSensitivity * xDirection,
+                    m_Yaw - mouseX * settings.OrbitSensitivity * xDirection,
                     6.28318530717958647692f);
-                m_Pitch = std::clamp(m_Pitch - input.MouseDeltaY * settings.OrbitSensitivity * yDirection,
+                m_Pitch = std::clamp(m_Pitch - mouseY * settings.OrbitSensitivity * yDirection,
                     -1.52f, 1.52f);
+                if (input.Fly && !input.Orbit)
+                {
+                    // Move the pivot by the inverse of the would-be orbital
+                    // displacement, so the camera position does not move.
+                    m_Target += cameraBeforeRotation - Pose().Position;
+                }
             }
             const ViewportCameraPose pose = Pose();
             const Vec3f forward = SafeNormalize(pose.Target - pose.Position, Vec3f::Forward());
             const Vec3f right = SafeNormalize(Cross(forward, pose.Up), Vec3f::Right());
             const Vec3f up = SafeNormalize(Cross(right, forward), Vec3f::Up());
+            // Camera-space up is correct for pixel panning, but WASD editor
+            // travel should be level with the world regardless of look pitch.
+            // Q/E always move on world Y, avoiding sideways vertical drift.
             if (input.Pan)
                 m_Target += (-right * input.MouseDeltaX + up * input.MouseDeltaY) *
                     (m_Distance * settings.PanSensitivity);
@@ -159,7 +178,11 @@ export namespace kairo::editor
                 m_Distance = std::clamp(m_Distance * std::exp(-input.WheelDelta * 0.13f), 0.15f, 5000.0f);
             if (input.Fly)
             {
-                const float speed = std::max(1.0f, m_Distance) * settings.FlySpeed * input.DeltaSeconds;
+                // Flight speed grows sublinearly with camera distance, avoiding
+                // runaway WASD motion while looking at a large imported scene.
+                // Cap delta time after stalls or tab/window switches.
+                const float speed = std::sqrt(std::max(1.0f, m_Distance)) *
+                    settings.FlySpeed * std::min(input.DeltaSeconds, 0.05f);
                 // Do not let diagonal fly input (W+D, W+E, W+D+E) move
                 // faster than one normalized axis. Reject non-finite axes
                 // before reaching this point to protect distant world views.
@@ -171,8 +194,13 @@ export namespace kairo::editor
                 const float magnitudeSquared = intent.LengthSquared();
                 if (magnitudeSquared > 1.0f)
                     intent /= std::sqrt(magnitudeSquared);
+                const Vec3f levelForward = SafeNormalize(
+                    Vec3f{ forward.x, 0.0f, forward.z }, Vec3f::Forward());
+                const Vec3f levelRight = SafeNormalize(
+                    Cross(levelForward, Vec3f::Up()), Vec3f::Right());
                 const Vec3f translation =
-                    (forward * intent.z + right * intent.x + up * intent.y) * speed;
+                    (levelForward * intent.z + levelRight * intent.x +
+                     Vec3f::Up() * intent.y) * speed;
                 m_Target += translation;
             }
         }

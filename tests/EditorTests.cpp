@@ -24,6 +24,95 @@ using namespace kairo::editor;
 
 static_assert(!std::is_same_v<NodeID, PinID>);
 
+TEST_CASE("Viewport keyboard ownership suppresses tool hotkeys but preserves shortcuts", "[KairoEditor][Input][Viewport]")
+{
+    CHECK(IsViewportMotionKey(EditorKey::W));
+    CHECK(IsViewportMotionKey(EditorKey::A));
+    CHECK(IsViewportMotionKey(EditorKey::S));
+    CHECK(IsViewportMotionKey(EditorKey::D));
+    CHECK(IsViewportMotionKey(EditorKey::Q));
+    CHECK(IsViewportMotionKey(EditorKey::E));
+    CHECK_FALSE(IsViewportMotionKey(EditorKey::R));
+    CHECK_FALSE(IsViewportMotionKey(EditorKey::F));
+    for (const auto key : { EditorKey::W, EditorKey::A, EditorKey::S,
+                            EditorKey::D, EditorKey::Q, EditorKey::E })
+    {
+        CHECK_FALSE(ShouldRouteWorldKeyAsAction(key, true, KeyModifiers::None));
+        CHECK_FALSE(ShouldRouteWorldKeyAsAction(key, true, KeyModifiers::Shift));
+        CHECK(ShouldRouteWorldKeyAsAction(key, false, KeyModifiers::None));
+        CHECK(ShouldRouteWorldKeyAsAction(key, true, KeyModifiers::Shortcut));
+        CHECK(ShouldRouteWorldKeyAsAction(key, true, KeyModifiers::Alt));
+    }
+    CHECK(ShouldRouteWorldKeyAsAction(EditorKey::F, true, KeyModifiers::None));
+
+    // The viewport's W navigation key must never become the Unreal profile's
+    // TranslateTool action, while explicit global Save still works.
+    EditorInputRouter router(KeymapProfile::Unreal);
+    router.SetContext(InputContext::Scene);
+    router.BeginFrame();
+    if (ShouldRouteWorldKeyAsAction(EditorKey::W, true, KeyModifiers::None))
+        (void)router.Route({ { EditorKey::W } });
+    CHECK_FALSE(router.Triggered(EditorAction::TranslateTool));
+    CHECK(ShouldRouteWorldKeyAsAction(EditorKey::S, true, KeyModifiers::Shortcut));
+    CHECK(router.Route({ { EditorKey::S, KeyModifiers::Shortcut } }));
+    CHECK(router.Consume(EditorAction::Save));
+}
+
+TEST_CASE("Viewport orbit pan and six-axis movement remain isolated from scene transforms", "[KairoEditor][Input][Viewport]")
+{
+    using namespace kairo::foundation::math;
+    ViewportController viewport;
+    const auto first = viewport.Pose();
+    const float distance = viewport.Distance();
+    viewport.Update({ .MouseDeltaX = 75.0f, .MouseDeltaY = -36.0f, .Orbit = true });
+    const auto orbited = viewport.Pose();
+    CHECK(orbited.Position != first.Position);
+    CHECK(std::abs(Distance(orbited.Position, orbited.Target) - distance) < 0.001f);
+    CHECK(orbited.Target == first.Target);
+
+    // RMB free-look pivots the view direction in place. It is not an orbit!
+    ViewportController freeLook;
+    const auto freeLookBefore = freeLook.Pose();
+    freeLook.Update({ .MouseDeltaX = 35.0f, .MouseDeltaY = -13.0f, .Fly = true });
+    const auto freeLookAfter = freeLook.Pose();
+    CHECK(Distance(freeLookAfter.Position, freeLookBefore.Position) < 1.0e-5f);
+    CHECK(Distance(freeLookAfter.Target, freeLookBefore.Target) > 0.01f);
+
+    viewport.Update({ .MouseDeltaX = 20.0f, .MouseDeltaY = -10.0f, .Pan = true });
+    const auto panned = viewport.Pose();
+    CHECK(panned.Target != orbited.Target);
+    CHECK(std::abs(Distance(panned.Position, panned.Target) - distance) < 0.001f);
+
+    viewport.Reset();
+    const auto beforeKeys = viewport.Pose();
+    viewport.Update({ .MoveForward = 1.0f, .MoveRight = 1.0f, .MoveUp = 1.0f,
+        .DeltaSeconds = 0.016f, .Fly = true });
+    const auto moved = viewport.Pose();
+    CHECK(moved.Target != beforeKeys.Target);
+    CHECK(moved.Position != beforeKeys.Position);
+    CHECK(std::abs(Distance(moved.Position, moved.Target) - distance) < 0.001f);
+
+    // Translation uses world Y for Q/E and level movement for W/S, even
+    // when the editor camera is looking sharply downward.
+    ViewportController pitched;
+    pitched.SetPose({ { 2.0f, 9.0f, 3.0f }, { 0.0f, 0.0f, 0.0f }, Vec3f::Up() });
+    const auto pitchedBefore = pitched.Pose();
+    pitched.Update({ .MoveUp = 1.0f, .DeltaSeconds = 0.016f, .Fly = true });
+    const auto pitchedRaised = pitched.Pose();
+    CHECK(pitchedRaised.Target.y > pitchedBefore.Target.y);
+    CHECK(std::abs(pitchedRaised.Target.x - pitchedBefore.Target.x) < 1.0e-5f);
+    CHECK(std::abs(pitchedRaised.Target.z - pitchedBefore.Target.z) < 1.0e-5f);
+    pitched.Update({ .MoveForward = 1.0f, .DeltaSeconds = 0.016f, .Fly = true });
+    CHECK(std::abs(pitched.Pose().Target.y - pitchedRaised.Target.y) < 1.0e-5f);
+
+    // A 2-second window stall must never teleport the free camera.
+    ViewportController stalled;
+    ViewportController regular;
+    stalled.Update({ .MoveForward = 1.0f, .DeltaSeconds = 2.0f, .Fly = true });
+    regular.Update({ .MoveForward = 1.0f, .DeltaSeconds = 0.05f, .Fly = true });
+    CHECK(Distance(stalled.Pose().Position, regular.Pose().Position) < 1.0e-4f);
+}
+
 TEST_CASE("Editor actions and viewport navigation provide deterministic authoring input", "[KairoEditor][Input][Viewport]")
 {
     const auto bindings = DefaultEditorActionBindings();
@@ -80,6 +169,22 @@ TEST_CASE("Editor actions and viewport navigation provide deterministic authorin
     CHECK(viewport.Pose().Position.x > viewport.Pose().Target.x);
     viewport.SnapToAxis(ViewportAxis::Top);
     CHECK(viewport.Pose().Position.y > viewport.Pose().Target.y);
+    // A straight vertical LookAt is singular if its up vector is world Y.
+    const auto top = viewport.Pose();
+    const auto topForward = kairo::foundation::math::SafeNormalize(
+        top.Target - top.Position, kairo::foundation::math::Vec3f::Forward());
+    CHECK(std::abs(kairo::foundation::math::Dot(topForward, top.Up)) < 0.999f);
+    viewport.SnapToAxis(ViewportAxis::Bottom);
+    const auto bottom = viewport.Pose();
+    const auto bottomForward = kairo::foundation::math::SafeNormalize(
+        bottom.Target - bottom.Position, kairo::foundation::math::Vec3f::Forward());
+    CHECK(std::abs(kairo::foundation::math::Dot(bottomForward, bottom.Up)) < 0.999f);
+    viewport.SetPose({ { 0.0f, 10.0f, 0.0f }, { 0.0f, 0.0f, 0.0f },
+        kairo::foundation::math::Vec3f::Up() });
+    const auto straightDown = viewport.Pose();
+    const auto stableForward = kairo::foundation::math::SafeNormalize(
+        straightDown.Target - straightDown.Position, kairo::foundation::math::Vec3f::Forward());
+    CHECK(std::abs(kairo::foundation::math::Dot(stableForward, straightDown.Up)) < 0.999f);
     // Free navigation must not teleport a user inspecting a distant world.
     const auto focusedWorld = viewport.Pose().Target;
     const auto focusedDistance = viewport.Distance();
