@@ -110,6 +110,8 @@ export namespace kairo::editor
             m_ViewportFlyCursorCaptured = false;
             m_State.ValidateSelection();
             m_GraphCanvas.BeginFrame();
+            if (ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId))
+                m_ViewportKeyboardActive = false;
             RunAutosaveIfDue();
             if (m_AISession) (void)m_AISession->Poll();
             if (m_OfflineRender)
