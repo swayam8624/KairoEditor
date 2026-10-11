@@ -1503,7 +1503,14 @@ export namespace kairo::editor
                     m_ViewportPickRequest = std::pair{ x, y };
                 }
                 DrawOrientationGizmo(viewportMin, viewportSize);
-                HandleViewportNavigation(hovered && !gizmoOwnsPointer, m_ViewportKeyboardActive);
+                // The transform gizmo must not monopolize MMB/RMB camera motion
+                // merely because the cursor overlaps a rotation/scale handle.
+                // LMB manipulation still belongs to the gizmo unless Alt is held.
+                const bool cameraDrag = ImGui::IsMouseDown(ImGuiMouseButton_Middle) ||
+                    ImGui::IsMouseDown(ImGuiMouseButton_Right) ||
+                    (ImGui::GetIO().KeyAlt && ImGui::IsMouseDown(ImGuiMouseButton_Left));
+                HandleViewportNavigation(hovered && (!gizmoOwnsPointer || cameraDrag),
+                    m_ViewportKeyboardActive);
 
                 const ImVec2 overlay = { viewportMin.x + 12.0f, viewportMin.y + 12.0f };
                 ImGui::GetWindowDrawList()->AddText(overlay, IM_COL32(210, 225, 238, 210),
