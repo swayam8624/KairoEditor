@@ -84,6 +84,19 @@ TEST_CASE("Viewport orbit pan and six-axis movement remain isolated from scene t
     CHECK(moved.Position != beforeKeys.Position);
     CHECK(std::abs(Distance(moved.Position, moved.Target) - distance) < 0.001f);
 
+    // Translation uses world Y for Q/E and level movement for W/S, even
+    // when the editor camera is looking sharply downward.
+    ViewportController pitched;
+    pitched.SetPose({ { 2.0f, 9.0f, 3.0f }, { 0.0f, 0.0f, 0.0f }, Vec3f::Up() });
+    const auto pitchedBefore = pitched.Pose();
+    pitched.Update({ .MoveUp = 1.0f, .DeltaSeconds = 0.016f, .Fly = true });
+    const auto pitchedRaised = pitched.Pose();
+    CHECK(pitchedRaised.Target.y > pitchedBefore.Target.y);
+    CHECK(std::abs(pitchedRaised.Target.x - pitchedBefore.Target.x) < 1.0e-5f);
+    CHECK(std::abs(pitchedRaised.Target.z - pitchedBefore.Target.z) < 1.0e-5f);
+    pitched.Update({ .MoveForward = 1.0f, .DeltaSeconds = 0.016f, .Fly = true });
+    CHECK(std::abs(pitched.Pose().Target.y - pitchedRaised.Target.y) < 1.0e-5f);
+
     // A 2-second window stall must never teleport the free camera.
     ViewportController stalled;
     ViewportController regular;
