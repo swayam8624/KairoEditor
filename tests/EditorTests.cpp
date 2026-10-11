@@ -24,6 +24,74 @@ using namespace kairo::editor;
 
 static_assert(!std::is_same_v<NodeID, PinID>);
 
+TEST_CASE("Viewport keyboard ownership suppresses tool hotkeys but preserves shortcuts", "[KairoEditor][Input][Viewport]")
+{
+    CHECK(IsViewportMotionKey(EditorKey::W));
+    CHECK(IsViewportMotionKey(EditorKey::A));
+    CHECK(IsViewportMotionKey(EditorKey::S));
+    CHECK(IsViewportMotionKey(EditorKey::D));
+    CHECK(IsViewportMotionKey(EditorKey::Q));
+    CHECK(IsViewportMotionKey(EditorKey::E));
+    CHECK_FALSE(IsViewportMotionKey(EditorKey::R));
+    CHECK_FALSE(IsViewportMotionKey(EditorKey::F));
+    for (const auto key : { EditorKey::W, EditorKey::A, EditorKey::S,
+                            EditorKey::D, EditorKey::Q, EditorKey::E })
+    {
+        CHECK_FALSE(ShouldRouteWorldKeyAsAction(key, true, KeyModifiers::None));
+        CHECK_FALSE(ShouldRouteWorldKeyAsAction(key, true, KeyModifiers::Shift));
+        CHECK(ShouldRouteWorldKeyAsAction(key, false, KeyModifiers::None));
+        CHECK(ShouldRouteWorldKeyAsAction(key, true, KeyModifiers::Shortcut));
+        CHECK(ShouldRouteWorldKeyAsAction(key, true, KeyModifiers::Alt));
+    }
+    CHECK(ShouldRouteWorldKeyAsAction(EditorKey::F, true, KeyModifiers::None));
+
+    // The viewport's W navigation key must never become the Unreal profile's
+    // TranslateTool action, while explicit global Save still works.
+    EditorInputRouter router(KeymapProfile::Unreal);
+    router.SetContext(InputContext::Scene);
+    router.BeginFrame();
+    if (ShouldRouteWorldKeyAsAction(EditorKey::W, true, KeyModifiers::None))
+        (void)router.Route({ { EditorKey::W } });
+    CHECK_FALSE(router.Triggered(EditorAction::TranslateTool));
+    CHECK(ShouldRouteWorldKeyAsAction(EditorKey::S, true, KeyModifiers::Shortcut));
+    CHECK(router.Route({ { EditorKey::S, KeyModifiers::Shortcut } }));
+    CHECK(router.Consume(EditorAction::Save));
+}
+
+TEST_CASE("Viewport orbit pan and six-axis movement remain isolated from scene transforms", "[KairoEditor][Input][Viewport]")
+{
+    using namespace kairo::foundation::math;
+    ViewportController viewport;
+    const auto first = viewport.Pose();
+    const float distance = viewport.Distance();
+    viewport.Update({ .MouseDeltaX = 75.0f, .MouseDeltaY = -36.0f, .Orbit = true });
+    const auto orbited = viewport.Pose();
+    CHECK(orbited.Position != first.Position);
+    CHECK(Distance(orbited.Position, orbited.Target) == Catch::Approx(distance).margin(0.001));
+    CHECK(orbited.Target == first.Target);
+
+    viewport.Update({ .MouseDeltaX = 20.0f, .MouseDeltaY = -10.0f, .Pan = true });
+    const auto panned = viewport.Pose();
+    CHECK(panned.Target != orbited.Target);
+    CHECK(Distance(panned.Position, panned.Target) == Catch::Approx(distance).margin(0.001));
+
+    viewport.Reset();
+    const auto beforeKeys = viewport.Pose();
+    viewport.Update({ .MoveForward = 1.0f, .MoveRight = 1.0f, .MoveUp = 1.0f,
+        .DeltaSeconds = 0.016f, .Fly = true });
+    const auto moved = viewport.Pose();
+    CHECK(moved.Target != beforeKeys.Target);
+    CHECK(moved.Position != beforeKeys.Position);
+    CHECK(Distance(moved.Position, moved.Target) == Catch::Approx(distance).margin(0.001));
+
+    // A 2-second window stall must never teleport the free camera.
+    ViewportController stalled;
+    ViewportController regular;
+    stalled.Update({ .MoveForward = 1.0f, .DeltaSeconds = 2.0f, .Fly = true });
+    regular.Update({ .MoveForward = 1.0f, .DeltaSeconds = 0.05f, .Fly = true });
+    CHECK(Distance(stalled.Pose().Position, regular.Pose().Position) < 1.0e-4f);
+}
+
 TEST_CASE("Editor actions and viewport navigation provide deterministic authoring input", "[KairoEditor][Input][Viewport]")
 {
     const auto bindings = DefaultEditorActionBindings();
