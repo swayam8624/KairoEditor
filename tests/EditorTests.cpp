@@ -80,6 +80,22 @@ TEST_CASE("Editor actions and viewport navigation provide deterministic authorin
     CHECK(viewport.Pose().Position.x > viewport.Pose().Target.x);
     viewport.SnapToAxis(ViewportAxis::Top);
     CHECK(viewport.Pose().Position.y > viewport.Pose().Target.y);
+    // A straight vertical LookAt is singular if its up vector is world Y.
+    const auto top = viewport.Pose();
+    const auto topForward = kairo::foundation::math::SafeNormalize(
+        top.Target - top.Position, kairo::foundation::math::Vec3f::Forward());
+    CHECK(std::abs(kairo::foundation::math::Dot(topForward, top.Up)) < 0.999f);
+    viewport.SnapToAxis(ViewportAxis::Bottom);
+    const auto bottom = viewport.Pose();
+    const auto bottomForward = kairo::foundation::math::SafeNormalize(
+        bottom.Target - bottom.Position, kairo::foundation::math::Vec3f::Forward());
+    CHECK(std::abs(kairo::foundation::math::Dot(bottomForward, bottom.Up)) < 0.999f);
+    viewport.SetPose({ { 0.0f, 10.0f, 0.0f }, { 0.0f, 0.0f, 0.0f },
+        kairo::foundation::math::Vec3f::Up() });
+    const auto straightDown = viewport.Pose();
+    const auto stableForward = kairo::foundation::math::SafeNormalize(
+        straightDown.Target - straightDown.Position, kairo::foundation::math::Vec3f::Forward());
+    CHECK(std::abs(kairo::foundation::math::Dot(stableForward, straightDown.Up)) < 0.999f);
     // Free navigation must not teleport a user inspecting a distant world.
     const auto focusedWorld = viewport.Pose().Target;
     const auto focusedDistance = viewport.Distance();
