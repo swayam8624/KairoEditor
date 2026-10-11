@@ -1,5 +1,6 @@
 #include <charconv>
 #include <cerrno>
+#include <chrono>
 #include <cmath>
 #include <cstddef>
 #include <cstdlib>
@@ -19,6 +20,7 @@
 #if defined(_WIN32)
 #include <process.h>
 #else
+#include <fcntl.h>
 #include <spawn.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -357,7 +359,7 @@ namespace
             "Set play-executable in the .kproject or KAIRO_PLAYER_EXECUTABLE.");
     }
 
-    void LaunchProjectRuntime(const kairo::editor::ProjectSession& project,
+    [[nodiscard]] std::intptr_t LaunchProjectRuntime(const kairo::editor::ProjectSession& project,
         const std::filesystem::path& editorExecutable)
     {
         const auto executable = ResolveRuntimeExecutable(project, editorExecutable);
@@ -375,6 +377,7 @@ namespace
         {
             (void)_cwait(nullptr, child, _WAIT_CHILD);
         }).detach();
+        return 0;
 #else
         pid_t child = 0;
         char* childArguments[] = {
@@ -382,16 +385,36 @@ namespace
             descriptorText.data(),
             nullptr
         };
-        const int status = posix_spawn(
-            &child, executableText.c_str(), nullptr, nullptr, childArguments, environ);
+        const auto logPath = project.ProjectRoot() / ".kairo" / "logs" / "player-last-run.log";
+        std::filesystem::create_directories(logPath.parent_path());
+        const int logFd = ::open(logPath.c_str(), O_CREAT | O_WRONLY | O_TRUNC, 0600);
+        if (logFd < 0)
+            throw std::system_error(errno, std::generic_category(),
+                "Cannot create KairoPlayer log " + logPath.string());
+
+        posix_spawn_file_actions_t actions{};
+        int status = posix_spawn_file_actions_init(&actions);
+        if (status == 0)
+        {
+            status = posix_spawn_file_actions_adddup2(&actions, logFd, STDOUT_FILENO);
+            if (status == 0)
+                status = posix_spawn_file_actions_adddup2(&actions, logFd, STDERR_FILENO);
+            if (status == 0)
+                status = posix_spawn_file_actions_addclose(&actions, logFd);
+            if (status == 0)
+                status = posix_spawn(&child, executableText.c_str(), &actions,
+                    nullptr, childArguments, environ);
+            posix_spawn_file_actions_destroy(&actions);
+        }
+        ::close(logFd);
         if (status != 0)
             throw std::system_error(status, std::generic_category(),
-                "Cannot launch project runtime " + executableText);
-        std::thread([child]
-        {
-            int statusCode = 0;
-            while (waitpid(child, &statusCode, 0) < 0 && errno == EINTR) {}
-        }).detach();
+                "Cannot launch KairoPlayer " + executableText);
+        std::cout << "KairoPlayer launched (PID " << child
+                  << "); diagnostics: " << logPath << '\n';
+        // The editor frame loop polls this PID. Do not detach a waitpid thread
+        // that silently throws away a startup failure and leaves no game window.
+        return static_cast<std::intptr_t>(child);
 #endif
     }
 }
@@ -689,6 +712,10 @@ int main(int argc, char** argv)
         std::uint64_t renderedFrames = 0u;
         std::optional<kairo::renderer::ViewportCapture> screenshot;
         std::optional<std::filesystem::path> projectTransition;
+#if !defined(_WIN32)
+        std::optional<pid_t> launchedRuntime;
+        std::chrono::steady_clock::time_point runtimeLaunchedAt{};
+#endif
         while (!renderer.NativeWindow().ShouldClose() && (!options.FrameLimit.has_value() || renderedFrames < *options.FrameLimit))
         {
             renderer.NativeWindow().PollEvents();
@@ -700,11 +727,57 @@ int main(int argc, char** argv)
             shell.SetViewportTexture(imgui.ViewportTexture());
             shell.SetRendererProfile(renderer.LastFrameProfile());
             shell.Draw();
+#if !defined(_WIN32)
+            if (launchedRuntime.has_value())
+            {
+                int childStatus = 0;
+                const pid_t completed = waitpid(*launchedRuntime, &childStatus, WNOHANG);
+                if (completed == *launchedRuntime || (completed < 0 && errno != EINTR))
+                {
+                    const bool quickExit = std::chrono::steady_clock::now() -
+                        runtimeLaunchedAt < std::chrono::seconds(2);
+                    const bool success = completed > 0 &&
+                        WIFEXITED(childStatus) && WEXITSTATUS(childStatus) == 0;
+                    launchedRuntime.reset();
+                    if (!success || quickExit)
+                    {
+                        const auto logPath = project.ProjectRoot() / ".kairo" /
+                            "logs" / "player-last-run.log";
+                        std::ifstream log(logPath);
+                        std::string excerpt;
+                        std::string line;
+                        while (std::getline(log, line))
+                        {
+                            excerpt += line + '\n';
+                            if (excerpt.size() > 2400u)
+                                excerpt.erase(0u, excerpt.size() - 2400u);
+                        }
+                        std::string detail = success
+                            ? "KairoPlayer closed immediately without staying in Play mode."
+                            : "KairoPlayer failed to start or exited with an error.";
+                        if (completed > 0 && WIFEXITED(childStatus))
+                            detail += " Exit status: " +
+                                std::to_string(WEXITSTATUS(childStatus)) + ".";
+                        detail += "\nLog: " + logPath.string();
+                        if (!excerpt.empty()) detail += "\n\n" + excerpt;
+                        shell.ReportHostError(std::move(detail));
+                    }
+                }
+            }
+#endif
             if (shell.TakeRuntimeLaunchRequest())
             {
                 try
                 {
-                    LaunchProjectRuntime(project, std::filesystem::absolute(argv[0]));
+#if !defined(_WIN32)
+                    if (launchedRuntime.has_value())
+                        throw std::runtime_error("The game is already running. Close it before launching Play again.");
+                    launchedRuntime = static_cast<pid_t>(LaunchProjectRuntime(
+                        project, std::filesystem::absolute(argv[0])));
+                    runtimeLaunchedAt = std::chrono::steady_clock::now();
+#else
+                    (void)LaunchProjectRuntime(project, std::filesystem::absolute(argv[0]));
+#endif
                 }
                 catch (const std::exception& error)
                 {
