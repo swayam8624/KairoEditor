@@ -371,8 +371,20 @@ namespace
         // Explicit editor renderer preference applies to the Play child too.
         // Without this, the editor can display with OpenGL while Play silently
         // attempts the project default (possibly unsupported) backend.
-        std::string backendText = backendOverride.has_value()
-            ? std::string(kairo::renderer::Name(*backendOverride)) : std::string{};
+        std::string backendText;
+        if (backendOverride.has_value() && !project.Descriptor().PlayExecutable.has_value())
+        {
+            switch (*backendOverride)
+            {
+                case kairo::renderer::GraphicsBackend::Automatic: backendText = "auto"; break;
+                case kairo::renderer::GraphicsBackend::Vulkan: backendText = "vulkan"; break;
+                case kairo::renderer::GraphicsBackend::Metal: backendText = "metal"; break;
+                case kairo::renderer::GraphicsBackend::Direct3D12: backendText = "d3d12"; break;
+                case kairo::renderer::GraphicsBackend::OpenGL: backendText = "opengl"; break;
+            }
+        }
+        // Custom project-owned Play executables have their own argv contracts.
+        backendOverride = backendText.empty() ? std::nullopt : backendOverride;
 
 #if defined(_WIN32)
         const intptr_t child = backendOverride.has_value()
