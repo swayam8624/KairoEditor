@@ -793,6 +793,11 @@ export namespace kairo::editor
             if (m_State.Panels().IsVisible(Panel::Hierarchy)) DrawHierarchy();
             if (m_State.Panels().IsVisible(Panel::Inspector)) DrawInspector();
             if (m_State.Panels().IsVisible(Panel::Viewport)) DrawViewport();
+            else
+            {
+                m_ViewportKeyboardActive = false;
+                m_ViewportPointerNavigationActive = false;
+            }
             for (std::uint8_t value = static_cast<std::uint8_t>(Panel::ContentBrowser); value < static_cast<std::uint8_t>(Panel::Count); ++value)
             {
                 const Panel panel = static_cast<Panel>(value);
@@ -1700,7 +1705,9 @@ export namespace kairo::editor
             const auto selected = m_State.SelectedEntity();
             if (!selected.has_value()) return;
             m_ViewportSceneCamera.reset();
-            m_ViewportController.Focus(m_Project.Scene().WorldTransform(*selected).Translation);
+            m_ViewportController.Focus(
+                m_Project.Scene().WorldTransform(*selected).Translation,
+                m_ViewportController.Distance());
         }
 
         void ViewSceneCamera()
@@ -1792,7 +1799,8 @@ export namespace kairo::editor
                  ImGui::IsKeyDown(ImGuiKey_DownArrow) ||
                  ImGui::IsKeyDown(ImGuiKey_LeftArrow) ||
                  ImGui::IsKeyDown(ImGuiKey_RightArrow));
-            const bool wheel = hovered && io.MouseWheel != 0.0f;
+            const bool wheel = hovered &&
+                (io.MouseWheel != 0.0f || io.MouseWheelH != 0.0f);
             if (pointerNavigation || keyboardMove || wheel)
                 m_ViewportSceneCamera.reset();
 
