@@ -361,16 +361,26 @@ namespace
     }
 
     [[nodiscard]] std::intptr_t LaunchProjectRuntime(const kairo::editor::ProjectSession& project,
-        const std::filesystem::path& editorExecutable)
+        const std::filesystem::path& editorExecutable,
+        std::optional<kairo::renderer::GraphicsBackend> backendOverride)
     {
         const auto executable = ResolveRuntimeExecutable(project, editorExecutable);
         const auto descriptor = project.ProjectFile();
         std::string executableText = executable.string();
         std::string descriptorText = descriptor.string();
+        // Explicit editor renderer preference applies to the Play child too.
+        // Without this, the editor can display with OpenGL while Play silently
+        // attempts the project default (possibly unsupported) backend.
+        std::string backendText = backendOverride.has_value()
+            ? std::string(kairo::renderer::Name(*backendOverride)) : std::string{};
 
 #if defined(_WIN32)
-        const intptr_t child = _spawnl(_P_NOWAIT, executableText.c_str(),
-            executableText.c_str(), descriptorText.c_str(), static_cast<char*>(nullptr));
+        const intptr_t child = backendOverride.has_value()
+            ? _spawnl(_P_NOWAIT, executableText.c_str(), executableText.c_str(),
+                descriptorText.c_str(), "--renderer", backendText.c_str(),
+                static_cast<char*>(nullptr))
+            : _spawnl(_P_NOWAIT, executableText.c_str(), executableText.c_str(),
+                descriptorText.c_str(), static_cast<char*>(nullptr));
         if (child == -1)
             throw std::runtime_error(
                 "Cannot launch project runtime: " + executableText);
@@ -384,6 +394,8 @@ namespace
         char* childArguments[] = {
             executableText.data(),
             descriptorText.data(),
+            backendOverride.has_value() ? const_cast<char*>("--renderer") : nullptr,
+            backendOverride.has_value() ? backendText.data() : nullptr,
             nullptr
         };
         const auto logPath = project.ProjectRoot() / ".kairo" / "logs" / "player-last-run.log";
@@ -780,10 +792,11 @@ int main(int argc, char** argv)
                     if (launchedRuntime.has_value())
                         throw std::runtime_error("The game is already running. Close it before launching Play again.");
                     launchedRuntime = static_cast<pid_t>(LaunchProjectRuntime(
-                        project, std::filesystem::absolute(argv[0])));
+                        project, std::filesystem::absolute(argv[0]), options.BackendOverride));
                     runtimeLaunchedAt = std::chrono::steady_clock::now();
 #else
-                    (void)LaunchProjectRuntime(project, std::filesystem::absolute(argv[0]));
+                    (void)LaunchProjectRuntime(project, std::filesystem::absolute(argv[0]),
+                        options.BackendOverride);
 #endif
                 }
                 catch (const std::exception& error)
