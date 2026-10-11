@@ -224,6 +224,29 @@ export namespace kairo::editor
         return result;
     }
 
+    /// Movement keys belong exclusively to the world camera while the image
+    /// has keyboard focus. A separate modifier chord (Cmd/Ctrl+...) is still
+    /// routed to global actions such as Save or Undo.
+    [[nodiscard]] constexpr bool IsViewportMotionKey(EditorKey key) noexcept
+    {
+        switch (key)
+        {
+            case EditorKey::W: case EditorKey::A: case EditorKey::S:
+            case EditorKey::D: case EditorKey::Q: case EditorKey::E:
+                return true;
+            default: return false;
+        }
+    }
+
+    [[nodiscard]] constexpr bool ShouldRouteWorldKeyAsAction(
+        EditorKey key, bool viewportOwnsKeyboard, KeyModifiers modifiers) noexcept
+    {
+        if (!viewportOwnsKeyboard || !IsViewportMotionKey(key)) return true;
+        const auto bits = static_cast<std::uint8_t>(modifiers);
+        return (bits & (static_cast<std::uint8_t>(KeyModifiers::Shortcut) |
+            static_cast<std::uint8_t>(KeyModifiers::Alt))) != 0u;
+    }
+
     /// Resolves raw host input into one-frame semantic editor actions.
     /// Text and modal contexts consume all editor chords by design; widgets
     /// and dialogs therefore cannot accidentally delete scene or graph data.
