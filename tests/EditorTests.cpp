@@ -70,6 +70,14 @@ TEST_CASE("Viewport orbit pan and six-axis movement remain isolated from scene t
     CHECK(std::abs(Distance(orbited.Position, orbited.Target) - distance) < 0.001f);
     CHECK(orbited.Target == first.Target);
 
+    // RMB free-look pivots the view direction in place. It is not an orbit!
+    ViewportController freeLook;
+    const auto freeLookBefore = freeLook.Pose();
+    freeLook.Update({ .MouseDeltaX = 35.0f, .MouseDeltaY = -13.0f, .Fly = true });
+    const auto freeLookAfter = freeLook.Pose();
+    CHECK(Distance(freeLookAfter.Position, freeLookBefore.Position) < 1.0e-5f);
+    CHECK(Distance(freeLookAfter.Target, freeLookBefore.Target) > 0.01f);
+
     viewport.Update({ .MouseDeltaX = 20.0f, .MouseDeltaY = -10.0f, .Pan = true });
     const auto panned = viewport.Pose();
     CHECK(panned.Target != orbited.Target);
