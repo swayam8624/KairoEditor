@@ -78,7 +78,7 @@ export namespace kairo::editor
             m_Target = pose.Target;
             m_Distance = std::clamp(distance, 0.15f, 5000.0f);
             m_Yaw = std::atan2(direction.x, direction.z);
-            m_Pitch = std::asin(std::clamp(direction.y, -1.0f, 1.0f));
+            m_Pitch = std::clamp(std::asin(std::clamp(direction.y, -1.0f, 1.0f)), -1.52f, 1.52f);
         }
 
         /// Input: one canonical world axis view.
@@ -92,8 +92,9 @@ export namespace kairo::editor
                 case ViewportAxis::Back: m_Yaw = Pi; m_Pitch = 0.0f; break;
                 case ViewportAxis::Right: m_Yaw = Pi * 0.5f; m_Pitch = 0.0f; break;
                 case ViewportAxis::Left: m_Yaw = -Pi * 0.5f; m_Pitch = 0.0f; break;
-                case ViewportAxis::Top: m_Yaw = 0.0f; m_Pitch = Pi * 0.5f; break;
-                case ViewportAxis::Bottom: m_Yaw = 0.0f; m_Pitch = -Pi * 0.5f; break;
+                // Avoid looking exactly along world up: LookAt would have no stable right vector.
+                case ViewportAxis::Top: m_Yaw = 0.0f; m_Pitch = 1.52f; break;
+                case ViewportAxis::Bottom: m_Yaw = 0.0f; m_Pitch = -1.52f; break;
             }
         }
 
