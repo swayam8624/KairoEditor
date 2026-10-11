@@ -131,14 +131,17 @@ export namespace kairo::editor
             ValidateNavigationSettings(settings);
             if (!std::isfinite(input.MouseDeltaX) || !std::isfinite(input.MouseDeltaY) ||
                 !std::isfinite(input.WheelDelta) || !std::isfinite(input.DeltaSeconds) ||
-                input.DeltaSeconds < 0.0f)
+                !std::isfinite(input.MoveForward) || !std::isfinite(input.MoveRight) ||
+                !std::isfinite(input.MoveUp) || input.DeltaSeconds < 0.0f)
                 throw std::invalid_argument("Viewport input must be finite with non-negative delta time.");
             using namespace kairo::foundation::math;
             if (input.Orbit || input.Fly)
             {
                 const float xDirection = settings.InvertOrbitX ? -1.0f : 1.0f;
                 const float yDirection = settings.InvertOrbitY ? -1.0f : 1.0f;
-                m_Yaw -= input.MouseDeltaX * settings.OrbitSensitivity * xDirection;
+                m_Yaw = std::remainder(
+                    m_Yaw - input.MouseDeltaX * settings.OrbitSensitivity * xDirection,
+                    6.28318530717958647692f);
                 m_Pitch = std::clamp(m_Pitch - input.MouseDeltaY * settings.OrbitSensitivity * yDirection,
                     -1.52f, 1.52f);
             }
@@ -157,7 +160,19 @@ export namespace kairo::editor
             if (input.Fly)
             {
                 const float speed = std::max(1.0f, m_Distance) * settings.FlySpeed * input.DeltaSeconds;
-                const Vec3f translation = (forward * input.MoveForward + right * input.MoveRight + up * input.MoveUp) * speed;
+                // Do not let diagonal fly input (W+D, W+E, W+D+E) move
+                // faster than one normalized axis. Reject non-finite axes
+                // before reaching this point to protect distant world views.
+                Vec3f intent{
+                    std::clamp(input.MoveRight, -1.0f, 1.0f),
+                    std::clamp(input.MoveUp, -1.0f, 1.0f),
+                    std::clamp(input.MoveForward, -1.0f, 1.0f)
+                };
+                const float magnitudeSquared = intent.LengthSquared();
+                if (magnitudeSquared > 1.0f)
+                    intent /= std::sqrt(magnitudeSquared);
+                const Vec3f translation =
+                    (forward * intent.z + right * intent.x + up * intent.y) * speed;
                 m_Target += translation;
             }
         }

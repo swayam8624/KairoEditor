@@ -109,6 +109,32 @@ TEST_CASE("Editor actions and viewport navigation provide deterministic authorin
     CHECK(reset.Position.y > reset.Target.y);
 
     REQUIRE_THROWS_AS(viewport.Focus({ 0.0f, 0.0f, 0.0f }, 0.0f), std::invalid_argument);
+
+    // Normalized 3D fly intent guarantees constant speed, including three-
+    // axis movement. The viewport is an editing camera, not an acceleration
+    // mechanic; diagonal navigation must not surprise a novice user.
+    viewport.Reset();
+    const auto singleAxisStart = viewport.Pose().Target;
+    viewport.Update({ .MoveForward = 1.0f, .DeltaSeconds = 0.25f, .Fly = true });
+    const float singleAxisTravel =
+        kairo::foundation::math::Distance(viewport.Pose().Target, singleAxisStart);
+    viewport.Reset();
+    const auto diagonalStart = viewport.Pose().Target;
+    viewport.Update({ .MoveForward = 1.0f, .MoveRight = 1.0f, .MoveUp = 1.0f,
+        .DeltaSeconds = 0.25f, .Fly = true });
+    const float diagonalTravel =
+        kairo::foundation::math::Distance(viewport.Pose().Target, diagonalStart);
+    CHECK(std::abs(diagonalTravel - singleAxisTravel) < 1.0e-4f);
+    CHECK_THROWS_AS(viewport.Update({ .MoveForward = std::numeric_limits<float>::quiet_NaN(),
+        .DeltaSeconds = 0.2f, .Fly = true }), std::invalid_argument);
+    CHECK_THROWS_AS(viewport.Update({ .MoveRight = std::numeric_limits<float>::infinity(),
+        .DeltaSeconds = 0.2f, .Fly = true }), std::invalid_argument);
+    // Repeated huge but finite orbit drags must wrap yaw rather than allowing
+    // unbounded accumulation and unpredictable trigonometry.
+    viewport.Update({ .MouseDeltaX = 1.0e8f, .Orbit = true });
+    const auto largeOrbit = viewport.Pose();
+    CHECK(std::isfinite(largeOrbit.Position.x));
+    CHECK(std::isfinite(largeOrbit.Position.z));
 }
 
 TEST_CASE("Navigation settings persist strict trackpad and fly preferences",
