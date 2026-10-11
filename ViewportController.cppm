@@ -155,6 +155,9 @@ export namespace kairo::editor
             const Vec3f forward = SafeNormalize(pose.Target - pose.Position, Vec3f::Forward());
             const Vec3f right = SafeNormalize(Cross(forward, pose.Up), Vec3f::Right());
             const Vec3f up = SafeNormalize(Cross(right, forward), Vec3f::Up());
+            // Camera-space up is correct for pixel panning, but WASD editor
+            // travel should be level with the world regardless of look pitch.
+            // Q/E always move on world Y, avoiding sideways vertical drift.
             if (input.Pan)
                 m_Target += (-right * input.MouseDeltaX + up * input.MouseDeltaY) *
                     (m_Distance * settings.PanSensitivity);
@@ -181,8 +184,13 @@ export namespace kairo::editor
                 const float magnitudeSquared = intent.LengthSquared();
                 if (magnitudeSquared > 1.0f)
                     intent /= std::sqrt(magnitudeSquared);
+                const Vec3f levelForward = SafeNormalize(
+                    Vec3f{ forward.x, 0.0f, forward.z }, Vec3f::Forward());
+                const Vec3f levelRight = SafeNormalize(
+                    Cross(levelForward, Vec3f::Up()), Vec3f::Right());
                 const Vec3f translation =
-                    (forward * intent.z + right * intent.x + up * intent.y) * speed;
+                    (levelForward * intent.z + levelRight * intent.x +
+                     Vec3f::Up() * intent.y) * speed;
                 m_Target += translation;
             }
         }
