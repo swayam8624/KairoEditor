@@ -1,6 +1,7 @@
 module;
 
 #include <imgui.h>
+#include <ImGuizmo.h>
 #include <imgui_impl_glfw.h>
 #include <imgui_impl_vulkan.h>
 #if defined(KAIRO_EDITOR_HAS_OPENGL_UI)
@@ -107,6 +108,8 @@ export namespace kairo::editor
             else throw std::logic_error("Dear ImGui backend was not initialized.");
             ImGui_ImplGlfw_NewFrame();
             ImGui::NewFrame();
+            // ImGuizmo needs its own per-frame initialization before scene tools.
+            ImGuizmo::BeginFrame();
         }
 
         void EndFrame() { ImGui::Render(); }
