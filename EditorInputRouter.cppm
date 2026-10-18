@@ -28,7 +28,7 @@ export namespace kairo::editor
     enum class EditorKey : std::uint8_t
     {
         A, C, D, E, F, G, N, Q, R, S, V, W, X, Z,
-        Space, Home, Backspace, Delete, F5
+        Space, Home, Backspace, Delete, F5, F6
     };
 
     [[nodiscard]] constexpr std::string_view Name(InputContext context) noexcept
@@ -51,7 +51,7 @@ export namespace kairo::editor
     {
         static constexpr std::array names{
             "a", "c", "d", "e", "f", "g", "n", "q", "r", "s", "v", "w", "x", "z",
-            "space", "home", "backspace", "delete", "f5"
+            "space", "home", "backspace", "delete", "f5", "f6"
         };
         const auto index = static_cast<std::size_t>(key);
         return index < names.size() ? names[index] : std::string_view{ "invalid" };
@@ -69,7 +69,7 @@ export namespace kairo::editor
 
     [[nodiscard]] constexpr std::optional<EditorKey> ParseEditorKey(std::string_view name) noexcept
     {
-        for (std::uint8_t value = 0u; value <= static_cast<std::uint8_t>(EditorKey::F5); ++value)
+        for (std::uint8_t value = 0u; value <= static_cast<std::uint8_t>(EditorKey::F6); ++value)
         {
             const auto key = static_cast<EditorKey>(value);
             if (Name(key) == name) return key;
@@ -137,6 +137,7 @@ export namespace kairo::editor
             { Undo, Global, { Z, Shortcut } },
             { Redo, Global, { Z, Shortcut | Shift } },
             { TogglePlay, Global, { F5 } },
+            { LaunchPlayer, Global, { F6 } },
             { GraphAddNode, Graph, { A, Shift } },
             { GraphAddNode, Graph, { Space } },
             { GraphDelete, Graph, { Delete } },
@@ -206,7 +207,7 @@ export namespace kairo::editor
             std::vector<InputChord> unique;
             for (const InputChord chord : overrideBinding.Chords)
             {
-                if (static_cast<std::uint8_t>(chord.Key) > static_cast<std::uint8_t>(EditorKey::F5) ||
+                if (static_cast<std::uint8_t>(chord.Key) > static_cast<std::uint8_t>(EditorKey::F6) ||
                     (static_cast<std::uint8_t>(chord.Modifiers) & ~std::uint8_t{ 7u }) != 0u)
                     throw std::invalid_argument("A keymap override contains an invalid chord.");
                 if (std::ranges::find(unique, chord) != unique.end())
