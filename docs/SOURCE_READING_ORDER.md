@@ -10,45 +10,45 @@ Read each phase in order. Every link goes to a source file or directory in this 
 
 ## 1. State and commands
 
-1. [`README.md`](README.md)
-2. [`EditorTypes.cppm`](EditorTypes.cppm)
-3. [`EditorState.cppm`](EditorState.cppm)
-4. [`PanelState.cppm`](PanelState.cppm)
-5. [`EditorActions.cppm`](EditorActions.cppm)
-6. [`CommandHistory.cppm`](CommandHistory.cppm)
-7. [`CommandTransaction.cppm`](CommandTransaction.cppm)
-8. [`SceneCommands.cppm`](SceneCommands.cppm)
+1. [`README.md`](../README.md)
+2. [`EditorTypes.cppm`](../EditorTypes.cppm)
+3. [`EditorState.cppm`](../EditorState.cppm)
+4. [`PanelState.cppm`](../PanelState.cppm)
+5. [`EditorActions.cppm`](../EditorActions.cppm)
+6. [`CommandHistory.cppm`](../CommandHistory.cppm)
+7. [`CommandTransaction.cppm`](../CommandTransaction.cppm)
+8. [`SceneCommands.cppm`](../SceneCommands.cppm)
 
 ## 2. Documents and persistence
 
-1. [`DocumentTypes.cppm`](DocumentTypes.cppm)
-2. [`DocumentSchema.cppm`](DocumentSchema.cppm)
-3. [`DocumentValidation.cppm`](DocumentValidation.cppm)
-4. [`DocumentCommands.cppm`](DocumentCommands.cppm)
-5. [`DocumentSerialization.cppm`](DocumentSerialization.cppm)
-6. [`DocumentCompiler.cppm`](DocumentCompiler.cppm)
-7. [`ProjectSession.cppm`](ProjectSession.cppm)
-8. [`ProjectRecovery.cppm`](ProjectRecovery.cppm)
+1. [`DocumentTypes.cppm`](../DocumentTypes.cppm)
+2. [`DocumentSchema.cppm`](../DocumentSchema.cppm)
+3. [`DocumentValidation.cppm`](../DocumentValidation.cppm)
+4. [`DocumentCommands.cppm`](../DocumentCommands.cppm)
+5. [`DocumentSerialization.cppm`](../DocumentSerialization.cppm)
+6. [`DocumentCompiler.cppm`](../DocumentCompiler.cppm)
+7. [`ProjectSession.cppm`](../ProjectSession.cppm)
+8. [`ProjectRecovery.cppm`](../ProjectRecovery.cppm)
 
 ## 3. Authoring and runtime boundaries
 
-1. [`AssetBrowserModel.cppm`](AssetBrowserModel.cppm)
-2. [`SceneSelection.cppm`](SceneSelection.cppm)
-3. [`ViewportController.cppm`](ViewportController.cppm)
-4. [`TransformGizmo.cppm`](TransformGizmo.cppm)
-5. [`PhysicsPreview.cppm`](PhysicsPreview.cppm)
-6. [`SceneRenderBridge.cppm`](SceneRenderBridge.cppm)
-7. [`ImGuiRuntime.cppm`](ImGuiRuntime.cppm)
-8. [`KairoUI.cppm`](KairoUI.cppm)
-9. [`EditorShell.cppm`](EditorShell.cppm)
+1. [`AssetBrowserModel.cppm`](../AssetBrowserModel.cppm)
+2. [`SceneSelection.cppm`](../SceneSelection.cppm)
+3. [`ViewportController.cppm`](../ViewportController.cppm)
+4. [`TransformGizmo.cppm`](../TransformGizmo.cppm)
+5. [`PhysicsPreview.cppm`](../PhysicsPreview.cppm)
+6. [`SceneRenderBridge.cppm`](../SceneRenderBridge.cppm)
+7. [`ImGuiRuntime.cppm`](../ImGuiRuntime.cppm)
+8. [`KairoUI.cppm`](../KairoUI.cppm)
+9. [`EditorShell.cppm`](../EditorShell.cppm)
 
 ## 4. Tests
 
-1. [`tests/EditorTests.cpp`](tests/EditorTests.cpp)
-2. [`tests/DocumentCompilerTests.cpp`](tests/DocumentCompilerTests.cpp)
-3. [`tests/Phase4WorkflowTests.cpp`](tests/Phase4WorkflowTests.cpp)
-4. [`tests/PhysicsPreviewTests.cpp`](tests/PhysicsPreviewTests.cpp)
-5. [`tests/SceneRenderBridgeTests.cpp`](tests/SceneRenderBridgeTests.cpp)
+1. [`tests/EditorTests.cpp`](../tests/EditorTests.cpp)
+2. [`tests/DocumentCompilerTests.cpp`](../tests/DocumentCompilerTests.cpp)
+3. [`tests/Phase4WorkflowTests.cpp`](../tests/Phase4WorkflowTests.cpp)
+4. [`tests/PhysicsPreviewTests.cpp`](../tests/PhysicsPreviewTests.cpp)
+5. [`tests/SceneRenderBridgeTests.cpp`](../tests/SceneRenderBridgeTests.cpp)
 
 ## End-to-end interaction map
 
