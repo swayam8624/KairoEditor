@@ -490,3 +490,12 @@ ctest --test-dir build-headless --output-on-failure
 The application requires GLFW, Vulkan headers, and a Vulkan loader. On macOS,
 the renderer runs through MoltenVK. CMake prefers sibling `KairoEngineCore` and
 `KairoRenderer` checkouts and falls back to their GitHub repositories.
+
+
+## Learn this repository from source
+
+The [Teaching source map](docs/SOURCE_READING_ORDER.md) gives a linked reading sequence, subsystem interactions, public API boundaries, and verification questions. Begin with the public contract and entry point, trace one real operation through its implementation, and use the linked tests to distinguish expected behavior from observed evidence.
+
+**Current scope and limitations.** KairoEditor authors scene data but does not own EngineCore persistence schemas, the graphics device or the physics simulation. Native end-to-end acceptance remains separate.
+
+**Learning and reuse.** Project-authored code is intended for study, modification and further development under the repository's applicable license. See [LICENSE](LICENSE) where present. Third-party libraries, borrowed source, assets, test data, models and media remain under their own terms; do not treat a top-level license as permission to redistribute restricted content.
