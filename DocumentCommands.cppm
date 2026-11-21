@@ -1,3 +1,9 @@
+// LEARNING MAP — typed, validated authoring commands. Document schemas and
+// serialization live in sibling modules; command/transaction history makes
+// reversible edits and undo/redo possible without bypassing invariants.
+// The compiler publishes runnable artifacts only after document validation.
+// See READING_ORDER.md for document -> compiler -> Player path.
+
 module;
 
 #include <algorithm>
