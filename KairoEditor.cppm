@@ -1,3 +1,8 @@
+// SOURCE STUDY NOTE:
+// Public Editor module surface exporting document, project, undo/redo, scene, UI and authoring contracts;
+// implementations remain in focused modules.
+// Related reading: docs/SOURCE_READING_ORDER.md.
+
 export module Kairo.Editor;
 export import Kairo.Editor.Types;
 export import Kairo.Editor.TextValidation;
