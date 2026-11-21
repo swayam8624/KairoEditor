@@ -1,3 +1,9 @@
+// LEARNING MAP — backend-neutral camera orbit/fly navigation state.
+// Native EditorShell translates keyboard/mouse actions into this controller;
+// KairoRenderer consumes the resulting camera state. World navigation and
+// input focus must not accidentally modify authored scene transforms.
+// See READING_ORDER.md and navigation tests.
+
 module;
 
 #include <algorithm>

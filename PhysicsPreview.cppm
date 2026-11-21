@@ -1,3 +1,9 @@
+// LEARNING MAP — isolated Play-mode physics preview. It constructs physics
+// bodies from editor scene descriptors via KairoPhysicsEngine, advances
+// bounded steps, and exposes debug/pose snapshots without mutating persistent
+// edit-mode documents during simulation.
+// See READING_ORDER.md and tests/PhysicsPreviewTests.cpp.
+
 module;
 
 #include <algorithm>

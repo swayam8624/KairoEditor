@@ -1,3 +1,9 @@
+> **Study the editor as a complete system:** [READING_ORDER.md](READING_ORDER.md) explains project/document lifecycle, command validation, undo/redo, ImGui UI, native viewport, and PhysicsPreview. [SOURCE_CATALOG.md](docs/SOURCE_CATALOG.md) links every source file.
+>
+> **Open source:** original KairoEditor code is under [MIT](LICENSE); Dear ImGui, platform SDKs and third-party assets retain their licenses. Learning, contributions and further development are encouraged within those terms.
+>
+> **Verification:** the 95% target in [STATUS.md](STATUS.md) is unverified until exact-head and native editor acceptance succeed.
+
 # KairoEditor
 
 `KairoEditor` is the authoring layer for Kairo scenes. It is intentionally a

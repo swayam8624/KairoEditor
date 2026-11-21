@@ -1,3 +1,9 @@
+// LEARNING MAP — bounded editor project lifecycle and in-memory session.
+// A project descriptor/scene comes from KairoEngineCore; this layer manages
+// editor-only selection, recovery and active workspace operations. Do not
+// let UI layout or native renderer lifetimes leak into persistent scene data.
+// See READING_ORDER.md, ProjectLifecycle and ProjectRecovery modules.
+
 module;
 
 #include <cstddef>

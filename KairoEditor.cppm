@@ -1,3 +1,9 @@
+// LEARNING MAP — editor public module facade. `import Kairo.Editor;`
+// re-exports document schema/commands, project sessions, scene editing,
+// undo state and workspace models; native ImGui rendering is a separate layer.
+// The EngineCore still owns portable project/scene storage.
+// Read READING_ORDER.md from document model toward the native EditorShell.
+
 export module Kairo.Editor;
 export import Kairo.Editor.Types;
 export import Kairo.Editor.TextValidation;

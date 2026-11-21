@@ -1,3 +1,9 @@
+// LEARNING MAP — semantic editor UI tokens/components built atop ImGui.
+// Panels request named controls and styles from this boundary rather than
+// embedding colors and behavior policies everywhere; EditorShell owns docked
+// presentation and EditorState/commands own durable application state.
+// See READING_ORDER.md for the UI -> command -> document pipeline.
+
 module;
 
 #include <imgui.h>
