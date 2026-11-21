@@ -1,3 +1,8 @@
+// SOURCE STUDY NOTE:
+// Maps authored scene/asset state to backend-independent renderer scene descriptors. KairoRenderer
+// handles actual GPU resources, not editor document IDs.
+// Related reading: docs/SOURCE_READING_ORDER.md.
+
 export module Kairo.Editor.SceneRenderBridge;
 
 import Kairo.Runtime.RealtimeSceneBridge;
