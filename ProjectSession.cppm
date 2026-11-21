@@ -1,3 +1,8 @@
+// SOURCE STUDY NOTE:
+// Project/session lifecycle between EngineCore project descriptors, editor document state and workspace
+// choices; read ProjectLifecycle and ProjectRecovery for on-disk boundaries.
+// Related reading: docs/SOURCE_READING_ORDER.md.
+
 module;
 
 #include <cstddef>
