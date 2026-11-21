@@ -1,3 +1,4 @@
+// TEACHING MAP: BACKEND-NEUTRAL AUTHORING STATE: Scene belongs to KairoEngineCore, while this class holds selection and workspace/mode state. PanelState applies presets; EditorActions/SceneCommands implement edits; CommandHistory provides undo; EditorShell and ImGuiRuntime display through KairoRenderer. This class must not own a Vulkan/Metal device or scene persistence.
 module;
 
 #include <optional>
@@ -32,6 +33,8 @@ export namespace kairo::editor
 
         /// Task: switch the tool layout without changing authored data or play
         /// state. Workspace presets are starting points, not locked layouts.
+// Presentation layout transition: switches panel presets without rewriting authored scene
+// content.
         void SwitchWorkspace(Workspace workspace)
         {
             m_Workspace = workspace;
