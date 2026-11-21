@@ -1,3 +1,8 @@
+// SOURCE STUDY NOTE:
+// ImGui-native editor window/panel orchestration connecting EditorState, KairoUI, reflection inspector,
+// asset browser and viewport rendering; EngineCore/Assets own underlying model data.
+// Related reading: docs/SOURCE_READING_ORDER.md.
+
 module;
 
 #include <imgui.h>
