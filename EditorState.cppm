@@ -1,3 +1,8 @@
+// SOURCE STUDY NOTE:
+// Backend-independent editor selection, workspace and play/edit state. The host owns Scene and
+// persistence while EditorShell turns this state into UI controls.
+// Related reading: docs/SOURCE_READING_ORDER.md.
+
 module;
 
 #include <optional>

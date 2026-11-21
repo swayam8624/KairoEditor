@@ -1,3 +1,8 @@
+// SOURCE STUDY NOTE:
+// Undoable schema-backed document changes; CommandHistory and AuthoringDocument own mutation order, while
+// DocumentValidation/Compiler translate validated state to runtime artifacts.
+// Related reading: docs/SOURCE_READING_ORDER.md.
+
 module;
 
 #include <algorithm>

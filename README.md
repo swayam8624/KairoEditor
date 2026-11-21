@@ -1,5 +1,7 @@
 # KairoEditor
 
+> **Teaching walkthrough:** The [linked source reading guide](docs/SOURCE_READING_ORDER.md) traces project inputs, state ownership and cross-repository API boundaries. Original source/documentation are proposed under the [MIT License](LICENSE) for learning and further development; external dependencies/assets retain their licenses.
+
 `KairoEditor` is the authoring layer for Kairo scenes. It is intentionally a
 separate repository from `KairoEngineCore`: EngineCore runs scenes, while the
 editor owns selection, workspace state, inspection, and play/edit transitions.
