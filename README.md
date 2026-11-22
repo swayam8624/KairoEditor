@@ -1,6 +1,6 @@
 # KairoEditor
 
-**Learn through the source:** [complete reading curriculum](docs/SOURCE_READING_ORDER.md) · [UI action → command → undoable scene change](docs/AUTHORING_TRANSACTION_WALKTHROUGH.md).
+**Learn through the source:** [complete reading curriculum](docs/SOURCE_READING_ORDER.md) · [UI action → command → undoable scene change](docs/AUTHORING_TRANSACTION_WALKTHROUGH.md) · [Undo journal and subtree snapshot laboratory](docs/UNDO_COMMANDS_AND_SCENE_SNAPSHOT_LAB.md).
 
 The source walkthrough also records a known audio-component gap in
 entity-subtree undo snapshots; it is not yet a verified functional fix.
