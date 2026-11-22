@@ -7,7 +7,7 @@
 // forking mesh/material/light conversion behavior. Do not implement another
 // renderer upload cache here or claim this file owns a graphics device.
 // For implementation details, follow the imported module's source:
-/// https://github.com/swayam8624/KairoGameEngine/blob/docs/teaching-walkthrough-20261121/Runtime/KairoRealtimeRenderBridge/RealtimeSceneBridge.cppm
+/// https://github.com/swayam8624/KairoGameEngine/blob/main/Runtime/KairoRealtimeRenderBridge/RealtimeSceneBridge.cppm
 export module Kairo.Editor.SceneRenderBridge;
 
 import Kairo.Runtime.RealtimeSceneBridge;
