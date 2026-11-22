@@ -461,6 +461,10 @@ export namespace kairo::editor
         std::optional<kairo::engine::ColliderComponent> Collider;
     };
 
+    // Copy *authored* fields before delete/duplicate, not a GPU
+    // mesh handle or PhysicsWorld solver state. AudioEmitter/Listener
+    // are currently omitted here and in EntitySnapshot: undo of
+    // audio-bearing entities is therefore not yet lossless.
     [[nodiscard]] inline EntitySnapshot CaptureEntity(
         const kairo::engine::Scene& scene, kairo::engine::Entity entity)
     {
@@ -483,6 +487,9 @@ export namespace kairo::editor
         return result;
     }
 
+    // Iterative hierarchy traversal records root and descendants
+    // before any mutation. Each snapshot retains stable Entity ID,
+    // parent ID and selected component values for undo/duplication.
     [[nodiscard]] inline std::vector<EntitySnapshot> CaptureEntitySubtree(
         const kairo::engine::Scene& scene, kairo::engine::Entity root)
     {
@@ -499,6 +506,10 @@ export namespace kairo::editor
         return result;
     }
 
+    // Apply optional component values only *after* the target Entity
+    // was allocated with its original ID. These snapshots are a
+    // defined subset of EngineCore components; add audio and future
+    // component types deliberately with regression tests.
     inline void ApplyEntitySnapshot(
         kairo::engine::Scene& scene, const EntitySnapshot& snapshot)
     {
@@ -517,6 +528,10 @@ export namespace kairo::editor
         if (snapshot.Collider.has_value()) scene.SetCollider(snapshot.ID, *snapshot.Collider);
     }
 
+    // Two-phase restoration: create all preserved IDs first, then
+    // apply components and reparent. This supports forward parent
+    // references. On failure, destroy any newly created entities
+    // in reverse order so a half-restored hierarchy isn't retained.
     inline void RestoreEntitySubtree(
         kairo::engine::Scene& scene, const std::vector<EntitySnapshot>& snapshots)
     {
@@ -555,6 +570,11 @@ export namespace kairo::editor
     /// parent, while every parent reference inside the copied subtree is remapped.
     /// Task: keep duplicate, undo, and redo inside one command boundary so redo
     /// cannot silently recreate a name-only entity after direct UI mutations.
+    // Clone a subtree into new authored IDs, remapping parents
+    // *within* the clone while retaining the external parent for
+    // the duplicated root. Undo destroys the duplicate root;
+    // redo must restore or regenerate consistent stable identities.
+    // Snapshot audio omission also affects duplication semantics.
     class DuplicateEntityCommand final : public EditorCommand
     {
     public:
@@ -637,6 +657,9 @@ export namespace kairo::editor
     /// and relationships needed to restore exact authored state and stable IDs.
     // Delete records a complete pre-edit subtree and restores it on Undo.
     // A simple CreateEntity call would not recover stable IDs/children.
+    // Capture once at command construction so Undo can reconstruct
+    // the same IDs and hierarchy. This is not a complete arbitrary
+    // component snapshot while AudioEmitter/Listener are missing.
     class DeleteEntityCommand final : public EditorCommand
     {
     public:
@@ -655,6 +678,11 @@ export namespace kairo::editor
     /// Reparents one entity while preserving its authored world-space TRS.
     /// The local transform is derived with KairoMath's scene-transform
     /// convention; a parent with a zero scale axis is rejected before mutation.
+    // Reparent with authored world TRS preservation rather than
+    // Scene::SetParent's default local-transform preservation.
+    // RelativeTo derives new local translation, rotation and scale
+    // from old world and destination parent world; zero-scale
+    // parents are rejected before editing to avoid division by zero.
     class SetEntityParentCommand final : public EditorCommand
     {
     public:
@@ -752,6 +780,11 @@ export namespace kairo::editor
     // The inspector and automation both use reflection keys and
     // validated values. Execute/Undo restore typed authored data rather
     // than treating UI control memory as a persistent component.
+    // Inspector property edits use stable reflection type/property
+    // keys and typed PropertyValue. Constructor records before;
+    // Execute writes after and validates the whole component.
+    // On invalid data, Apply re-writes the old captured value;
+    // gesture coalescing preserves the original before snapshot.
     class SetReflectedPropertyCommand final : public EditorCommand
     {
     public:
@@ -813,6 +846,10 @@ export namespace kairo::editor
 
     /// Replaces the complete local TRS atomically so position/rotation/scale
     /// cannot become partially undoable. Adjacent drag frames coalesce.
+    // Store full before/after local TRS in one command, not three
+    // independently undoable UI fields. TryMerge coalesces adjacent
+    // transform updates for this same Entity/ProjectSession.
+    // This is authored state, not a live physics pose update.
     class SetEntityTransformCommand final : public EditorCommand
     {
     public:
