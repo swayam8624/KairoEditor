@@ -1,3 +1,19 @@
+// TEACHING ENTRY POINT: C++23 umbrella for *authoring*, not gameplay
+// runtime or native GPU ownership. EngineCore supplies authoritative scene
+// and .kproject schemas; KairoAssets supplies stable IDs/import artifacts;
+// KairoRenderer owns graphics device, viewport and presentation;
+// PhysicsEngine owns simulation and contact state.
+//
+// Follow one user edit: EditorInputRouter -> EditorActions / SceneCommands
+// -> CommandHistory -> ProjectSession/EditScene -> validation/persistence.
+// EditorState retains selection, mode and panel preferences, not Scene
+// ownership. EditorShell/ImGuiRuntime turn these neutral contracts into
+// UI. SceneRenderBridge is a compatibility re-export of the shared runtime
+// RealtimeSceneBridge, used by Player too; avoid duplicating conversions.
+//
+// `export import` exposes each module API and is not a runtime event order.
+// See docs/SOURCE_READING_ORDER.md, tests/EditorTests.cpp and the authoring
+// command tests before extending an inspector widget.
 export module Kairo.Editor;
 export import Kairo.Editor.Types;
 export import Kairo.Editor.TextValidation;
