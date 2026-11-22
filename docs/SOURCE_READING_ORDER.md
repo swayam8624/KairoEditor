@@ -8,6 +8,8 @@ The editor owns the *authoring experience*, not the engine scene schema or rende
 
 Read each phase in order. Every link goes to a source file or directory in this repository. For a directory, inspect its public interface and then its implementation files. After each phase, identify the caller, the state it owns, the inputs it validates, and its observable outputs.
 
+**Source exercise:** [Undo/redo cursor, gesture merging, reflected edits and subtree restoration](UNDO_COMMANDS_AND_SCENE_SNAPSHOT_LAB.md). The current audio component snapshot gap remains explicitly documented.
+
 ## 1. State, project ownership and undoable operations
 
 Use [the complete authoring-transaction walkthrough](AUTHORING_TRANSACTION_WALKTHROUGH.md)
