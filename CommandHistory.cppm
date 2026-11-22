@@ -92,14 +92,28 @@ export namespace kairo::editor
         // A successfully executed new command invalidates the redo
         // branch. Merging is optional and must respect the earlier
         // command's undo information and transaction boundary.
+        // One edit is executed against ProjectSession *before* changing
+        // the undo journal. On success the redo suffix is discarded;
+        // TryMerge can coalesce a drag into the previous command while
+        // preserving its original before-value. A bounded journal
+        // evicts oldest commands if capacity is exhausted.
+        // Command::Execute is expected to supply its own rollback
+        // if it throws; this class cannot undo arbitrary partial edits.
         void Execute(std::unique_ptr<EditorCommand> command)
         {
             if (!command) throw std::invalid_argument("Cannot execute a null editor command.");
             command->Execute();
 
+            // New edits fork history: after Undo, previously redoable
+            // actions are invalid because the authored scene has
+            // taken another path. Erase that suffix before appending.
             if (m_Cursor != m_Entries.size())
                 m_Entries.erase(m_Entries.begin() + static_cast<std::ptrdiff_t>(m_Cursor), m_Entries.end());
 
+            // Gestures such as repeated position changes merge only
+            // if the command verifies the same project/Entity/property.
+            // The most recent after-value replaces the old after,
+            // while the old before-value stays available for Undo.
             if (m_Cursor != 0u && m_Entries[m_Cursor - 1u]->TryMerge(*command)) return;
 
             if (m_Entries.size() == m_MaximumEntries)
@@ -113,6 +127,10 @@ export namespace kairo::editor
 
         // Reverse the latest applied command, moving the cursor only
         // after Undo succeeds; failure must preserve history position.
+        // Run the inverse operation before decrementing the journal
+        // cursor. The command remains present if Undo throws, but
+        // the command implementation is still responsible for
+        // not leaving a half-restored Scene.
         void Undo()
         {
             if (!CanUndo()) throw std::logic_error("No editor command is available to undo.");
@@ -122,6 +140,9 @@ export namespace kairo::editor
 
         // Reapply from the redo suffix. The command still owns its
         // before/after state and does not reconstruct it from the UI.
+        // Re-execute the saved command, then advance cursor on
+        // success. Do not reconstruct after-values from ImGui widgets:
+        // UI text/drag values may have changed since original Execute.
         void Redo()
         {
             if (!CanRedo()) throw std::logic_error("No editor command is available to redo.");
@@ -132,6 +153,9 @@ export namespace kairo::editor
         /// Task: release commands whose object references belong to a closing
         /// or replacing project. Hosts must clear history at document identity
         /// boundaries before destroying the referenced session.
+        // ProjectSession/EngineCore Scene ownership may be replaced
+        // or closed; all commands borrow pointers into that project.
+        // Clear the journal before those objects become invalid.
         void Clear() noexcept
         {
             m_Entries.clear();
