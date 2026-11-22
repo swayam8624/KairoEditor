@@ -33,6 +33,10 @@ namespace
     }
 }
 
+// TEACHING TEST: The Editor compatibility module reuses shared RenderAssetBindings:
+// two primitive meshes, outer SceneInstance transform plus local Y+2, same authored
+// pick ID, and render-layer filtering. No upload ownership is transferred to the
+// Editor.
 TEST_CASE("Imported scene instances expand shared primitive bindings with instance transforms",
     "[KairoEditor][RenderBridge][glTF]")
 {
@@ -61,6 +65,9 @@ TEST_CASE("Imported scene instances expand shared primitive bindings with instan
     CHECK(BuildRenderScene(scene, assets, 2u).Draws().empty());
 }
 
+// TEACHING TEST: Skip hidden MeshRenderer, sort by persistent Entity.Value, compose
+// child WorldTransform (-2 + 3 = +1 world X), preserve PBR factors, enforce nonempty
+// layer mask and assign ObjectID from Entity ID.
 TEST_CASE("Engine scenes extract visible renderer draws in entity order", "[KairoEditor][RenderBridge]")
 {
     kairo::engine::Scene scene;
@@ -102,6 +109,9 @@ TEST_CASE("Engine scenes extract visible renderer draws in entity order", "[Kair
     REQUIRE_THROWS_AS(BuildRenderScene(scene, assets, 0u), std::invalid_argument);
 }
 
+// TEACHING TEST: Test the common Editor/Player conversion of 800 candela to
+// intensity 8, shadow disable, ambient multiplier, environment texture binding and
+// layer-filtered lights.
 TEST_CASE("Engine scenes extract authored lights environments and shadow policy",
     "[KairoEditor][RenderBridge][Lighting]")
 {
@@ -141,6 +151,9 @@ TEST_CASE("Engine scenes extract authored lights environments and shadow policy"
     CHECK(BuildRenderScene(scene, bindings, 0x2u).Lights().empty());
 }
 
+// TEACHING TEST: Typed registry validation rejects an empty/invalid/duplicate mesh
+// handle; BuildRenderScene fails on unregistered authored mesh ID rather than
+// emitting a broken draw.
 TEST_CASE("Render asset bindings reject ambiguous and missing assets", "[KairoEditor][RenderBridge]")
 {
     kairo::assets::AssetRegistry registry;
@@ -158,6 +171,9 @@ TEST_CASE("Render asset bindings reject ambiguous and missing assets", "[KairoEd
     REQUIRE_THROWS_AS(BuildRenderScene(scene, assets), std::out_of_range);
 }
 
+// TEACHING TEST: Known builtin metadata produces canonical plane/cube CPU meshes.
+// Unknown builtin importer or non-mesh type yields nullopt; GPU allocation occurs
+// elsewhere.
 TEST_CASE("Builtin primitive metadata maps to renderer geometry once", "[KairoEditor][RenderBridge][Builtin]")
 {
     kairo::assets::AssetMetadata plane{ MeshID, kairo::assets::AssetType::Mesh,
@@ -177,6 +193,9 @@ TEST_CASE("Builtin primitive metadata maps to renderer geometry once", "[KairoEd
     CHECK_FALSE(MakeBuiltinRenderMesh(plane).has_value());
 }
 
+// TEACHING TEST: Import a three-vertex OBJ via actual cache/registry; first import
+// populates derived data, second import reports a cache hit with identical key and
+// geometry; unknown importer is rejected.
 TEST_CASE("Source OBJ meshes import through shared assets into renderer geometry", "[KairoEditor][RenderBridge][Import]")
 {
     const auto root = std::filesystem::temp_directory_path() /
