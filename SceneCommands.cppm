@@ -433,11 +433,15 @@ export namespace kairo::editor
         kairo::engine::MeshRendererComponent m_After;
     };
 
-    /// A complete entity snapshot for the component types EngineCore currently
-    /// exposes. Opaque physics bindings are retained as authored references;
-    /// this command never reaches into or snapshots an external runtime world.
-    // Snapshot an entity's authored component state before structural
-    // edits so undo can restore a deleted subtree, not only its root ID.
+    /// An authored entity snapshot for the component categories listed below.
+    /// Opaque physics bindings remain *descriptors*, not external world state.
+    /// IMPORTANT LIMITATION: as currently implemented this snapshot omits
+    /// EngineCore's AudioEmitter and AudioListener components. Deleting and
+    /// undoing an entity with those components may not restore them; add
+    /// capture/apply support and regression tests in a separate functional fix.
+    // Store per-entity data before structural edits so undo recreates a
+    // subtree instead of only its root ID. Do not call this an exhaustive
+    // copy of every EngineCore component until the audio gap is addressed.
     struct EntitySnapshot final
     {
         kairo::engine::Entity ID;
