@@ -8,6 +8,8 @@ The editor owns the *authoring experience*, not the engine scene schema or rende
 
 Read each phase in order. Every link goes to a source file or directory in this repository. For a directory, inspect its public interface and then its implementation files. After each phase, identify the caller, the state it owns, the inputs it validates, and its observable outputs.
 
+**Cross-repository integration lab:** [Shared CPU scene extraction, typed assets and native lifetime](https://github.com/swayam8624/KairoGameEngine/blob/main/docs/ASSET_SCENE_TO_GPU_LIFETIME_LAB.md). Read the authored/CPU contracts before following the native GPU backend; source inspection is not a native test result.
+
 **Source exercise:** [Undo/redo cursor, gesture merging, reflected edits and subtree restoration](UNDO_COMMANDS_AND_SCENE_SNAPSHOT_LAB.md). The current audio component snapshot gap remains explicitly documented.
 
 ## 1. State, project ownership and undoable operations
