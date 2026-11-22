@@ -1,5 +1,7 @@
 # KairoEditor
 
+**Cross-repository integration lab:** [Editor/Player shared scene extraction and GPU handle lifetime](https://github.com/swayam8624/KairoGameEngine/blob/main/docs/ASSET_SCENE_TO_GPU_LIFETIME_LAB.md). Read the authored/CPU contracts before following the native GPU backend; source inspection is not a native test result.
+
 **Learn through the source:** [complete reading curriculum](docs/SOURCE_READING_ORDER.md) · [UI action → command → undoable scene change](docs/AUTHORING_TRANSACTION_WALKTHROUGH.md) · [Undo journal and subtree snapshot laboratory](docs/UNDO_COMMANDS_AND_SCENE_SNAPSHOT_LAB.md).
 
 The source walkthrough also records a known audio-component gap in
