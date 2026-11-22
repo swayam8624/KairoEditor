@@ -1,5 +1,10 @@
 # KairoEditor
 
+**Learn through the source:** [complete reading curriculum](docs/SOURCE_READING_ORDER.md) · [UI action → command → undoable scene change](docs/AUTHORING_TRANSACTION_WALKTHROUGH.md).
+
+The source walkthrough also records a known audio-component gap in
+entity-subtree undo snapshots; it is not yet a verified functional fix.
+
 `KairoEditor` is the authoring layer for Kairo scenes. It is intentionally a
 separate repository from `KairoEngineCore`: EngineCore runs scenes, while the
 editor owns selection, workspace state, inspection, and play/edit transitions.
@@ -458,7 +463,8 @@ ctest --test-dir build --output-on-failure
 From the game-engine superproject:
 
 ```bash
-cd /Users/swayamsingal/Desktop/Programming/Kairo
+# Run these commands from the parent directory containing sibling Kairo repos.
+cd /path/to/Kairo
 cmake --preset dev-clang
 cmake --build --preset dev-clang --parallel
 ./build/dev-clang/KairoEditor/KairoProjectCompiler \
