@@ -1,4 +1,15 @@
-// TEACHING MAP: BACKEND-NEUTRAL AUTHORING STATE: Scene belongs to KairoEngineCore, while this class holds selection and workspace/mode state. PanelState applies presets; EditorActions/SceneCommands implement edits; CommandHistory provides undo; EditorShell and ImGuiRuntime display through KairoRenderer. This class must not own a Vulkan/Metal device or scene persistence.
+// TEACHING MAP: EditorState is a *non-owning* view of EngineCore::Scene.
+// It stores selection, Edit/Play/Pause mode, authoring surface and workspace
+// choices. PanelState implements visibility presets; EditorActions and
+// CommandHistory execute durable authored changes; ProjectSession manages
+// scene/document persistence and Play-mode cloning.
+//
+// A selected Entity becomes stale after deletion or scene replacement.
+// ValidateSelection protects UI consumers from dereferencing such IDs.
+// Mode changes in this class are state changes, not a call to
+// PhysicsWorld::Step or RendererRuntime::DrawFrame. Native UI/graphics
+// lifetime belongs to EditorShell/host adapters.
+
 module;
 
 #include <optional>
@@ -63,6 +74,8 @@ export namespace kairo::editor
         /// Precondition: entity belongs to the scene supplied at construction.
         /// Task: select an entity for hierarchy, inspector, and viewport tools.
         /// TEACHING METHOD: Only accept an entity that Scene currently owns; throw on stale/out-of-scene selection.
+        // Check the selected ID against the borrowed Scene before
+        // publishing it to hierarchy/inspector/viewport UI state.
         void Select(kairo::engine::Entity entity)
         {
             if (!m_Scene.Contains(entity)) throw std::out_of_range("KairoEditor cannot select an entity outside the active scene.");
@@ -97,6 +110,8 @@ export namespace kairo::editor
 
         /// Task: clear a stale selection after external scene destruction.
         /// TEACHING METHOD: Discard stale selected entity when Scene no longer contains it; protects UI inspectors after deletes.
+        // A cached selected ID may be removed by undo or project reload.
+        // Revalidate before inspector/transform access each UI frame.
         void ValidateSelection() noexcept
         {
             if (m_Selected.has_value() && !m_Scene.Contains(*m_Selected)) m_Selected.reset();
