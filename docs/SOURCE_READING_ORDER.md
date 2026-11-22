@@ -8,47 +8,60 @@ The editor owns the *authoring experience*, not the engine scene schema or rende
 
 Read each phase in order. Every link goes to a source file or directory in this repository. For a directory, inspect its public interface and then its implementation files. After each phase, identify the caller, the state it owns, the inputs it validates, and its observable outputs.
 
-## 1. State and commands
+## 1. State, project ownership and undoable operations
 
-1. [`README.md`](../README.md)
-2. [`EditorTypes.cppm`](../EditorTypes.cppm)
-3. [`EditorState.cppm`](../EditorState.cppm)
-4. [`PanelState.cppm`](../PanelState.cppm)
-5. [`EditorActions.cppm`](../EditorActions.cppm)
-6. [`CommandHistory.cppm`](../CommandHistory.cppm)
-7. [`CommandTransaction.cppm`](../CommandTransaction.cppm)
-8. [`SceneCommands.cppm`](../SceneCommands.cppm)
+Use [the complete authoring-transaction walkthrough](AUTHORING_TRANSACTION_WALKTHROUGH.md)
+to trace one real input gesture from UI to an undoable EngineCore edit.
 
-## 2. Documents and persistence
+1. [`CMakeLists.txt`](../CMakeLists.txt) and [`KairoEditor.cppm`](../KairoEditor.cppm): build and C++23 exports.
+2. [`EditorTypes.cppm`](../EditorTypes.cppm), [`PanelState.cppm`](../PanelState.cppm) and [`EditorState.cppm`](../EditorState.cppm): selection, mode, workspace and borrowed Scene reference.
+3. [`EditorInputRouter.cppm`](../EditorInputRouter.cppm), [`EditorActions.cppm`](../EditorActions.cppm) and [`KeymapSettings.cppm`](../KeymapSettings.cppm): focus-safe intent routing.
+4. [`CommandHistory.cppm`](../CommandHistory.cppm) and [`CommandTransaction.cppm`](../CommandTransaction.cppm): undo/redo cursor, merging, authoring transactions.
+5. [`SceneCommands.cppm`](../SceneCommands.cppm), [`SceneFragment.cppm`](../SceneFragment.cppm) and [`SceneSelection.cppm`](../SceneSelection.cppm): reversible component and subtree operations.
+6. [`ProjectSession.cppm`](../ProjectSession.cppm), [`ProjectLifecycle.cppm`](../ProjectLifecycle.cppm) and [`ProjectRecovery.cppm`](../ProjectRecovery.cppm): project-owned scene, dirty state, saving and recovery.
+7. [`tests/EditorTests.cpp`](../tests/EditorTests.cpp), [`tests/Phase4WorkflowTests.cpp`](../tests/Phase4WorkflowTests.cpp): state and command behavior.
 
-1. [`DocumentTypes.cppm`](../DocumentTypes.cppm)
-2. [`DocumentSchema.cppm`](../DocumentSchema.cppm)
-3. [`DocumentValidation.cppm`](../DocumentValidation.cppm)
-4. [`DocumentCommands.cppm`](../DocumentCommands.cppm)
-5. [`DocumentSerialization.cppm`](../DocumentSerialization.cppm)
-6. [`DocumentCompiler.cppm`](../DocumentCompiler.cppm)
-7. [`ProjectSession.cppm`](../ProjectSession.cppm)
-8. [`ProjectRecovery.cppm`](../ProjectRecovery.cppm)
+**Exercise:** create an entity, rename it, duplicate a subtree, delete,
+undo and redo. Inspect the snapshot coverage—currently audio emitter and
+listener components are missing from SceneCommands' EntitySnapshot,
+requiring separate functional repair/tests before claiming perfect undo.
 
-## 3. Authoring and runtime boundaries
+## 2. Documents, validation and authoring surfaces
 
-1. [`AssetBrowserModel.cppm`](../AssetBrowserModel.cppm)
-2. [`SceneSelection.cppm`](../SceneSelection.cppm)
-3. [`ViewportController.cppm`](../ViewportController.cppm)
-4. [`TransformGizmo.cppm`](../TransformGizmo.cppm)
-5. [`PhysicsPreview.cppm`](../PhysicsPreview.cppm)
-6. [`SceneRenderBridge.cppm`](../SceneRenderBridge.cppm)
-7. [`ImGuiRuntime.cppm`](../ImGuiRuntime.cppm)
-8. [`KairoUI.cppm`](../KairoUI.cppm)
-9. [`EditorShell.cppm`](../EditorShell.cppm)
+8. [`DocumentTypes.cppm`](../DocumentTypes.cppm), [`DocumentSchema.cppm`](../DocumentSchema.cppm) and [`CoreDocumentSchemas.cppm`](../CoreDocumentSchemas.cppm): portable typed documents.
+9. [`AuthoringDocument.cppm`](../AuthoringDocument.cppm), [`DocumentCommands.cppm`](../DocumentCommands.cppm) and [`DocumentValidation.cppm`](../DocumentValidation.cppm): mutable document with reversible changes.
+10. [`DocumentSerialization.cppm`](../DocumentSerialization.cppm), [`DocumentCompiler.cppm`](../DocumentCompiler.cppm) and [`LogicDocumentCompiler.cppm`](../LogicDocumentCompiler.cppm): persistence, compilation and derived logic.
+11. [`ProjectDocuments.cppm`](../ProjectDocuments.cppm), [`DocumentProjection.cppm`](../DocumentProjection.cppm) and [`AuthoringWorkspaceState.cppm`](../AuthoringWorkspaceState.cppm): editor session/document views.
+12. [`GraphCanvas.cppm`](../GraphCanvas.cppm), [`ImGuiGraphCanvas.cppm`](../ImGuiGraphCanvas.cppm), [`AIEditorSession.cppm`](../AIEditorSession.cppm) and [`AIEditorTools.cppm`](../AIEditorTools.cppm): interactive graph/edit assistance.
+13. [`tests/DocumentCompilerTests.cpp`](../tests/DocumentCompilerTests.cpp) and the document-focused tests in the full inventory below.
 
-## 4. Tests
+**Exercise:** change a graph document, undo, compile and compare the
+resulting artifact with the committed model rather than the current
+ImGui text buffer.
 
-1. [`tests/EditorTests.cpp`](../tests/EditorTests.cpp)
-2. [`tests/DocumentCompilerTests.cpp`](../tests/DocumentCompilerTests.cpp)
-3. [`tests/Phase4WorkflowTests.cpp`](../tests/Phase4WorkflowTests.cpp)
-4. [`tests/PhysicsPreviewTests.cpp`](../tests/PhysicsPreviewTests.cpp)
-5. [`tests/SceneRenderBridgeTests.cpp`](../tests/SceneRenderBridgeTests.cpp)
+## 3. Asset, scene rendering and simulation preview
+
+14. [`AssetBrowserModel.cppm`](../AssetBrowserModel.cppm), [`AssetWorkspace.cppm`](../AssetWorkspace.cppm), [`AssetBrowserRuntime.cppm`](../AssetBrowserRuntime.cppm) and [`AssetScenePlacement.cppm`](../AssetScenePlacement.cppm): persistent IDs and placement.
+15. [`SceneRenderBridge.cppm`](../SceneRenderBridge.cppm): compatibility aliases over the shared KairoGameEngine Editor/Player converter.
+16. [`ViewportController.cppm`](../ViewportController.cppm) and [`TransformGizmo.cppm`](../TransformGizmo.cppm): camera navigation, selection and undoable transforms.
+17. [`PhysicsPreview.cppm`](../PhysicsPreview.cppm), [`AnimationPreview.cppm`](../AnimationPreview.cppm) and [`OfflineRenderAuthoring.cppm`](../OfflineRenderAuthoring.cppm): isolated preview contexts.
+18. [`tests/PhysicsPreviewTests.cpp`](../tests/PhysicsPreviewTests.cpp) and [`tests/SceneRenderBridgeTests.cpp`](../tests/SceneRenderBridgeTests.cpp): adapter behavior.
+
+**Exercise:** follow a picked renderer object ID back to an authored
+EngineCore Entity and then to a SceneCommand, ensuring a transient GPU
+handle is never persisted as a project AssetID.
+
+## 4. Native UI, shell and verification
+
+19. [`KairoUI.cppm`](../KairoUI.cppm), [`EditorTheme.cppm`](../EditorTheme.cppm), [`ImGuiRuntime.cppm`](../ImGuiRuntime.cppm) and [`ImGuiReflectionInspector.cppm`](../ImGuiReflectionInspector.cppm): semantic widgets and toolkit-specific implementation.
+20. [`EditorShell.cppm`](../EditorShell.cppm): full Draw -> hierarchy/inspector/viewport -> action -> command dispatch.
+21. [`detail/MetalImGuiBridge.mm`](../detail/MetalImGuiBridge.mm), [`NativeDialogs.cppm`](../NativeDialogs.cppm) and [`EditorLayoutRecovery.cppm`](../EditorLayoutRecovery.cppm): native bridge/recovery.
+22. Continue with the other authoring, shipping, diagnostics, tests and source files in the inventory below.
+
+**Record:** authoritative Scene before/after, selected Entity ID,
+command history cursor, current edit/play mode, dirty project state,
+graphics backend and exact native tests. UI model tests are not proof
+of complete native Editor acceptance.
 
 ## End-to-end interaction map
 
