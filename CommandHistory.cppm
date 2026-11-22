@@ -1,3 +1,16 @@
+// TEACHING MODULE: UI-independent undo/redo boundary. Commands own the
+// before/after data needed to reverse authoring changes; they mutate
+// ProjectSession/EngineCore scene or documents, not ImGui widget state.
+//
+// A Command's Execute/Undo must provide a strong exception guarantee:
+// if it throws, authored data remains unchanged and the history cursor
+// must not advance. On a new edit after Undo, redo history is replaced.
+// TryMerge permits gesture coalescing (e.g., inspector drag) but should
+// not merge unrelated edits or cross transaction boundaries.
+//
+// Distinguish this *authoring history* from RuntimeWorld's deferred game
+// commands and PhysicsWorld's contact cache; they have different lifetimes
+// and persistence semantics. See SceneCommands.cppm and EditorTests.cpp.
 module;
 
 #include <cstddef>
@@ -42,6 +55,8 @@ export namespace kairo::editor
     /// a new edit after undo discards the obsolete redo branch. The entry bound
     /// prevents an arbitrarily long editing session from retaining unbounded
     /// command payloads; the oldest applied operation is evicted first.
+    // Owns executed commands plus a cursor dividing applied operations
+    // from redoable ones. A throwing command must not corrupt the cursor.
     class CommandHistory final
     {
     public:
@@ -74,6 +89,9 @@ export namespace kairo::editor
 
         /// Executes before changing journal ownership. If execution fails, the
         /// existing undo and redo branches remain intact.
+        // A successfully executed new command invalidates the redo
+        // branch. Merging is optional and must respect the earlier
+        // command's undo information and transaction boundary.
         void Execute(std::unique_ptr<EditorCommand> command)
         {
             if (!command) throw std::invalid_argument("Cannot execute a null editor command.");
@@ -93,6 +111,8 @@ export namespace kairo::editor
             ++m_Cursor;
         }
 
+        // Reverse the latest applied command, moving the cursor only
+        // after Undo succeeds; failure must preserve history position.
         void Undo()
         {
             if (!CanUndo()) throw std::logic_error("No editor command is available to undo.");
@@ -100,6 +120,8 @@ export namespace kairo::editor
             --m_Cursor;
         }
 
+        // Reapply from the redo suffix. The command still owns its
+        // before/after state and does not reconstruct it from the UI.
         void Redo()
         {
             if (!CanRedo()) throw std::logic_error("No editor command is available to redo.");
