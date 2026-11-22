@@ -1,3 +1,17 @@
+// TEACHING MODULE: Concrete reversible EngineCore scene mutations used by
+// hierarchy, inspector, viewport, action routing and automation. Each
+// EditorCommand records enough state for Execute/Undo. ProjectSession
+// owns the editable Scene; CommandHistory controls cursor/merge behavior.
+//
+// Entity deletion/duplication is not merely an ID change: subtree
+// hierarchy, component data, references and stable asset IDs must be
+// preserved/restored consistently. Reflection property commands validate
+// typed values rather than poking arbitrary ImGui memory into components.
+// The shared runtime scene schema lives in EngineCore, not this UI module.
+//
+// Separate edited scene values from Play-mode PhysicsWorld simulation.
+// A physics-preview command should change authored preview settings,
+// not silently capture transient solver state into a saved .kscene.
 module;
 
 #include <memory>
@@ -134,6 +148,8 @@ export namespace kairo::editor
 
     /// Creates one scene entity and preserves its allocated identity across
     /// undo/redo. CreatedEntity is valid after the first successful Execute.
+    // Idempotence across an undo/redo cycle depends on preserving the
+    // assigned entity identity and authored metadata for restoration.
     class CreateEntityCommand final : public EditorCommand
     {
     public:
@@ -420,6 +436,8 @@ export namespace kairo::editor
     /// A complete entity snapshot for the component types EngineCore currently
     /// exposes. Opaque physics bindings are retained as authored references;
     /// this command never reaches into or snapshots an external runtime world.
+    // Snapshot an entity's authored component state before structural
+    // edits so undo can restore a deleted subtree, not only its root ID.
     struct EntitySnapshot final
     {
         kairo::engine::Entity ID;
@@ -613,6 +631,8 @@ export namespace kairo::editor
 
     /// Removes one hierarchy subtree while retaining all persistent components
     /// and relationships needed to restore exact authored state and stable IDs.
+    // Delete records a complete pre-edit subtree and restores it on Undo.
+    // A simple CreateEntity call would not recover stable IDs/children.
     class DeleteEntityCommand final : public EditorCommand
     {
     public:
@@ -725,6 +745,9 @@ export namespace kairo::editor
     /// records after structural edits. Component-level validation runs after
     /// every write; a failed validation restores the prior property value
     /// before the error reaches the editor shell.
+    // The inspector and automation both use reflection keys and
+    // validated values. Execute/Undo restore typed authored data rather
+    // than treating UI control memory as a persistent component.
     class SetReflectedPropertyCommand final : public EditorCommand
     {
     public:
