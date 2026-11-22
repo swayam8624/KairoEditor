@@ -1,3 +1,18 @@
+// TEACHING MODULE: Native Dear ImGui shell for *displaying and dispatching*
+// EditorState/ProjectSession/CommandHistory actions. EngineCore owns scene
+// schema; KairoAssets owns identity/artifacts; RendererRuntime owns GPU
+// presentation and scene resources; PhysicsPreview hosts isolated simulation.
+// UI widget state must not be treated as authoritative persisted scene data.
+//
+// Read callbacks in this order: Draw -> DrawMainBar / DrawVisiblePanels ->
+// DrawHierarchy / DrawInspector / DrawViewport -> input routing and scene
+// actions -> SceneCommands through CommandHistory. Project lifecycle
+// actions call ProjectSession/Recovery rather than copying parser logic.
+// This file is large because of UI composition; separate state contracts
+// are documented in their respective modules and guides.
+//
+// When adding a widget, identify the authoritative field, validation,
+// reversible command, and Play/Edit-mode semantics *before* wiring ImGui.
 module;
 
 #include <imgui.h>
@@ -105,6 +120,9 @@ export namespace kairo::editor
             }
         }
 
+        // One UI frame. The host already owns an active renderer/window;
+        // this draws panels and dispatches authoring commands, not the
+        // native GPU command buffer or PhysicsWorld simulation directly.
         void Draw()
         {
             m_ViewportFlyCursorCaptured = false;
@@ -808,6 +826,8 @@ export namespace kairo::editor
             }
         }
 
+        // Build the UI tree from EngineCore Scene IDs; selection is stored
+        // in EditorState and mutation must flow through undoable commands.
         void DrawHierarchy()
         {
             if (!ImGui::Begin("Hierarchy")) { ImGui::End(); return; }
@@ -884,6 +904,9 @@ export namespace kairo::editor
             ImGui::EndDragDropTarget();
         }
 
+        // Read selected component descriptors and submit validated edits
+        // as commands. Do not persist a raw pointer to a component field
+        // beyond potential scene mutation/reload.
         void DrawInspector()
         {
             if (!ImGui::Begin("Inspector")) { ImGui::End(); return; }
@@ -1397,6 +1420,9 @@ export namespace kairo::editor
             }
         }
 
+        // Draw renderer-owned viewport output as an ImGui surface.
+        // Picking/object IDs and gizmo changes map back into authored
+        // scene commands; they do not transfer GPU texture ownership here.
         void DrawViewport()
         {
             if (ImGui::Begin("Viewport", nullptr, ImGuiWindowFlags_NoScrollbar |
@@ -1666,6 +1692,9 @@ export namespace kairo::editor
             }
         }
 
+        // Respect focus for text/graph/code editing so gameplay/editor
+        // shortcuts do not steal keystrokes from active content fields.
+        // Convert input into named EditorActions before executing changes.
         void RouteAndDispatchInput()
         {
             const ImGuiIO& io = ImGui::GetIO();
@@ -1769,6 +1798,9 @@ export namespace kairo::editor
             m_ViewportNavigationProjection = ViewportCamera();
         }
 
+        // Enter an isolated Play-mode preview (ProjectSession owns the
+        // edit/play separation). Runtime physics changes must not
+        // silently overwrite the saved authored scene.
         void StartPlay()
         {
             m_RuntimeScene = m_Project.Scene();
