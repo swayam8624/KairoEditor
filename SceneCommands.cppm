@@ -15,6 +15,7 @@
 module;
 
 #include <memory>
+#include <unordered_map>
 #include <cmath>
 #include <cstdint>
 #include <limits>
@@ -29,6 +30,7 @@ module;
 export module Kairo.Editor.SceneCommands;
 
 import Kairo.Editor.CommandHistory;
+import Kairo.Editor.SceneEntityData;
 import Kairo.Editor.PrimitiveTypes;
 import Kairo.Editor.ProjectSession;
 import Kairo.EngineCore;
@@ -435,13 +437,7 @@ export namespace kairo::editor
 
     /// An authored entity snapshot for the component categories listed below.
     /// Opaque physics bindings remain *descriptors*, not external world state.
-    /// IMPORTANT LIMITATION: as currently implemented this snapshot omits
-    /// EngineCore's AudioEmitter and AudioListener components. Deleting and
-    /// undoing an entity with those components may not restore them; add
-    /// capture/apply support and regression tests in a separate functional fix.
-    // Store per-entity data before structural edits so undo recreates a
-    // subtree instead of only its root ID. Do not call this an exhaustive
-    // copy of every EngineCore component until the audio gap is addressed.
+    // Keep snapshot identity separate from shared authored-component transfer.
     struct EntitySnapshot final
     {
         kairo::engine::Entity ID;
@@ -459,12 +455,11 @@ export namespace kairo::editor
         std::optional<kairo::engine::LogicComponent> Logic;
         std::optional<kairo::engine::RigidBodyComponent> RigidBody;
         std::optional<kairo::engine::ColliderComponent> Collider;
+        std::optional<kairo::engine::AudioEmitterComponent> AudioEmitter;
+        std::optional<kairo::engine::AudioListenerComponent> AudioListener;
     };
 
-    // Copy *authored* fields before delete/duplicate, not a GPU
-    // mesh handle or PhysicsWorld solver state. AudioEmitter/Listener
-    // are currently omitted here and in EntitySnapshot: undo of
-    // audio-bearing entities is therefore not yet lossless.
+    // Capture authored values, never transient runtime handles.
     [[nodiscard]] inline EntitySnapshot CaptureEntity(
         const kairo::engine::Scene& scene, kairo::engine::Entity entity)
     {
@@ -476,14 +471,7 @@ export namespace kairo::editor
         result.Enabled = scene.IsEnabled(entity);
         result.Layer = scene.Layer(entity);
         result.Tags = scene.Tags(entity);
-        if (scene.HasMeshRenderer(entity)) result.MeshRenderer = scene.MeshRenderer(entity);
-        if (scene.HasSceneInstance(entity)) result.SceneInstance = scene.SceneInstance(entity);
-        if (scene.HasCamera(entity)) result.Camera = scene.Camera(entity);
-        if (scene.HasLight(entity)) result.Light = scene.Light(entity);
-        if (scene.HasEnvironment(entity)) result.Environment = scene.Environment(entity);
-        if (scene.HasLogic(entity)) result.Logic = scene.Logic(entity);
-        if (scene.HasRigidBody(entity)) result.RigidBody = scene.RigidBody(entity);
-        if (scene.HasCollider(entity)) result.Collider = scene.Collider(entity);
+        CaptureAuthoredComponents(scene, entity, result);
         return result;
     }
 
@@ -506,10 +494,7 @@ export namespace kairo::editor
         return result;
     }
 
-    // Apply optional component values only *after* the target Entity
-    // was allocated with its original ID. These snapshots are a
-    // defined subset of EngineCore components; add audio and future
-    // component types deliberately with regression tests.
+    // Restore authored values after allocating the stable entity ID.
     inline void ApplyEntitySnapshot(
         kairo::engine::Scene& scene, const EntitySnapshot& snapshot)
     {
@@ -517,15 +502,7 @@ export namespace kairo::editor
         scene.SetEnabled(snapshot.ID, snapshot.Enabled);
         scene.SetLayer(snapshot.ID, snapshot.Layer);
         for (const auto& tag : snapshot.Tags) scene.AddTag(snapshot.ID, tag);
-        if (snapshot.MeshRenderer.has_value()) scene.SetMeshRenderer(snapshot.ID, *snapshot.MeshRenderer);
-        if (snapshot.SceneInstance.has_value())
-            scene.SetSceneInstance(snapshot.ID, *snapshot.SceneInstance);
-        if (snapshot.Camera.has_value()) scene.SetCamera(snapshot.ID, *snapshot.Camera);
-        if (snapshot.Light.has_value()) scene.SetLight(snapshot.ID, *snapshot.Light);
-        if (snapshot.Environment.has_value()) scene.SetEnvironment(snapshot.ID, *snapshot.Environment);
-        if (snapshot.Logic.has_value()) scene.SetLogic(snapshot.ID, *snapshot.Logic);
-        if (snapshot.RigidBody.has_value()) scene.SetRigidBody(snapshot.ID, *snapshot.RigidBody);
-        if (snapshot.Collider.has_value()) scene.SetCollider(snapshot.ID, *snapshot.Collider);
+        ApplyAuthoredComponents(scene, snapshot.ID, snapshot);
     }
 
     // Two-phase restoration: create all preserved IDs first, then
@@ -574,7 +551,6 @@ export namespace kairo::editor
     // *within* the clone while retaining the external parent for
     // the duplicated root. Undo destroys the duplicate root;
     // redo must restore or regenerate consistent stable identities.
-    // Snapshot audio omission also affects duplication semantics.
     class DuplicateEntityCommand final : public EditorCommand
     {
     public:
@@ -609,25 +585,23 @@ export namespace kairo::editor
                     created.push_back(scene.CreateEntity(name));
                 }
 
+                // Build one lookup instead of scanning the source subtree for each parent.
+                std::unordered_map<std::uint32_t, kairo::engine::Entity> remap;
+                remap.reserve(m_Source.size());
+                for (std::size_t index = 0u; index < m_Source.size(); ++index)
+                    remap.emplace(m_Source[index].ID.Value, created[index]);
+
                 m_Duplicates.reserve(m_Source.size());
                 for (std::size_t index = 0u; index < m_Source.size(); ++index)
                 {
                     EntitySnapshot duplicate = m_Source[index];
                     duplicate.ID = created[index];
                     duplicate.Name = index == 0u ? duplicate.Name + " Copy" : duplicate.Name;
-                    // A scene has exactly one primary camera. Duplicating one
-                    // keeps its complete lens/clear settings but leaves the
-                    // authored source as primary until the user explicitly
-                    // promotes the copy.
-                    if (duplicate.Camera.has_value()) duplicate.Camera->Primary = false;
+                    ClearCopiedPrimaryRoles(duplicate);
                     if (duplicate.Parent.has_value())
                     {
-                        for (std::size_t parentIndex = 0u; parentIndex < m_Source.size(); ++parentIndex)
-                        {
-                            if (m_Source[parentIndex].ID != *duplicate.Parent) continue;
-                            duplicate.Parent = created[parentIndex];
-                            break;
-                        }
+                        const auto parent = remap.find(duplicate.Parent->Value);
+                        if (parent != remap.end()) duplicate.Parent = parent->second;
                     }
                     m_Duplicates.push_back(std::move(duplicate));
                 }
@@ -658,8 +632,7 @@ export namespace kairo::editor
     // Delete records a complete pre-edit subtree and restores it on Undo.
     // A simple CreateEntity call would not recover stable IDs/children.
     // Capture once at command construction so Undo can reconstruct
-    // the same IDs and hierarchy. This is not a complete arbitrary
-    // component snapshot while AudioEmitter/Listener are missing.
+    // the same IDs and hierarchy, including authored audio components.
     class DeleteEntityCommand final : public EditorCommand
     {
     public:
