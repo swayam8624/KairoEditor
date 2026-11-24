@@ -80,7 +80,7 @@ target_sources(KairoEditor PUBLIC FILE_SET CXX_MODULES BASE_DIRS ${CMAKE_CURRENT
     AuthoringDocument.cppm DocumentValidation.cppm DocumentSerialization.cppm DocumentCommands.cppm
     DocumentCompiler.cppm LogicDocumentCompiler.cppm ProjectLogicBuild.cppm ProjectDocuments.cppm GraphCanvas.cppm DocumentProjection.cppm
     AuthoringWorkspaceState.cppm
-    ProjectDescriptor.cppm ProjectRecovery.cppm ProjectSession.cppm ProjectLifecycle.cppm NativeDialogs.cppm CommandHistory.cppm CommandTransaction.cppm EditorActions.cppm EditorInputRouter.cppm KeymapSettings.cppm NavigationSettings.cppm EditorLayoutRecovery.cppm ViewportController.cppm PrimitiveTypes.cppm SceneCommands.cppm
+    ProjectDescriptor.cppm ProjectRecovery.cppm ProjectSession.cppm ProjectLifecycle.cppm NativeDialogs.cppm CommandHistory.cppm CommandTransaction.cppm EditorActions.cppm EditorInputRouter.cppm KeymapSettings.cppm NavigationSettings.cppm EditorLayoutRecovery.cppm ViewportController.cppm PrimitiveTypes.cppm SceneEntityData.cppm SceneCommands.cppm
     AssetBrowserModel.cppm AssetWorkspace.cppm AssetBrowserRuntime.cppm AssetScenePlacement.cppm SceneSelection.cppm EditorDiagnostics.cppm SceneFragment.cppm ProductionAuthoring.cppm AdvancedProductionAuthoring.cppm NativeGameplayAuthoring.cppm OfflineRenderAuthoring.cppm MaterialPreviewAuthoring.cppm ProductionSystemsAuthoring.cppm ShippingAuthoring.cppm
     AIEditorTools.cppm AIEditorSession.cppm EditorState.cppm PanelState.cppm KairoEditor.cppm)
 # KairoEditor directly imports Kairo.Assets.* modules in its production

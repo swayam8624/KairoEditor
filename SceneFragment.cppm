@@ -11,9 +11,12 @@ module;
 #include <string>
 #include <utility>
 #include <vector>
+#include <unordered_set>
 
 export module Kairo.Editor.SceneFragment;
 
+import Kairo.Editor.SceneEntityData;
+import Kairo.EngineCore.AudioSceneComponents;
 import Kairo.EngineCore.Components;
 import Kairo.EngineCore.Entity;
 import Kairo.EngineCore.RuntimeComponents;
@@ -36,6 +39,9 @@ export namespace kairo::editor
         std::optional<kairo::engine::LogicComponent> Logic;
         std::optional<kairo::engine::RigidBodyComponent> RigidBody;
         std::optional<kairo::engine::ColliderComponent> Collider;
+        std::optional<kairo::engine::SceneInstanceComponent> SceneInstance;
+        std::optional<kairo::engine::AudioEmitterComponent> AudioEmitter;
+        std::optional<kairo::engine::AudioListenerComponent> AudioListener;
     };
 
     struct SceneFragment final
@@ -62,13 +68,20 @@ export namespace kairo::editor
     {
         inline void Gather(const kairo::engine::Scene& scene,
             kairo::engine::Entity entity, bool descendants,
-            std::vector<kairo::engine::Entity>& result)
+            std::vector<kairo::engine::Entity>& result,
+            std::unordered_set<std::uint32_t>& visited)
         {
-            if (std::ranges::find(result, entity) != result.end()) return;
-            result.push_back(entity);
-            if (!descendants) return;
-            for (kairo::engine::Entity child : scene.Children(entity))
-                Gather(scene, child, true, result);
+            std::vector<kairo::engine::Entity> pending{ entity };
+            while (!pending.empty())
+            {
+                const auto current = pending.back();
+                pending.pop_back();
+                if (!visited.insert(current.Value).second) continue;
+                result.push_back(current);
+                if (!descendants) continue;
+                const auto& children = scene.Children(current);
+                pending.insert(pending.end(), children.rbegin(), children.rend());
+            }
         }
 
         inline void Validate(const SceneFragment& fragment)
@@ -93,23 +106,29 @@ export namespace kairo::editor
                     throw std::invalid_argument("Scene fragment layer is invalid.");
                 for (const std::string& tag : entity.Tags)
                     kairo::engine::EntitySettingsComponent::ValidateTag(tag);
-                if (entity.MeshRenderer.has_value()) entity.MeshRenderer->Validate();
-                if (entity.Camera.has_value()) entity.Camera->Validate();
-                if (entity.Light.has_value()) entity.Light->Validate();
-                if (entity.Environment.has_value()) entity.Environment->Validate();
-                if (entity.Logic.has_value()) entity.Logic->Validate();
-                if (entity.RigidBody.has_value()) entity.RigidBody->Validate();
-                if (entity.Collider.has_value()) entity.Collider->Validate();
+                ValidateAuthoredComponents(entity);
             }
+            // Each parent chain is visited at most twice. Avoid quadratic
+            // ancestor walks and recursive stack overflow on deep prefabs.
+            std::vector<std::uint8_t> state(fragment.Entities.size(), 0u);
             for (std::size_t index = 0u; index < fragment.Entities.size(); ++index)
             {
-                std::size_t cursor = index;
-                std::size_t steps = 0u;
-                while (fragment.Entities[cursor].Parent >= 0)
+                std::int32_t cursor = static_cast<std::int32_t>(index);
+                while (cursor >= 0 && state[static_cast<std::size_t>(cursor)] == 0u)
                 {
-                    cursor = static_cast<std::size_t>(fragment.Entities[cursor].Parent);
-                    if (++steps > fragment.Entities.size())
-                        throw std::invalid_argument("Scene fragment hierarchy contains a cycle.");
+                    const auto current = static_cast<std::size_t>(cursor);
+                    state[current] = 1u;
+                    cursor = fragment.Entities[current].Parent;
+                }
+                if (cursor >= 0 && state[static_cast<std::size_t>(cursor)] == 1u)
+                    throw std::invalid_argument("Scene fragment hierarchy contains a cycle.");
+
+                cursor = static_cast<std::int32_t>(index);
+                while (cursor >= 0 && state[static_cast<std::size_t>(cursor)] == 1u)
+                {
+                    const auto current = static_cast<std::size_t>(cursor);
+                    state[current] = 2u;
+                    cursor = fragment.Entities[current].Parent;
                 }
             }
         }
@@ -123,11 +142,12 @@ export namespace kairo::editor
         if (selection.empty())
             throw std::invalid_argument("Scene fragment capture requires a selection.");
         std::vector<kairo::engine::Entity> captured;
+        std::unordered_set<std::uint32_t> visited;
         for (kairo::engine::Entity entity : selection)
         {
             if (!scene.Contains(entity))
                 throw std::out_of_range("Scene fragment selection contains an unknown entity.");
-            scene_fragment_detail::Gather(scene, entity, includeDescendants, captured);
+            scene_fragment_detail::Gather(scene, entity, includeDescendants, captured, visited);
         }
         std::ranges::sort(captured, {}, &kairo::engine::Entity::Value);
         std::map<std::uint32_t, std::size_t> indices;
@@ -150,13 +170,7 @@ export namespace kairo::editor
                 if (found != indices.end())
                     entity.Parent = static_cast<std::int32_t>(found->second);
             }
-            if (scene.HasMeshRenderer(source)) entity.MeshRenderer = scene.MeshRenderer(source);
-            if (scene.HasCamera(source)) entity.Camera = scene.Camera(source);
-            if (scene.HasLight(source)) entity.Light = scene.Light(source);
-            if (scene.HasEnvironment(source)) entity.Environment = scene.Environment(source);
-            if (scene.HasLogic(source)) entity.Logic = scene.Logic(source);
-            if (scene.HasRigidBody(source)) entity.RigidBody = scene.RigidBody(source);
-            if (scene.HasCollider(source)) entity.Collider = scene.Collider(source);
+            CaptureAuthoredComponents(scene, source, entity);
             fragment.Entities.push_back(std::move(entity));
         }
         scene_fragment_detail::Validate(fragment);
@@ -174,7 +188,13 @@ export namespace kairo::editor
         std::vector<kairo::engine::Entity> created;
         created.reserve(fragment.Entities.size());
 
-        for (const SceneFragmentEntity& source : fragment.Entities)
+        bool cameraPrimary = candidate.PrimaryCamera().has_value();
+        bool listenerPrimary = false;
+        for (const auto listener : candidate.AudioListenerEntities())
+            if (candidate.AudioListenerComponentFor(listener).Primary)
+                listenerPrimary = true;
+
+        for (SceneFragmentEntity& source : fragment.Entities)
         {
             const kairo::engine::Entity entity = candidate.CreateEntity(source.Name);
             created.push_back(entity);
@@ -182,13 +202,12 @@ export namespace kairo::editor
             candidate.SetEnabled(entity, source.Enabled);
             candidate.SetLayer(entity, source.Layer);
             for (const std::string& tag : source.Tags) candidate.AddTag(entity, tag);
-            if (source.MeshRenderer.has_value()) candidate.SetMeshRenderer(entity, *source.MeshRenderer);
-            if (source.Camera.has_value()) candidate.SetCamera(entity, *source.Camera);
-            if (source.Light.has_value()) candidate.SetLight(entity, *source.Light);
-            if (source.Environment.has_value()) candidate.SetEnvironment(entity, *source.Environment);
-            if (source.Logic.has_value()) candidate.SetLogic(entity, *source.Logic);
-            if (source.RigidBody.has_value()) candidate.SetRigidBody(entity, *source.RigidBody);
-            if (source.Collider.has_value()) candidate.SetCollider(entity, *source.Collider);
+            // Retain a copied primary only if the destination does not have one.
+            // Disabled authored primary listeners also reserve their unique role.
+            ClearCopiedPrimaryRoles(source, cameraPrimary, listenerPrimary);
+            if (source.Camera && source.Camera->Primary) cameraPrimary = true;
+            if (source.AudioListener && source.AudioListener->Primary) listenerPrimary = true;
+            ApplyAuthoredComponents(candidate, entity, source);
         }
         for (std::size_t index = 0u; index < fragment.Entities.size(); ++index)
         {

@@ -4,8 +4,10 @@
 
 **Learn through the source:** [complete reading curriculum](docs/SOURCE_READING_ORDER.md) · [UI action → command → undoable scene change](docs/AUTHORING_TRANSACTION_WALKTHROUGH.md) · [Undo journal and subtree snapshot laboratory](docs/UNDO_COMMANDS_AND_SCENE_SNAPSHOT_LAB.md).
 
-The source walkthrough also records a known audio-component gap in
-entity-subtree undo snapshots; it is not yet a verified functional fix.
+Structural editing now shares one authored-component transfer policy for undo,
+duplicate, clipboard and prefab operations. Audio emitters/listeners and imported
+scene instances are retained; copies do not steal primary roles. Regression
+coverage is registered; native build verification is still required.
 
 `KairoEditor` is the authoring layer for Kairo scenes. It is intentionally a
 separate repository from `KairoEngineCore`: EngineCore runs scenes, while the
