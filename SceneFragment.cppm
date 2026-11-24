@@ -188,6 +188,12 @@ export namespace kairo::editor
         std::vector<kairo::engine::Entity> created;
         created.reserve(fragment.Entities.size());
 
+        bool cameraPrimary = candidate.PrimaryCamera().has_value();
+        bool listenerPrimary = false;
+        for (const auto listener : candidate.AudioListenerEntities())
+            if (candidate.AudioListenerComponentFor(listener).Primary)
+                listenerPrimary = true;
+
         for (SceneFragmentEntity& source : fragment.Entities)
         {
             const kairo::engine::Entity entity = candidate.CreateEntity(source.Name);
@@ -196,8 +202,11 @@ export namespace kairo::editor
             candidate.SetEnabled(entity, source.Enabled);
             candidate.SetLayer(entity, source.Layer);
             for (const std::string& tag : source.Tags) candidate.AddTag(entity, tag);
-            // Clipboard/prefab copies retain components but never steal primary roles.
-            ClearCopiedPrimaryRoles(source);
+            // Retain a copied primary only if the destination does not have one.
+            // Disabled authored primary listeners also reserve their unique role.
+            ClearCopiedPrimaryRoles(source, cameraPrimary, listenerPrimary);
+            if (source.Camera && source.Camera->Primary) cameraPrimary = true;
+            if (source.AudioListener && source.AudioListener->Primary) listenerPrimary = true;
             ApplyAuthoredComponents(candidate, entity, source);
         }
         for (std::size_t index = 0u; index < fragment.Entities.size(); ++index)
