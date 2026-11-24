@@ -46,10 +46,11 @@ export namespace kairo::editor
     // Cloning must not steal an existing scene's unique primary roles.
     // Undo uses the unmodified snapshot to restore the original roles.
     template<class Data>
-    void ClearCopiedPrimaryRoles(Data& data) noexcept
+    void ClearCopiedPrimaryRoles(Data& data, bool cameraAlreadyPrimary = true,
+        bool listenerAlreadyPrimary = true) noexcept
     {
-        if (data.Camera) data.Camera->Primary = false;
-        if (data.AudioListener) data.AudioListener->Primary = false;
+        if (cameraAlreadyPrimary && data.Camera) data.Camera->Primary = false;
+        if (listenerAlreadyPrimary && data.AudioListener) data.AudioListener->Primary = false;
     }
 
     template<class Data>
