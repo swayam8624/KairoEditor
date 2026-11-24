@@ -1984,6 +1984,13 @@ TEST_CASE("Clipboard and prefab retain imported scenes and audio without stealin
     };
     checkCopy(PasteSceneFragment(scene, fragment));
     checkCopy(InstantiatePrefab(scene, PrefabTemplate{ "Audio prefab", 1u, fragment }));
+
+    // Cross-scene paste must not unnecessarily demote the only primary roles.
+    kairo::engine::Scene emptyDestination;
+    const auto pasted = PasteSceneFragment(emptyDestination, fragment);
+    REQUIRE(pasted.size() == 2u);
+    CHECK(emptyDestination.PrimaryCamera() == pasted[0]);
+    CHECK(emptyDestination.ActiveAudioListener() == pasted[0]);
 }
 
 TEST_CASE("Malformed cyclic scene fragments are rejected without scene changes",
