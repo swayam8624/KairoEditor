@@ -36,7 +36,7 @@ CaptureEntitySubtree walks the complete hierarchy before mutation and saves Enti
 
 If restoration throws after creating some nodes, it destroys created entities in reverse order. Because parent deletion can recursively destroy its descendants, the rollback checks Scene::Contains before each cleanup step.
 
-**Component coverage repair:** [SceneEntityData.cppm](../SceneEntityData.cppm) centralizes capture, validation, application and copy-role policy. Undo now retains audio emitters/listeners; duplicate and clipboard copies retain their data but clear the unique primary camera/listener flags. Scene fragments also retain imported scene instances. The new regression tests cover these cases; exact-head execution is not yet verified.
+**Component coverage repair:** [SceneEntityData.cppm](../SceneEntityData.cppm) centralizes capture, validation, application and copy-role policy. Undo now retains audio emitters/listeners; duplicate copies clear primary camera/listener flags, while clipboard/prefab copies keep them only when the destination has no corresponding primary. Scene fragments also retain imported scene instances. The new regression tests cover these cases; exact-head execution is not yet verified.
 
 **Exercise:** build root→child with different camera/light/mesh/physics components, delete root, Undo, then compare all stable IDs and component values. Repeat with audio emitters and a primary listener to verify the repaired path.
 
