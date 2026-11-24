@@ -1877,6 +1877,131 @@ TEST_CASE("Duplicate entity command preserves complete subtrees across undo and 
     std::filesystem::remove_all(root);
 }
 
+
+TEST_CASE("Structural undo and duplicate preserve authored audio", "[KairoEditor][Commands][Audio]")
+{
+    const auto root = std::filesystem::temp_directory_path() /
+        ("kairo-command-audio-" + kairo::assets::GenerateAssetID().ToString());
+    ProjectSession project;
+    project.CreateProject(root, "Audio command scene");
+    auto& scene = project.EditScene();
+    const auto parent = scene.CreateEntity("Listener");
+    const auto child = scene.CreateEntity("Emitter");
+    scene.SetParent(child, parent);
+    scene.SetAudioListener(parent, { .Enabled = true, .Primary = true });
+    kairo::engine::AudioEmitterComponent emitter;
+    emitter.Clip.ID = kairo::assets::AssetID::Parse("00000000-0000-4000-8000-000000000491");
+    emitter.Gain = 0.25;
+    emitter.Pitch = 1.5;
+    emitter.Loop = true;
+    emitter.Bus = "effects";
+    emitter.Priority = 3;
+    scene.SetAudioEmitter(child, emitter);
+
+    CommandHistory history;
+    history.Execute(std::make_unique<DeleteEntityCommand>(project, parent));
+    REQUIRE_FALSE(scene.Contains(parent));
+    REQUIRE_FALSE(scene.Contains(child));
+    history.Undo();
+    REQUIRE(scene.HasAudioListener(parent));
+    REQUIRE(scene.HasAudioEmitter(child));
+    CHECK(scene.AudioListenerComponentFor(parent).Primary);
+    CHECK(scene.ActiveAudioListener() == parent);
+    CHECK(scene.Parent(child) == parent);
+    CHECK(scene.AudioEmitter(child).Clip.ID == emitter.Clip.ID);
+    CHECK(scene.AudioEmitter(child).Gain == 0.25);
+    CHECK(scene.AudioEmitter(child).Pitch == 1.5);
+    CHECK(scene.AudioEmitter(child).Loop);
+    CHECK(scene.AudioEmitter(child).Bus == "effects");
+    CHECK(scene.AudioEmitter(child).Priority == 3);
+    history.Redo();
+    REQUIRE_FALSE(scene.Contains(parent));
+    history.Undo();
+
+    auto duplicate = std::make_unique<DuplicateEntityCommand>(project, parent);
+    auto* command = duplicate.get();
+    history.Execute(std::move(duplicate));
+    const auto copy = command->DuplicatedRoot();
+    REQUIRE(scene.Children(copy).size() == 1u);
+    const auto copyChild = scene.Children(copy).front();
+    REQUIRE(scene.HasAudioListener(copy));
+    REQUIRE(scene.HasAudioEmitter(copyChild));
+    CHECK_FALSE(scene.AudioListenerComponentFor(copy).Primary);
+    CHECK(scene.ActiveAudioListener() == parent);
+    CHECK(scene.AudioEmitter(copyChild).Clip.ID == emitter.Clip.ID);
+    CHECK(scene.AudioEmitter(copyChild).Gain == emitter.Gain);
+    history.Undo();
+    CHECK_FALSE(scene.Contains(copy));
+    history.Redo();
+    REQUIRE(scene.HasAudioListener(copy));
+    REQUIRE(scene.HasAudioEmitter(copyChild));
+    CHECK(scene.AudioEmitter(copyChild).Bus == "effects");
+    CHECK_FALSE(scene.AudioListenerComponentFor(copy).Primary);
+    history.Clear();
+    project.Close(UnsavedChangesPolicy::Discard);
+    std::filesystem::remove_all(root);
+}
+
+TEST_CASE("Clipboard and prefab retain imported scenes and audio without stealing primary roles",
+    "[KairoEditor][SceneFragment]")
+{
+    kairo::engine::Scene scene;
+    const auto parent = scene.CreateEntity("Source");
+    const auto child = scene.CreateEntity("Child");
+    scene.SetParent(child, parent);
+    scene.SetCamera(parent, { 0.9f, 0.1f, 100.0f, true });
+    scene.SetAudioListener(parent, { .Enabled = true, .Primary = true });
+    kairo::engine::AudioEmitterComponent emitter;
+    emitter.Clip.ID = kairo::assets::AssetID::Parse("00000000-0000-4000-8000-000000000492");
+    emitter.Gain = 0.5;
+    scene.SetAudioEmitter(child, emitter);
+    kairo::engine::SceneInstanceComponent instance;
+    instance.SceneAsset.ID = kairo::assets::AssetID::Parse("00000000-0000-4000-8000-000000000493");
+    instance.RenderLayers = 0x21u;
+    scene.SetSceneInstance(child, instance);
+
+    // Overlapping selections must not duplicate an already gathered child.
+    const auto fragment = CaptureSceneFragment(scene, { child, parent, child });
+    REQUIRE(fragment.Entities.size() == 2u);
+    const auto checkCopy = [&](const std::vector<kairo::engine::Entity>& created)
+    {
+        REQUIRE(created.size() == 2u);
+        const auto copy = created[0];
+        const auto copyChild = created[1];
+        CHECK(scene.Parent(copyChild) == copy);
+        REQUIRE(scene.HasSceneInstance(copyChild));
+        REQUIRE(scene.HasAudioEmitter(copyChild));
+        REQUIRE(scene.HasAudioListener(copy));
+        REQUIRE(scene.HasCamera(copy));
+        CHECK(scene.SceneInstance(copyChild).SceneAsset.ID == instance.SceneAsset.ID);
+        CHECK(scene.SceneInstance(copyChild).RenderLayers == 0x21u);
+        CHECK(scene.AudioEmitter(copyChild).Clip.ID == emitter.Clip.ID);
+        CHECK(scene.AudioEmitter(copyChild).Gain == emitter.Gain);
+        CHECK_FALSE(scene.Camera(copy).Primary);
+        CHECK_FALSE(scene.AudioListenerComponentFor(copy).Primary);
+        CHECK(scene.PrimaryCamera() == parent);
+        CHECK(scene.ActiveAudioListener() == parent);
+    };
+    checkCopy(PasteSceneFragment(scene, fragment));
+    checkCopy(InstantiatePrefab(scene, PrefabTemplate{ "Audio prefab", 1u, fragment }));
+}
+
+TEST_CASE("Malformed cyclic scene fragments are rejected without scene changes",
+    "[KairoEditor][SceneFragment]")
+{
+    kairo::engine::Scene scene;
+    const auto original = scene.CreateEntity("Original");
+    SceneFragment fragment;
+    fragment.Entities.resize(3u);
+    for (auto& entity : fragment.Entities) entity.Name = "Cycle";
+    fragment.Entities[0].Parent = 1;
+    fragment.Entities[1].Parent = 2;
+    fragment.Entities[2].Parent = 0;
+    REQUIRE_THROWS_AS(PasteSceneFragment(scene, fragment), std::invalid_argument);
+    REQUIRE(scene.Entities().size() == 1u);
+    CHECK(scene.Contains(original));
+}
+
 TEST_CASE("Reflected scene commands are undoable and preserve component invariants",
     "[KairoEditor][Commands][Reflection]")
 {
