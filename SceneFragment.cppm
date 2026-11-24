@@ -108,15 +108,27 @@ export namespace kairo::editor
                     kairo::engine::EntitySettingsComponent::ValidateTag(tag);
                 ValidateAuthoredComponents(entity);
             }
+            // Each parent chain is visited at most twice. Avoid quadratic
+            // ancestor walks and recursive stack overflow on deep prefabs.
+            std::vector<std::uint8_t> state(fragment.Entities.size(), 0u);
             for (std::size_t index = 0u; index < fragment.Entities.size(); ++index)
             {
-                std::size_t cursor = index;
-                std::size_t steps = 0u;
-                while (fragment.Entities[cursor].Parent >= 0)
+                std::int32_t cursor = static_cast<std::int32_t>(index);
+                while (cursor >= 0 && state[static_cast<std::size_t>(cursor)] == 0u)
                 {
-                    cursor = static_cast<std::size_t>(fragment.Entities[cursor].Parent);
-                    if (++steps > fragment.Entities.size())
-                        throw std::invalid_argument("Scene fragment hierarchy contains a cycle.");
+                    const auto current = static_cast<std::size_t>(cursor);
+                    state[current] = 1u;
+                    cursor = fragment.Entities[current].Parent;
+                }
+                if (cursor >= 0 && state[static_cast<std::size_t>(cursor)] == 1u)
+                    throw std::invalid_argument("Scene fragment hierarchy contains a cycle.");
+
+                cursor = static_cast<std::int32_t>(index);
+                while (cursor >= 0 && state[static_cast<std::size_t>(cursor)] == 1u)
+                {
+                    const auto current = static_cast<std::size_t>(cursor);
+                    state[current] = 2u;
+                    cursor = fragment.Entities[current].Parent;
                 }
             }
         }
