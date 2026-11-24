@@ -36,9 +36,9 @@ CaptureEntitySubtree walks the complete hierarchy before mutation and saves Enti
 
 If restoration throws after creating some nodes, it destroys created entities in reverse order. Because parent deletion can recursively destroy its descendants, the rollback checks Scene::Contains before each cleanup step.
 
-**Important documented limitation:** the current EntitySnapshot does not include AudioEmitterComponent or AudioListenerComponent, even though EngineCore Scene supports them. Delete/Undo of audio-bearing subtrees therefore cannot yet be described as complete, and DuplicateEntityCommand's same snapshot mechanism has analogous coverage concerns. This pass documents the issue; a separate functional patch and regression tests are needed to correct behavior.
+**Component coverage repair:** [SceneEntityData.cppm](../SceneEntityData.cppm) centralizes capture, validation, application and copy-role policy. Undo now retains audio emitters/listeners; duplicate and clipboard copies retain their data but clear the unique primary camera/listener flags. Scene fragments also retain imported scene instances. The new regression tests cover these cases; exact-head execution is not yet verified.
 
-**Exercise:** build root→child with different camera/light/mesh/physics components, delete root, Undo, then compare all stable IDs and component values. Repeat with an audio emitter to reproduce the known gap.
+**Exercise:** build root→child with different camera/light/mesh/physics components, delete root, Undo, then compare all stable IDs and component values. Repeat with audio emitters and a primary listener to verify the repaired path.
 
 ## 5. Reparenting can preserve local or world transform—but not both automatically
 
@@ -62,4 +62,4 @@ Read [tests/EditorTests.cpp](../tests/EditorTests.cpp), the scene-command tests 
 
 Model-only tests prove command semantics, not native ImGui viewport, graphics-picking or save/recovery behavior. Keep runtime backend tests separate and record exact source SHA, compiler and host.
 
-*Source-derived teaching artifact; no new native Editor build or command regression suite was run as part of these documentation changes.*
+*The implementation and regression tests were updated on the cleanup branch. Native execution is not established by this document.*
