@@ -5,6 +5,7 @@ module;
 #include <cstddef>
 #include <filesystem>
 #include <optional>
+#include <map>
 #include <ranges>
 #include <stdexcept>
 #include <string>
@@ -91,20 +92,20 @@ export namespace kairo::editor
             AssetWorkspace workspace;
             const std::vector<kairo::assets::AssetMetadata> metadata = registry.Snapshot();
             workspace.m_Entries.reserve(metadata.size());
+            // Build the reverse dependency graph once, instead of scanning
+            // the whole catalog for each displayed asset.
+            std::map<kairo::assets::AssetID,std::vector<kairo::assets::AssetReference>> reverse;
+            for (const auto& candidate : metadata)
+                for (const auto& dependency : candidate.Dependencies)
+                    reverse[dependency.ID].push_back({candidate.ID,candidate.Type});
             for (const auto& asset : metadata)
             {
                 AssetWorkspaceEntry entry;
                 entry.Metadata = asset;
                 entry.Import = imports.Find(asset.ID);
                 entry.Status = StatusForAsset(projectRoot, asset, imports);
-                for (const auto& candidate : metadata)
-                {
-                    for (const auto& dependency : candidate.Dependencies)
-                    {
-                        if (dependency.ID == asset.ID)
-                            entry.Dependents.push_back({ candidate.ID, candidate.Type });
-                    }
-                }
+                if (auto found = reverse.find(asset.ID); found != reverse.end())
+                    entry.Dependents = std::move(found->second);
                 std::ranges::sort(entry.Dependents, {}, &kairo::assets::AssetReference::ID);
                 workspace.m_Entries.push_back(std::move(entry));
             }
@@ -114,6 +115,8 @@ export namespace kairo::editor
                 if (leftPath != rightPath) return leftPath < rightPath;
                 return left.Metadata.ID < right.Metadata.ID;
             });
+            for (std::size_t i=0;i<workspace.m_Entries.size();++i)
+                workspace.m_Index.emplace(workspace.m_Entries[i].Metadata.ID,i);
             return workspace;
         }
 
@@ -124,10 +127,9 @@ export namespace kairo::editor
 
         [[nodiscard]] const AssetWorkspaceEntry& At(kairo::assets::AssetID id) const
         {
-            const auto found = std::ranges::find(m_Entries, id,
-                [](const AssetWorkspaceEntry& entry) { return entry.Metadata.ID; });
-            if (found == m_Entries.end()) throw std::out_of_range("Asset workspace does not contain this asset.");
-            return *found;
+            const auto found=m_Index.find(id);
+            if (found==m_Index.end()) throw std::out_of_range("Asset workspace does not contain this asset.");
+            return m_Entries[found->second];
         }
 
         [[nodiscard]] std::vector<AssetWorkspaceEntry> Filter(const AssetWorkspaceFilter& filter) const
@@ -162,6 +164,7 @@ export namespace kairo::editor
 
     private:
         std::vector<AssetWorkspaceEntry> m_Entries;
+        std::map<kairo::assets::AssetID,std::size_t> m_Index;
 
         [[nodiscard]] static bool VisibleStatus(
             AssetWorkspaceStatus status, const AssetWorkspaceFilter& filter) noexcept

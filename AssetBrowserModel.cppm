@@ -5,6 +5,8 @@ module;
 #include <cstddef>
 #include <filesystem>
 #include <optional>
+#include <map>
+#include <set>
 #include <ranges>
 #include <stdexcept>
 #include <string>
@@ -112,6 +114,10 @@ export namespace kairo::editor
         const auto snapshot = registry.Snapshot();
         std::vector<AssetBrowserEntry> result;
         result.reserve(snapshot.size());
+        std::map<kairo::assets::AssetID,std::set<kairo::assets::AssetID>> reverse;
+        for(const auto& source:snapshot)
+            for(const auto& dependency:source.Dependencies)
+                reverse[dependency.ID].insert(source.ID);
 
         for (const kairo::assets::AssetMetadata& metadata : snapshot)
         {
@@ -130,11 +136,8 @@ export namespace kairo::editor
             entry.Metadata = metadata;
             entry.State = asset_browser_detail::EvaluateState(
                 projectRoot, metadata, imports, entry.Import);
-            for (const kairo::assets::AssetMetadata& other : snapshot)
-                if (std::ranges::any_of(other.Dependencies,
-                    [&metadata](const kairo::assets::AssetReference& dependency)
-                    { return dependency.ID == metadata.ID; }))
-                    ++entry.DirectDependentCount;
+            if(const auto found=reverse.find(metadata.ID);found!=reverse.end())
+                entry.DirectDependentCount=found->second.size();
             result.push_back(std::move(entry));
         }
         std::ranges::sort(result, [](const AssetBrowserEntry& left,
@@ -173,13 +176,12 @@ export namespace kairo::editor
             throw std::out_of_range("Cannot inspect dependencies for an unknown asset.");
         std::vector<kairo::assets::AssetMetadata> result;
         std::vector<kairo::assets::AssetID> pending{ root };
-        std::vector<kairo::assets::AssetID> visited;
+        std::set<kairo::assets::AssetID> visited;
         while (!pending.empty())
         {
             const kairo::assets::AssetID current = pending.back();
             pending.pop_back();
-            if (std::ranges::find(visited, current) != visited.end()) continue;
-            visited.push_back(current);
+            if (!visited.insert(current).second) continue;
             const kairo::assets::AssetMetadata metadata = registry.At(current);
             if (current != root) result.push_back(metadata);
             for (const kairo::assets::AssetReference& dependency : metadata.Dependencies)

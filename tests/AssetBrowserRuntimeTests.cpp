@@ -85,3 +85,26 @@ TEST_CASE("asset browser request queue rejects invalid identity")
         std::invalid_argument);
     REQUIRE(queue.Size() == 0u);
 }
+TEST_CASE("thumbnail invalidation removes every revision and extent for only one asset")
+{
+    using namespace kairo::assets;
+    using namespace kairo::editor;
+    AssetMetadata a,b;
+    a.ID=AssetID::Parse("12345678-1234-4abc-8def-1234567890ab");
+    b.ID=AssetID::Parse("12345678-1234-4abc-8def-1234567890ac");
+    a.Type=AssetType::Mesh;b.Type=AssetType::Texture2D;
+    AssetThumbnailScheduler scheduler;
+    for(unsigned i=1;i<=128;++i)
+    {
+        a.Revision=i;b.Revision=i;
+        scheduler.Request(a,64);scheduler.Request(a,128);scheduler.Request(b,64);
+    }
+    REQUIRE(scheduler.RequestedCount()==384u);
+    scheduler.Invalidate(a.ID);
+    REQUIRE(scheduler.RequestedCount()==128u);
+    const auto pending=scheduler.TakePending();
+    REQUIRE(pending.size()==128u);
+    for(const auto& request:pending)CHECK(request.Asset==b.ID);
+    scheduler.Request(a,64);
+    REQUIRE(scheduler.TakePending().size()==1u);
+}
