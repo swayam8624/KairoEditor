@@ -1,5 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <filesystem>
+#include <string>
+#include <vector>
 
 import Kairo.Assets;
 import Kairo.Editor.AssetWorkspace;
@@ -61,4 +63,26 @@ TEST_CASE("Asset workspace filters by type status and path text")
     const auto generated = workspace.Filter(generatedOnly);
     REQUIRE(generated.size() == 1u);
     CHECK(generated[0].Status == AssetWorkspaceStatus::Generated);
+}
+
+TEST_CASE("large asset workspace retains all reverse edges and indexed identity")
+{
+    using namespace kairo::assets;
+    using namespace kairo::editor;
+    AssetRegistry registry;
+    ImportDatabase imports;
+    const auto texture=registry.Create({AssetType::Texture2D,AssetOrigin::Generated,
+        "Textures/Common.ktex","kairo.generated",{}});
+    std::vector<AssetID> ids;
+    for(unsigned i=0;i<2048;++i)
+        ids.push_back(registry.Create({AssetType::Material,AssetOrigin::Generated,
+            "Materials/"+std::to_string(i)+".kmat","kairo.generated",{{texture,AssetType::Texture2D}}}));
+    const auto workspace=AssetWorkspace::Build(std::filesystem::current_path(),registry,imports);
+    REQUIRE(workspace.Entries().size()==2049u);
+    REQUIRE(workspace.DeleteBlockers(texture).size()==2048u);
+    for(const auto& id:ids)
+    {
+        CHECK(workspace.At(id).Metadata.ID==id);
+        CHECK(workspace.At(id).CanDelete());
+    }
 }

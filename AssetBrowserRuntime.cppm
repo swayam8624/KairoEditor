@@ -4,6 +4,8 @@ module;
 #include <array>
 #include <cstdint>
 #include <stdexcept>
+#include <set>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -69,9 +71,11 @@ export namespace kairo::editor
                 throw std::out_of_range("Asset thumbnail extent is outside the supported range.");
             const AssetThumbnailRequest request{
                 metadata.ID, metadata.Type, metadata.Revision, extent };
-            if (std::ranges::find(m_Requested, request) != m_Requested.end()) return;
-            m_Requested.push_back(request);
+            const Key key{request.Asset,request.Type,request.Revision,request.Extent};
+            if(m_Requested.contains(key))return;
             m_Pending.push_back(request);
+            try { m_Requested.insert(key); }
+            catch(...) { m_Pending.pop_back(); throw; }
         }
 
         [[nodiscard]] std::vector<AssetThumbnailRequest> TakePending() noexcept
@@ -81,8 +85,12 @@ export namespace kairo::editor
 
         void Invalidate(kairo::assets::AssetID asset) noexcept
         {
-            std::erase_if(m_Requested, [asset](const AssetThumbnailRequest& request)
-            { return request.Asset == asset; });
+            // Only the requested asset's keys are erased from the ordered index.
+            auto it=m_Requested.lower_bound(Key{asset,{},0u,0u});
+            // AssetType underlying minimum is not assumed by the loop:
+            // use an exact ID match and a key lower bound with type zero.
+            while(it!=m_Requested.end()&&std::get<0>(*it)==asset)
+                it=m_Requested.erase(it);
             std::erase_if(m_Pending, [asset](const AssetThumbnailRequest& request)
             { return request.Asset == asset; });
         }
@@ -96,7 +104,8 @@ export namespace kairo::editor
         [[nodiscard]] std::size_t RequestedCount() const noexcept { return m_Requested.size(); }
 
     private:
-        std::vector<AssetThumbnailRequest> m_Requested;
+        using Key=std::tuple<kairo::assets::AssetID,kairo::assets::AssetType,std::uint64_t,std::uint32_t>;
+        std::set<Key> m_Requested;
         std::vector<AssetThumbnailRequest> m_Pending;
     };
 
