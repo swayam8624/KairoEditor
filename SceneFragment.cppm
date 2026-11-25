@@ -221,10 +221,9 @@ export namespace kairo::editor
         return created;
     }
 
-    [[nodiscard]] inline std::vector<kairo::engine::Entity> InstantiatePrefab(
-        kairo::engine::Scene& scene, PrefabTemplate prefab,
-        std::vector<PrefabOverride> overrides = {},
-        std::optional<kairo::engine::Entity> rootParent = std::nullopt)
+    // A common override resolver serves both first placement and refresh.
+    [[nodiscard]] inline SceneFragment ResolvePrefab(PrefabTemplate prefab,
+        std::vector<PrefabOverride> overrides = {})
     {
         if (prefab.Name.empty() || prefab.Version == 0u)
             throw std::invalid_argument("Prefab requires a name and positive version.");
@@ -247,6 +246,106 @@ export namespace kairo::editor
             if (overrideValue.Transform.has_value()) target.Transform = *overrideValue.Transform;
             if (overrideValue.Enabled.has_value()) target.Enabled = *overrideValue.Enabled;
         }
-        return PasteSceneFragment(scene, std::move(prefab.Fragment), rootParent);
+        return std::move(prefab.Fragment);
+    }
+
+    [[nodiscard]] inline std::vector<kairo::engine::Entity> InstantiatePrefab(
+        kairo::engine::Scene& scene, PrefabTemplate prefab,
+        std::vector<PrefabOverride> overrides = {},
+        std::optional<kairo::engine::Entity> rootParent = std::nullopt)
+    {
+        return PasteSceneFragment(scene,ResolvePrefab(std::move(prefab),std::move(overrides)),rootParent);
+    }
+
+    // Explicit editor-session link. The source name and version are checked
+    // on refresh; member order corresponds to the source fragment indices.
+    // The scene retains its ordinary stable Entity IDs, even on refresh.
+    struct LinkedPrefabInstance final
+    {
+        std::string TemplateName;
+        std::uint32_t Version=0;
+        std::vector<kairo::engine::Entity> Members;
+        std::vector<std::int32_t> Parents;
+        std::vector<PrefabOverride> Overrides;
+        std::optional<kairo::engine::Entity> RootParent;
+    };
+
+    [[nodiscard]] inline LinkedPrefabInstance InstantiateLinkedPrefab(
+        kairo::engine::Scene& scene,const PrefabTemplate& prefab,
+        std::vector<PrefabOverride> overrides={},
+        std::optional<kairo::engine::Entity> rootParent=std::nullopt)
+    {
+        LinkedPrefabInstance link;
+        link.TemplateName=prefab.Name;link.Version=prefab.Version;
+        link.Overrides=std::move(overrides);link.RootParent=rootParent;
+        for(const auto& part:prefab.Fragment.Entities)link.Parents.push_back(part.Parent);
+        link.Members=InstantiatePrefab(scene,prefab,link.Overrides,rootParent);
+        return link;
+    }
+
+    // Refresh compatible revisions in place, with an all-or-nothing scene
+    // copy. Index-based links intentionally reject structural revisions; a
+    // future persistent part UUID schema must handle insertions/removals.
+    // External children are retained; reparented/missing members fail safely.
+    inline void RefreshLinkedPrefab(kairo::engine::Scene& scene,
+        LinkedPrefabInstance& link,const PrefabTemplate& prefab,
+        std::vector<PrefabOverride> overrides)
+    {
+        if(prefab.Name!=link.TemplateName||prefab.Version<link.Version)
+            throw std::invalid_argument("Prefab source identity or version mismatch.");
+        auto resolved=ResolvePrefab(prefab,overrides);
+        if(resolved.Entities.size()!=link.Members.size()||link.Parents.size()!=link.Members.size())
+            throw std::invalid_argument("Linked prefab topology changed.");
+        std::unordered_set<std::uint32_t> seen;
+        for(std::size_t i=0;i<link.Members.size();++i)
+        {
+            const auto member=link.Members[i];
+            const auto parent=resolved.Entities[i].Parent;
+            if(parent!=link.Parents[i]||!scene.Contains(member)||!seen.insert(member.Value).second)
+                throw std::invalid_argument("Linked prefab member is missing, duplicated, or changed.");
+            const auto expected=parent<0?link.RootParent:
+                std::optional<kairo::engine::Entity>{link.Members[static_cast<std::size_t>(parent)]};
+            if(scene.Parent(member)!=expected)
+                throw std::invalid_argument("Linked prefab member was reparented.");
+        }
+        auto candidate=scene;
+        // Unique roles must be computed from entities outside this instance
+        // before removing and replacing any owned component.
+        bool primaryCamera=false,primaryListener=false;
+        if(const auto camera=candidate.PrimaryCamera();camera)
+            primaryCamera=!seen.contains(camera->Value);
+        for(const auto listener:candidate.AudioListenerEntities())
+            if(!seen.contains(listener.Value)&&candidate.AudioListenerComponentFor(listener).Primary)
+                primaryListener=true;
+        for(const auto member:link.Members)
+        {
+            (void)candidate.RemoveMeshRenderer(member);(void)candidate.RemoveSceneInstance(member);
+            (void)candidate.RemoveCamera(member);(void)candidate.RemoveLight(member);
+            (void)candidate.RemoveEnvironment(member);(void)candidate.RemoveLogic(member);
+            (void)candidate.RemoveRigidBody(member);(void)candidate.RemoveCollider(member);
+            (void)candidate.RemoveAudioEmitter(member);(void)candidate.RemoveAudioListener(member);
+        }
+        for(std::size_t i=0;i<link.Members.size();++i)
+        {
+            auto& part=resolved.Entities[i];const auto member=link.Members[i];
+            candidate.Name(member).Value=part.Name;
+            candidate.Transform(member)=part.Transform;
+            candidate.SetEnabled(member,part.Enabled);candidate.SetLayer(member,part.Layer);
+            const auto oldTags=candidate.Tags(member);
+            for(const auto& tag:oldTags)(void)candidate.RemoveTag(member,tag);
+            for(const auto& tag:part.Tags)candidate.AddTag(member,tag);
+            ClearCopiedPrimaryRoles(part,primaryCamera,primaryListener);
+            if(part.Camera&&part.Camera->Primary)primaryCamera=true;
+            if(part.AudioListener&&part.AudioListener->Primary)primaryListener=true;
+            ApplyAuthoredComponents(candidate,member,part);
+        }
+        scene=std::move(candidate);
+        link.Version=prefab.Version;link.Overrides=std::move(overrides);
+    }
+
+    inline void RefreshLinkedPrefab(kairo::engine::Scene& scene,
+        LinkedPrefabInstance& link,const PrefabTemplate& prefab)
+    {
+        RefreshLinkedPrefab(scene,link,prefab,link.Overrides);
     }
 }

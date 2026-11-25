@@ -229,3 +229,48 @@ TEST_CASE("Rendering component commands add edit remove and undo complete values
     CHECK(project.Scene().SceneInstance(entity).SceneAsset.ID == importedID);
     std::filesystem::remove_all(root);
 }
+
+TEST_CASE("linked prefab refresh preserves stable IDs, overrides, and unrelated children")
+{
+    using namespace kairo::editor;
+    using namespace kairo::engine;
+    Scene source;
+    const auto root=source.CreateEntity("Root");
+    const auto child=source.CreateEntity("Child");
+    source.SetParent(child,root);
+    source.AddTag(child,"old");
+    PrefabTemplate prefab{"Pickup",1,CaptureSceneFragment(source,{root})};
+    Scene destination;
+    const auto container=destination.CreateEntity("Container");
+    auto a=InstantiateLinkedPrefab(destination,prefab,{{1,std::string("Custom"),std::nullopt,false}},container);
+    auto b=InstantiateLinkedPrefab(destination,prefab,{},container);
+    const auto aMembers=a.Members,bMembers=b.Members;
+    const auto extra=destination.CreateEntity("Unrelated");
+    destination.SetParent(extra,a.Members[0]);
+    prefab.Version=2;
+    prefab.Fragment.Entities[1].Name="Updated";
+    prefab.Fragment.Entities[1].Transform.Local.Translation.x=9.f;
+    prefab.Fragment.Entities[1].Tags={"new"};
+    RefreshLinkedPrefab(destination,a,prefab);
+    RefreshLinkedPrefab(destination,b,prefab);
+    CHECK(a.Members==aMembers);CHECK(b.Members==bMembers);
+    CHECK(a.Version==2);CHECK(b.Version==2);
+    CHECK(destination.Parent(extra)==a.Members[0]);
+    CHECK(destination.Name(a.Members[1]).Value=="Custom");
+    CHECK_FALSE(destination.IsEnabled(a.Members[1]));
+    CHECK(destination.Name(b.Members[1]).Value=="Updated");
+    CHECK(destination.IsEnabled(b.Members[1]));
+    CHECK(destination.Transform(a.Members[1]).Local.Translation.x==9.f);
+    CHECK(destination.HasTag(a.Members[1],"new"));
+    CHECK_FALSE(destination.HasTag(a.Members[1],"old"));
+    RefreshLinkedPrefab(destination,a,prefab,{});
+    CHECK(destination.Name(a.Members[1]).Value=="Updated");
+    CHECK(destination.IsEnabled(a.Members[1]));
+    auto malformed=prefab;malformed.Version=3;malformed.Fragment.Entities[1].Parent=-1;
+    CHECK_THROWS_AS(RefreshLinkedPrefab(destination,a,malformed),std::invalid_argument);
+    CHECK(a.Version==2);
+    CHECK(destination.Parent(a.Members[1])==a.Members[0]);
+    destination.SetParent(b.Members[1],container);
+    CHECK_THROWS_AS(RefreshLinkedPrefab(destination,b,prefab),std::invalid_argument);
+    CHECK(destination.Parent(b.Members[1])==container);
+}
