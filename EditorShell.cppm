@@ -156,6 +156,7 @@ export namespace kairo::editor
             DrawDocumentLifecyclePopups();
             DrawProjectLifecyclePopups();
             DrawAssetImportPopup();
+            DrawPrefabPopups();
             DrawNavigationPreferences();
             DrawNavigationHelp();
             DrawKeymapEditor();
@@ -426,6 +427,13 @@ export namespace kairo::editor
         std::unordered_map<kairo::assets::AssetID,AssetPreview,kairo::assets::AssetIDHash> m_AssetPreviews;
         int m_AssetTypeFilter=0;
         std::string m_AssetFolder;
+        std::array<char,65> m_PrefabName{};
+        std::array<char,129> m_InstanceName{};
+        std::optional<kairo::engine::Entity> m_PrefabCapture;
+        bool m_RequestPrefabSave=false,m_RequestPrefabPlace=false,m_PrefabUnderSelected=false;
+        std::vector<std::string> m_PrefabLibrary;
+        int m_PrefabIndex=0;
+        std::array<float,3> m_PrefabPosition{};
         std::array<char,1024> m_OBJImportPath{};
         bool m_RequestOBJImport=false;
         std::optional<std::filesystem::path> m_OBJImportRequest;
@@ -935,6 +943,17 @@ export namespace kairo::editor
                 });
             }
             if (ImGui::IsItemHovered()) ImGui::SetTooltip("Delete selected entity");
+            if(ActionButton("Save Prefab",UIButtonTone::Neutral,selectedEntity.has_value() &&
+                m_State.Mode()==EditorMode::Edit && !m_Project.HasUnsavedChanges() &&
+                !m_AuthoringWorkspace.HasDirtyTextDrafts()))
+            {
+                m_PrefabCapture=selectedEntity;
+                m_PrefabName.fill(0);
+                m_RequestPrefabSave=true;
+            }
+            ImGui::SameLine();
+            if(ActionButton("Place Prefab",UIButtonTone::Neutral,m_State.Mode()==EditorMode::Edit))
+                m_RequestPrefabPlace=true;
             ImGui::Separator();
             const auto& scene = m_Project.Scene();
             (void)SearchField("##HierarchyFilter", "Search entities", m_HierarchyFilter.data(), m_HierarchyFilter.size());
@@ -1033,7 +1052,7 @@ export namespace kairo::editor
                 ImGui::TextDisabled("Select an entity to inspect it.");
                 ImGui::End(); return;
             }
-            auto& scene = m_Project.EditScene();
+            const auto& scene = m_Project.Scene();
             ImGui::TextUnformatted(scene.Name(*selected).Value.c_str());
             ImGui::SameLine();
             ImGui::TextDisabled("#%u", selected->Value);
@@ -2715,6 +2734,79 @@ export namespace kairo::editor
                 line(12,16,-12,16);line(-12,16,-12,-16);line(4,-16,4,-8);
                 line(4,-8,12,-8);line(-7,-2,7,-2);line(-7,4,7,4);line(-7,10,3,10);
             }
+        }
+
+        void DrawPrefabPopups()
+        {
+            if(m_RequestPrefabSave)
+            {
+                m_RequestPrefabSave=false;
+                ImGui::OpenPopup("Save prefab definition");
+            }
+            if(ImGui::BeginPopupModal("Save prefab definition",nullptr,ImGuiWindowFlags_AlwaysAutoResize))
+            {
+                ImGui::TextWrapped("Save the selected hierarchy as a reusable, independent project template.");
+                ImGui::InputText("Prefab name",m_PrefabName.data(),m_PrefabName.size());
+                if(ActionButton("Save definition",UIButtonTone::Primary,m_PrefabCapture.has_value()))
+                    RunCommand([this]{
+                        if(m_AuthoringWorkspace.HasDirtyTextDrafts()||m_State.Mode()!=EditorMode::Edit)
+                            throw std::logic_error("Save all drafts and exit Play first.");
+                        (void)SaveProjectPrefab(m_Project,*m_PrefabCapture,m_PrefabName.data());
+                        m_PrefabCapture.reset();
+                        ImGui::CloseCurrentPopup();
+                    });
+                ImGui::SameLine();
+                if(ActionButton("Cancel")){m_PrefabCapture.reset();ImGui::CloseCurrentPopup();}
+                ImGui::EndPopup();
+            }
+            if(m_RequestPrefabPlace)
+            {
+                m_RequestPrefabPlace=false;
+                RunCommand([this]{
+                    m_PrefabLibrary=ListProjectPrefabs(m_Project);
+                    m_PrefabIndex=0;m_InstanceName.fill(0);m_PrefabPosition={};
+                    m_PrefabUnderSelected=false;
+                    ImGui::OpenPopup("Place prefab instance");
+                });
+            }
+            if(!ImGui::BeginPopupModal("Place prefab instance",nullptr,ImGuiWindowFlags_AlwaysAutoResize))return;
+            if(m_PrefabLibrary.empty())ImGui::TextDisabled("No saved prefab definitions.");
+            else
+            {
+                if(ImGui::BeginCombo("Prefab",m_PrefabLibrary[static_cast<std::size_t>(m_PrefabIndex)].c_str()))
+                {
+                    for(std::size_t i=0;i<m_PrefabLibrary.size();++i)
+                        if(ImGui::Selectable(m_PrefabLibrary[i].c_str(),static_cast<int>(i)==m_PrefabIndex))
+                            m_PrefabIndex=static_cast<int>(i);
+                    ImGui::EndCombo();
+                }
+                ImGui::InputText("Instance name (optional)",m_InstanceName.data(),m_InstanceName.size());
+                ImGui::DragFloat3("Local position",m_PrefabPosition.data(),.1f);
+                const auto parent=m_State.SelectedEntity();
+                ImGui::BeginDisabled(!parent.has_value());
+                ImGui::Checkbox("Parent under selected entity",&m_PrefabUnderSelected);
+                ImGui::EndDisabled();
+                if(ActionButton("Instantiate",UIButtonTone::Primary,m_State.Mode()==EditorMode::Edit))
+                    RunCommand([this,parent]{
+                        auto prefab=LoadProjectPrefab(m_Project,m_PrefabLibrary[static_cast<std::size_t>(m_PrefabIndex)]);
+                        const auto root=std::ranges::find_if(prefab.Fragment.Entities,[](const auto& e){return e.Parent<0;});
+                        if(root==prefab.Fragment.Entities.end())throw std::logic_error("Prefab root missing.");
+                        PrefabOverride value;
+                        value.EntityIndex=static_cast<std::uint32_t>(root-prefab.Fragment.Entities.begin());
+                        if(m_InstanceName[0]!='\0')value.Name=std::string(m_InstanceName.data());
+                        value.Transform=root->Transform;
+                        value.Transform->Local.Translation={m_PrefabPosition[0],m_PrefabPosition[1],m_PrefabPosition[2]};
+                        auto command=std::make_unique<PlaceProjectPrefabCommand>(m_Project,std::move(prefab),
+                            std::vector<PrefabOverride>{std::move(value)},m_PrefabUnderSelected?parent:std::nullopt);
+                        auto* placed=command.get();
+                        m_History.Execute(std::move(command));
+                        m_State.Select(placed->Root());
+                        ImGui::CloseCurrentPopup();
+                    });
+                ImGui::SameLine();
+            }
+            if(ActionButton("Close"))ImGui::CloseCurrentPopup();
+            ImGui::EndPopup();
         }
 
         void DrawAssetImportPopup()
