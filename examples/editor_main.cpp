@@ -849,6 +849,16 @@ int main(int argc, char** argv)
             environmentEntity.has_value())
             requireTexture(project.Scene().Environment(*environmentEntity).EnvironmentTexture,
                 kairo::assets::TextureColorSpace::Linear, false);
+        // Standalone imported images are visible even before a material references them.
+        // Cap additional GPU uploads to the preview budget; referenced images are not capped.
+        std::size_t standaloneTextureCount=0;
+        for(const auto& asset:project.Assets().Snapshot())
+            if(asset.Type==kairo::assets::AssetType::Texture2D&&asset.Origin==kairo::assets::AssetOrigin::SourceFile&&
+                !textureSettings.contains(asset.ID)&&standaloneTextureCount<128)
+            {
+                textureSettings.emplace(asset.ID,kairo::assets::TextureImportSettings{});
+                ++standaloneTextureCount;
+            }
         for (const auto& [id, settings] : textureSettings)
         {
             const auto texture = kairo::editor::ImportRenderTexture(project.ProjectRoot(), { id },
@@ -957,6 +967,7 @@ int main(int argc, char** argv)
                 derivedCache, resolveGltfTexture,resolveEmbedded);
             std::vector<kairo::renderer::MeshHandle> meshHandles;
             meshHandles.reserve(imported.RenderAsset.Primitives.size());
+            if(!imported.RenderAsset.Primitives.empty())cacheMeshPreview(asset,imported.RenderAsset.Primitives.front().Geometry);
             for (const auto& primitive : imported.RenderAsset.Primitives)
                 meshHandles.push_back(uploadMesh(primitive.Geometry));
             renderAssets.BindGltfScene({ asset.ID }, std::move(imported.Source),
@@ -1162,12 +1173,12 @@ int main(int argc, char** argv)
                 viewportCursorCaptured = wantsCursorCapture;
             }
             imgui.EndFrame();
-            if(auto source=shell.TakeOBJImportRequest())
+            if(auto sources=shell.TakeAssetImportRequests();!sources.empty())
             {
                 try
                 {
-                    const auto imported=kairo::editor::ImportStandaloneOBJ(project,*source);
-                    std::cout<<"Imported OBJ "<<imported.ToString()<<'\n';
+                    const auto imported=kairo::editor::ImportAssetBatch(project,sources);
+                    std::cout<<"Imported "<<imported.size()<<" primary asset(s).\n";
                     projectTransition=project.ProjectFile();
                     break;
                 }
