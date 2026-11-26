@@ -82,7 +82,7 @@ namespace kairo::editor::detail
     [[nodiscard]] std::optional<std::vector<ContourSegment>> TraceContour(
         const ContourTopology& topology,Transform transform,ContourPoint eye,
         std::optional<ContourPoint> orthographicTowardEye=std::nullopt,
-        std::size_t lineBudget=MaximumContourLines)
+        std::size_t lineBudget=MaximumContourLines,bool reverseWinding=false)
     {
         using D=std::array<double,3>;
         const auto subtract=[](ContourPoint a,ContourPoint b)->D
@@ -103,7 +103,9 @@ namespace kairo::editor::detail
             const D a=subtract(world[f[1]],world[f[0]]),b=subtract(world[f[2]],world[f[0]]);
             const D n{a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]};
             const D v=orthographicTowardEye?subtract(*orthographicTowardEye,{}):subtract(eye,world[f[0]]);
-            const double dot=n[0]*v[0]+n[1]*v[1]+n[2]*v[2];
+            // Mirrored affine transforms invert winding. Correct the sign so
+            // exactly edge-on faces use the same tie policy after reflection.
+            const double dot=(reverseWinding?-1.0:1.0)*(n[0]*v[0]+n[1]*v[1]+n[2]*v[2]);
             const double nn=n[0]*n[0]+n[1]*n[1]+n[2]*n[2];
             const double vv=v[0]*v[0]+v[1]*v[1]+v[2]*v[2];
             if(nn==0||vv==0||!std::isfinite(dot)||!std::isfinite(nn)||!std::isfinite(vv))
