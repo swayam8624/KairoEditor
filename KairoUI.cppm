@@ -23,27 +23,28 @@ export namespace kairo::editor
     };
 
     /// All product-facing editor colors and compact layout constants. Accent
-    /// yellow is intentionally scarce: selection, primary commands, and
+    /// cobalt is intentionally scarce: selection, primary commands, and
     /// active tools only. Panels remain neutral so authored media is dominant.
     struct KairoUIDesignTokens final
     {
-        UIColor Background{ 0.043f, 0.051f, 0.063f };
-        UIColor Surface{ 0.071f, 0.086f, 0.106f };
-        UIColor RaisedSurface{ 0.090f, 0.110f, 0.133f };
-        UIColor HoverSurface{ 0.125f, 0.153f, 0.188f };
-        UIColor Border{ 0.169f, 0.200f, 0.243f };
-        UIColor Text{ 0.961f, 0.969f, 0.980f };
-        UIColor MutedText{ 0.620f, 0.659f, 0.714f };
-        UIColor DisabledText{ 0.447f, 0.486f, 0.533f };
-        UIColor Accent{ 0.949f, 0.788f, 0.298f };
-        UIColor AccentHover{ 1.000f, 0.847f, 0.420f };
-        UIColor AccentPressed{ 0.710f, 0.557f, 0.094f };
-        UIColor Success{ 0.275f, 0.765f, 0.482f };
-        UIColor Warning{ 1.000f, 0.690f, 0.125f };
-        UIColor Danger{ 1.000f, 0.365f, 0.365f };
-        UIColor Info{ 0.302f, 0.639f, 1.000f };
-        float Radius = 6.0f;
-        float CompactRadius = 4.0f;
+        UIColor Background{ 0.102f, 0.110f, 0.122f }; // #1a1c1f
+        UIColor Surface{ 0.145f, 0.157f, 0.173f }; // #25282c
+        UIColor RaisedSurface{ 0.122f, 0.133f, 0.149f };
+        UIColor HoverSurface{ 0.196f, 0.212f, 0.235f };
+        UIColor Border{ 0.224f, 0.239f, 0.263f };
+        UIColor Text{ 0.933f, 0.941f, 0.957f };
+        UIColor MutedText{ 0.678f, 0.706f, 0.749f };
+        UIColor DisabledText{ 0.490f, 0.518f, 0.561f };
+        UIColor Accent{ 0.141f, 0.353f, 0.753f };
+        UIColor AccentHover{ 0.161f, 0.400f, 0.800f };
+        UIColor AccentPressed{ 0.110f, 0.282f, 0.620f };
+        UIColor Selection{ 0.157f, 0.282f, 0.455f };
+        UIColor Success{ 0.400f, 0.749f, 0.525f };
+        UIColor Warning{ 0.875f, 0.686f, 0.337f };
+        UIColor Danger{ 0.875f, 0.380f, 0.380f };
+        UIColor Info{ 0.400f, 0.659f, 0.957f };
+        float Radius = 4.0f;
+        float CompactRadius = 3.0f;
         float SpaceSmall = 4.0f;
         float Space = 8.0f;
         float SpaceLarge = 12.0f;
@@ -138,14 +139,14 @@ namespace kairo::editor
             ImGui::PushStyleColor(ImGuiCol_Button, ToLinear(design.Accent));
             ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ToLinear(design.AccentHover));
             ImGui::PushStyleColor(ImGuiCol_ButtonActive, ToLinear(design.AccentPressed));
-            ImGui::PushStyleColor(ImGuiCol_Text, ToLinear(design.Background));
+            ImGui::PushStyleColor(ImGuiCol_Text, ToLinear(design.Text));
         }
         else if (tone == UIButtonTone::Destructive)
         {
-            ImGui::PushStyleColor(ImGuiCol_Button, ToLinear(design.Danger));
-            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ToLinear(design.Warning));
-            ImGui::PushStyleColor(ImGuiCol_ButtonActive, ToLinear(design.Danger));
-            ImGui::PushStyleColor(ImGuiCol_Text, ToLinear(design.Background));
+            ImGui::PushStyleColor(ImGuiCol_Button, ToLinear(design.Surface));
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ToLinear(design.HoverSurface));
+            ImGui::PushStyleColor(ImGuiCol_ButtonActive, ToLinear(design.RaisedSurface));
+            ImGui::PushStyleColor(ImGuiCol_Text, ToLinear(design.Danger));
         }
 
         const bool clicked = ImGui::Button(ownedLabel.c_str(), { width, 0.0f });
@@ -165,7 +166,7 @@ namespace kairo::editor
             ImGui::PushStyleColor(ImGuiCol_Button, ToLinear(design.Accent));
             ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ToLinear(design.AccentHover));
             ImGui::PushStyleColor(ImGuiCol_ButtonActive, ToLinear(design.AccentPressed));
-            ImGui::PushStyleColor(ImGuiCol_Text, ToLinear(design.Background));
+            ImGui::PushStyleColor(ImGuiCol_Text, ToLinear(design.Text));
         }
         const bool clicked = ImGui::Button(ownedLabel.c_str(), { 0.0f, ImGui::GetFrameHeight() });
         if (active) ImGui::PopStyleColor(4);
