@@ -293,6 +293,11 @@ if(KAIRO_EDITOR_BUILD_TESTS)
     set_property(TARGET KairoEditorPhase4Tests PROPERTY COMPILE_WARNING_AS_ERROR ON)
     enable_testing()
     add_test(NAME KairoEditorTests COMMAND KairoEditorTests)
+    # Selection geometry is deliberately independent of the graphics backend.
+    add_executable(KairoEditorSelectionBoundsTests tests/SelectionBoundsTests.cpp)
+    target_compile_features(KairoEditorSelectionBoundsTests PRIVATE cxx_std_23)
+    set_property(TARGET KairoEditorSelectionBoundsTests PROPERTY COMPILE_WARNING_AS_ERROR ON)
+    add_test(NAME KairoEditorSelectionBoundsTests COMMAND KairoEditorSelectionBoundsTests)
     add_test(NAME KairoEditorPhase4Tests COMMAND KairoEditorPhase4Tests)
     # MSVC 19.44 ICEs in symbols.c while destroying the imported module types
     # used by this boundary harness. Keep the production modules and the main
