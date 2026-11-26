@@ -19,7 +19,7 @@ set(KAIRO_EDITOR_NATIVE_GAMEPLAY_TARGETS "" CACHE STRING
 
 # Immutable standalone fallback revisions. Local source directories and sibling
 # checkouts still take precedence for active workspace development.
-set(KAIRO_EDITOR_CORE_REVISION ae055592a0ca5d62f74dfde33a2686a7bcda5ec2)
+set(KAIRO_EDITOR_CORE_REVISION 29d7f6bd1efec3eb17df49abdf8a99ec300945e7)
 set(KAIRO_EDITOR_RENDERER_REVISION 9d692020f3e51d22a087ad6e426bda4bf002b876)
 set(KAIRO_EDITOR_REALTIME_BRIDGE_REVISION c5b6781a13aa805221e58ba3bd32d1ecb942546e)
 set(KAIRO_EDITOR_AI_REVISION 34d6b79727ea0bf11a369244e03c32895da9bd14)
@@ -307,6 +307,10 @@ if(KAIRO_EDITOR_BUILD_TESTS)
     target_compile_features(KairoEditorAnimationTimelineTests PRIVATE cxx_std_23)
     set_property(TARGET KairoEditorAnimationTimelineTests PROPERTY COMPILE_WARNING_AS_ERROR ON)
     add_test(NAME KairoEditorAnimationTimelineTests COMMAND KairoEditorAnimationTimelineTests)
+    add_executable(KairoEditorLogicTraceCaptureTests tests/LogicTraceCaptureTests.cpp)
+    target_compile_features(KairoEditorLogicTraceCaptureTests PRIVATE cxx_std_23)
+    set_property(TARGET KairoEditorLogicTraceCaptureTests PROPERTY COMPILE_WARNING_AS_ERROR ON)
+    add_test(NAME KairoEditorLogicTraceCaptureTests COMMAND KairoEditorLogicTraceCaptureTests)
     add_executable(KairoEditorAssetPreviewPixelsTests tests/AssetPreviewPixelsTests.cpp)
     target_compile_features(KairoEditorAssetPreviewPixelsTests PRIVATE cxx_std_23)
     set_property(TARGET KairoEditorAssetPreviewPixelsTests PROPERTY COMPILE_WARNING_AS_ERROR ON)
