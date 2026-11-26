@@ -22,6 +22,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <span>
 #include <system_error>
 #include <thread>
 #include <unordered_map>
@@ -895,6 +896,7 @@ int main(int argc, char** argv)
 #endif
             }
         }
+        std::unordered_map<std::string,kairo::renderer::TextureHandle> gltfTextures;
         for (const auto& asset : project.Assets().Snapshot())
         {
             if (asset.Type != kairo::assets::AssetType::Scene ||
@@ -903,38 +905,56 @@ int main(int argc, char** argv)
                 kairo::assets::TextureSemantic semantic)
             {
                 const auto path = (asset.Path.parent_path() /
-                    std::filesystem::path(uri)).lexically_normal();
+                    kairo::assets::GltfLocalUriPath(uri)).lexically_normal();
                 const auto metadata = project.Assets().FindByPath(path);
                 if (!metadata.has_value() ||
                     metadata->Type != kairo::assets::AssetType::Texture2D)
                     throw std::invalid_argument(
                         "glTF image URI is not registered as a project texture asset: " +
                         path.generic_string());
-                if (const auto existing = textureSettings.find(metadata->ID);
-                    existing != textureSettings.end())
-                    return renderAssets.ResolveTexture({ metadata->ID });
-                kairo::assets::TextureImportSettings settings;
-                settings.ColorSpace = semantic == kairo::assets::TextureSemantic::Color
-                    ? kairo::assets::TextureColorSpace::SRGB
-                    : kairo::assets::TextureColorSpace::Linear;
-                settings.NormalMap = semantic == kairo::assets::TextureSemantic::Normal;
+                const auto settings=kairo::editor::GltfImageSettings(semantic);
+                const auto key=metadata->ID.ToString()+":"+kairo::assets::CanonicalTextureImportSettings(settings);
+                if(const auto found=gltfTextures.find(key);found!=gltfTextures.end())return found->second;
                 const auto texture = kairo::editor::ImportRenderTexture(
                     project.ProjectRoot(), { metadata->ID }, settings,
                     project.Assets(), meshImports, derivedCache);
-                textureSettings.emplace(metadata->ID, settings);
                 const auto handle = renderer.CreateTexture(texture);
-                renderAssets.BindTexture({ metadata->ID }, handle);
-                cacheTexturePreview(metadata->ID,texture);
+                gltfTextures.emplace(key,handle);
+                // Keep the first standalone asset binding available for
+                // editor asset inspection. glTF draws use their own variants.
+                const bool first=textureSettings.emplace(metadata->ID,settings).second;
+                if(first)
+                {
+                    renderAssets.BindTexture({metadata->ID},handle);
+                    cacheTexturePreview(metadata->ID,texture);
+                }
 #if defined(KAIRO_EDITOR_HAS_OFFLINE_RENDER)
-                auto offline = MakeOfflineTexture(texture, metadata->ID.ToString());
-                offlineTextureHandles.emplace(handle, offline);
-                offlineTextures.emplace(metadata->ID, std::move(offline));
+                auto offline = MakeOfflineTexture(texture,key);
+                offlineTextureHandles.emplace(handle,offline);
+                if(first)offlineTextures.emplace(metadata->ID,std::move(offline));
+#endif
+                return handle;
+            };
+            const auto resolveEmbedded=[&](const kairo::assets::GltfTextureBinding& binding,
+                kairo::assets::TextureSemantic semantic)
+            {
+                const auto fingerprint=binding.EmbeddedBytes.empty()?
+                    kairo::assets::FingerprintBytes(std::as_bytes(std::span(binding.Uri.data(),binding.Uri.size()))):
+                    kairo::assets::FingerprintBytes(binding.EmbeddedBytes);
+                const auto key="embedded:"+fingerprint.ToHex()+":"+
+                    kairo::assets::CanonicalTextureImportSettings(kairo::editor::GltfImageSettings(semantic));
+                if(const auto found=gltfTextures.find(key);found!=gltfTextures.end())return found->second;
+                const auto texture=kairo::editor::DecodeEmbeddedGltfTexture(binding,semantic);
+                const auto handle=renderer.CreateTexture(texture);
+                gltfTextures.emplace(key,handle);
+#if defined(KAIRO_EDITOR_HAS_OFFLINE_RENDER)
+                offlineTextureHandles.emplace(handle,MakeOfflineTexture(texture,key));
 #endif
                 return handle;
             };
             auto imported = kairo::editor::ImportRenderGltfSceneWithSource(
                 project.ProjectRoot(), { asset.ID }, project.Assets(), meshImports,
-                derivedCache, resolveGltfTexture);
+                derivedCache, resolveGltfTexture,resolveEmbedded);
             std::vector<kairo::renderer::MeshHandle> meshHandles;
             meshHandles.reserve(imported.RenderAsset.Primitives.size());
             for (const auto& primitive : imported.RenderAsset.Primitives)
