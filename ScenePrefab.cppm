@@ -112,14 +112,28 @@ export namespace kairo::editor
         return result;
     }
 
-    [[nodiscard]] inline PrefabTemplate LoadProjectPrefab(const ProjectSession& project,std::string_view name)
+    // A revision token is the exact bounded source, not a timestamp: edits
+    // with the same length or filesystem timestamp still invalidate a review.
+    [[nodiscard]] inline std::filesystem::path ExistingPrefabPath(
+        const ProjectSession& project,std::string_view name)
     {
         const auto valid=ValidatePrefabName(name);
+        const auto library=ListProjectPrefabs(project);
+        if(std::ranges::find(library,valid)==library.end())
+            throw std::invalid_argument("Select an existing prefab using its exact name.");
         const auto relative=std::filesystem::path("Prefabs")/valid/"Prefab.kscene";
         const auto file=ResolveExistingProjectFile(project.ProjectRoot(),relative,"prefab");
-        if(std::filesystem::is_symlink(project.ProjectRoot()/"Prefabs")||std::filesystem::is_symlink(project.ProjectRoot()/relative)||
+        if(std::filesystem::is_symlink(project.ProjectRoot()/"Prefabs")||
+            std::filesystem::is_symlink(project.ProjectRoot()/relative)||
             std::filesystem::is_symlink((project.ProjectRoot()/relative).parent_path()))
             throw std::invalid_argument("Linked prefab files are unsupported.");
+        return file;
+    }
+
+    [[nodiscard]] inline std::string ReadProjectPrefabRevision(
+        const ProjectSession& project,std::string_view name)
+    {
+        const auto file=ExistingPrefabPath(project,name);
         std::ifstream stream(file,std::ios::binary);
         if(!stream)throw std::runtime_error("Cannot read prefab.");
         std::string bytes(MaximumPrefabBytes+1,'\0');
@@ -127,11 +141,37 @@ export namespace kairo::editor
         if(stream.bad()||stream.gcount()>static_cast<std::streamsize>(MaximumPrefabBytes))
             throw std::runtime_error("Cannot read bounded prefab.");
         bytes.resize(static_cast<std::size_t>(stream.gcount()));
+        return bytes;
+    }
+
+    [[nodiscard]] inline PrefabTemplate LoadProjectPrefab(const ProjectSession& project,std::string_view name)
+    {
+        const auto valid=ValidatePrefabName(name);
+        const auto bytes=ReadProjectPrefabRevision(project,valid);
         const auto scene=kairo::engine::ParseScene(bytes,project.Assets());
         const auto roots=scene.RootEntities();
         if(roots.size()!=1||scene.Size()>MaximumPrefabEntities)
             throw std::invalid_argument("Prefab must have one root and at most 512 entities.");
         return {valid,1u,CaptureSceneFragment(scene,{roots.front()})};
+    }
+
+    // Replace only a reviewed definition, never an instance or the active
+    // scene. SaveScene stages and atomically replaces a single file. The
+    // revision check detects prior external changes, not simultaneous writers.
+    inline void ReplaceProjectPrefab(const ProjectSession& project,
+        kairo::engine::Entity root,std::string_view name,std::string_view expectedRevision)
+    {
+        if(project.HasUnsavedChanges())
+            throw std::logic_error("Save the project before replacing a prefab.");
+        const auto output=ExistingPrefabPath(project,name);
+        auto prefab=CaptureProjectPrefab(project,root,name);
+        kairo::engine::Scene detached;
+        (void)InstantiatePrefab(detached,std::move(prefab));
+        const auto bytes=kairo::engine::SerializeScene(detached,project.Assets());
+        if(bytes.size()>MaximumPrefabBytes)throw std::length_error("Prefab exceeds byte budget.");
+        if(ReadProjectPrefabRevision(project,name)!=expectedRevision)
+            throw std::runtime_error("Prefab changed since review. Review the current definition again.");
+        kairo::engine::SaveScene(output,detached,project.Assets());
     }
 
     // Commands validate on a candidate scene before changing ProjectSession.
