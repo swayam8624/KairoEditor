@@ -1,5 +1,7 @@
 module;
 #include <algorithm>
+#include <ranges>
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -36,6 +38,11 @@ export namespace kairo::editor
         for(char c:name)
             if(!((c>='a'&&c<='z')||(c>='A'&&c<='Z')||(c>='0'&&c<='9')||c=='_'||c=='-'||c==' '))
                 throw std::invalid_argument("Prefab name accepts letters, digits, spaces, hyphens and underscores.");
+        std::string lower(name);
+        for(char& c:lower)if(c>='A'&&c<='Z')c=static_cast<char>(c-'A'+'a');
+        if(lower=="con"||lower=="prn"||lower=="aux"||lower=="nul"||
+            (lower.size()==4&&(lower.starts_with("com")||lower.starts_with("lpt"))&&lower[3]>='1'&&lower[3]<='9'))
+            throw std::invalid_argument("Reserved prefab name.");
         return std::string(name);
     }
 
@@ -57,14 +64,20 @@ export namespace kairo::editor
     [[nodiscard]] inline std::filesystem::path SaveProjectPrefab(
         const ProjectSession& project,kairo::engine::Entity root,std::string_view name)
     {
+        if(project.HasUnsavedChanges())throw std::logic_error("Save the project before creating a prefab.");
         auto prefab=CaptureProjectPrefab(project,root,name);
         kairo::engine::Scene detached;
         (void)InstantiatePrefab(detached,std::move(prefab));
         const auto bytes=kairo::engine::SerializeScene(detached,project.Assets());
         if(bytes.size()>MaximumPrefabBytes)throw std::length_error("Prefab exceeds byte budget.");
         const auto relative=std::filesystem::path("Prefabs")/ValidatePrefabName(name);
+        if(std::filesystem::is_symlink(project.ProjectRoot()/"Prefabs"))throw std::invalid_argument("Linked prefab directories are unsupported.");
         const auto parent=ResolveProjectOutput(project.ProjectRoot(),"Prefabs");
         std::filesystem::create_directories(parent);
+        const auto key=kairo::assets::PortableAssetPathKey(relative);
+        for(const auto& entry:std::filesystem::directory_iterator(parent))
+            if(kairo::assets::PortableAssetPathKey(std::filesystem::path("Prefabs")/entry.path().filename())==key)
+                throw std::runtime_error("A prefab with this name already exists.");
         const auto output=ResolveProjectOutput(project.ProjectRoot(),relative);
         // Reserve a directory atomically and never replace an existing prefab.
         if(!std::filesystem::create_directory(output))
@@ -79,6 +92,7 @@ export namespace kairo::editor
 
     [[nodiscard]] inline std::vector<std::string> ListProjectPrefabs(const ProjectSession& project)
     {
+        if(std::filesystem::is_symlink(project.ProjectRoot()/"Prefabs"))throw std::invalid_argument("Linked prefab directories are unsupported.");
         const auto folder=ResolveProjectOutput(project.ProjectRoot(),"Prefabs");
         std::vector<std::string> result;
         if(!std::filesystem::exists(folder))return result;
@@ -103,7 +117,7 @@ export namespace kairo::editor
         const auto valid=ValidatePrefabName(name);
         const auto relative=std::filesystem::path("Prefabs")/valid/"Prefab.kscene";
         const auto file=ResolveExistingProjectFile(project.ProjectRoot(),relative,"prefab");
-        if(std::filesystem::is_symlink(project.ProjectRoot()/relative)||
+        if(std::filesystem::is_symlink(project.ProjectRoot()/"Prefabs")||std::filesystem::is_symlink(project.ProjectRoot()/relative)||
             std::filesystem::is_symlink((project.ProjectRoot()/relative).parent_path()))
             throw std::invalid_argument("Linked prefab files are unsupported.");
         std::ifstream stream(file,std::ios::binary);
