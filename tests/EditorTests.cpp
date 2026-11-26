@@ -2234,3 +2234,84 @@ TEST_CASE("Editor layouts restore only compatible dock schemas", "[KairoEditor][
 
     std::filesystem::remove_all(root);
 }
+
+
+TEST_CASE("Project prefab files preserve hierarchy and asset identity through independent undoable placement",
+    "[KairoEditor][Prefab]")
+{
+    const auto root=std::filesystem::temp_directory_path()/
+        ("kairo-prefab-"+kairo::assets::GenerateAssetID().ToString());
+    struct Cleanup {std::filesystem::path Path;~Cleanup(){std::error_code ec;std::filesystem::remove_all(Path,ec);}} cleanup{root};
+    ProjectSession project;
+    project.CreateProject(root,"Prefab Test");
+    const auto mesh=kairo::assets::GenerateAssetID();
+    const auto material=kairo::assets::GenerateAssetID();
+    project.EditAssets().Insert({mesh,kairo::assets::AssetType::Mesh,kairo::assets::AssetOrigin::Builtin,
+        "builtin/cube","kairo.builtin",1u,{}});
+    project.EditAssets().Insert({material,kairo::assets::AssetType::Material,kairo::assets::AssetOrigin::Builtin,
+        "builtin/default-material","kairo.builtin",1u,{}});
+    auto& scene=project.EditScene();
+    const auto parent=scene.CreateEntity("Original parent");
+    const auto source=scene.CreateEntity("Crate");
+    const auto child=scene.CreateEntity("Lid");
+    scene.SetParent(source,parent);scene.SetParent(child,source);
+    scene.Transform(source).Local.Translation={3,4,5};
+    scene.Transform(child).Local.Translation={0,2,0};
+    kairo::engine::MeshRendererComponent render;
+    render.MeshAsset={mesh};render.MaterialAsset={material};
+    scene.SetMeshRenderer(child,render);
+    scene.AddTag(child,"test.prefab");
+    CHECK_THROWS(SaveProjectPrefab(project,source,"Crate"));
+    project.SaveAll();
+    const auto file=SaveProjectPrefab(project,source,"Crate");
+    CHECK(std::filesystem::is_regular_file(root/file));
+    CHECK_FALSE(project.HasUnsavedChanges());
+    CHECK(ListProjectPrefabs(project)==std::vector<std::string>{"Crate"});
+    CHECK_THROWS(SaveProjectPrefab(project,source,"crate"));
+    CHECK_THROWS(SaveProjectPrefab(project,source,"../escape"));
+    CHECK_THROWS(SaveProjectPrefab(project,source,"CON"));
+    CHECK(project.Scene().Parent(source)==parent);
+    const auto prefab=LoadProjectPrefab(project,"Crate");
+    REQUIRE(prefab.Fragment.Entities.size()==2);
+    const auto at=std::ranges::find_if(prefab.Fragment.Entities,[](const auto& e){return e.Parent<0;});
+    REQUIRE(at!=prefab.Fragment.Entities.end());
+    CHECK(at->Transform.Local.Translation.x==0.f);
+    PrefabOverride overrideValue;
+    overrideValue.EntityIndex=static_cast<std::uint32_t>(at-prefab.Fragment.Entities.begin());
+    overrideValue.Name="Placed crate";
+    overrideValue.Transform=at->Transform;
+    overrideValue.Transform->Local.Translation={8,0,1};
+    CommandHistory history;
+    auto command=std::make_unique<PlaceProjectPrefabCommand>(project,prefab,
+        std::vector<PrefabOverride>{overrideValue},parent);
+    auto* placed=command.get();
+    history.Execute(std::move(command));
+    const auto instance=placed->Root();
+    REQUIRE(project.Scene().Contains(instance));
+    CHECK(instance!=source);
+    CHECK(project.Scene().Parent(instance)==parent);
+    CHECK(project.Scene().Name(instance).Value=="Placed crate");
+    CHECK(project.Scene().Transform(instance).Local.Translation.x==8.f);
+    REQUIRE(project.Scene().Children(instance).size()==1);
+    const auto lid=project.Scene().Children(instance).front();
+    CHECK(lid!=child);
+    CHECK(project.Scene().MeshRenderer(lid).MeshAsset.ID==mesh);
+    CHECK(project.Scene().Transform(lid).Local.Translation.y==2.f);
+    history.Undo();
+    CHECK_FALSE(project.Scene().Contains(instance));
+    CHECK_FALSE(project.Scene().Contains(lid));
+    CHECK(project.Scene().Contains(source));
+    history.Redo();
+    CHECK(project.Scene().Contains(instance));
+    CHECK(project.Scene().Contains(lid));
+    auto second=std::make_unique<PlaceProjectPrefabCommand>(project,prefab);
+    auto* secondPlaced=second.get();
+    history.Execute(std::move(second));
+    CHECK(secondPlaced->Root()!=instance);
+    CHECK(project.Scene().RootEntities().size()==2);
+    project.SaveAll();
+    project.OpenProject(project.ProjectFile());
+    CHECK(project.Scene().Contains(instance));
+    CHECK(project.Scene().Contains(lid));
+    CHECK(LoadProjectPrefab(project,"Crate").Fragment.Entities.size()==2);
+}
