@@ -1354,7 +1354,9 @@ export namespace kairo::editor
                         const auto world = scene.WorldTransform(entity);
                         m_ViewportController.SetPose({ world.Translation,
                             world.Translation + world.Forward(), world.Up() });
+                        m_ViewportSceneCamera = entity;
                         m_ViewportRenderLayers = camera.RenderLayers;
+                        m_ViewportNavigationProjection = ViewportCamera();
                     }
                     ImGui::SameLine();
                     if (ActionButton("Remove##Camera", UIButtonTone::Destructive))
@@ -1579,6 +1581,8 @@ export namespace kairo::editor
                 if (ImGui::IsItemHovered())
                     ImGui::SetTooltip("Scene left-drag: Pick objects, Orbit the view, Pan the view or Zoom. Trackpad-friendly, no middle button required.");
 
+                // Orientation controls live outside the pickable scene image.
+                DrawOrientationGizmo();
                 const ImVec2 viewportMin = ImGui::GetCursorScreenPos();
                 const ImVec2 viewportSize = ImGui::GetContentRegionAvail();
                 const ImVec2 framebufferScale = ImGui::GetIO().DisplayFramebufferScale;
@@ -1627,7 +1631,9 @@ export namespace kairo::editor
                 }
                 const bool gizmoOwnsPointer = m_ViewportDragTool == ViewportDragTool::Pick &&
                     DrawTransformGizmo(viewportMin, viewportSize);
-                const bool navigationClick = ImGui::GetIO().KeyAlt;
+                const bool navigationClick = ImGui::GetIO().KeyAlt ||
+                    m_ViewportPointerNavigationActive || ImGui::IsMouseDown(ImGuiMouseButton_Right) ||
+                    ImGui::IsMouseDown(ImGuiMouseButton_Middle);
                 if (hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left) &&
                     !navigationClick && m_ViewportDragTool == ViewportDragTool::Pick &&
                     !gizmoOwnsPointer &&
@@ -1643,7 +1649,6 @@ export namespace kairo::editor
                         static_cast<float>(m_RequestedViewportHeight - 1u)));
                     m_ViewportPickRequest = std::pair{ x, y };
                 }
-                DrawOrientationGizmo(viewportMin, viewportSize);
                 // The transform gizmo must not monopolize MMB/RMB camera motion
                 // merely because the cursor overlaps a rotation/scale handle.
                 // LMB manipulation still belongs to the gizmo unless Alt is held.
@@ -1661,13 +1666,13 @@ export namespace kairo::editor
                     m_ActiveTool == EditorAction::TranslateTool ? "MOVE" :
                     m_ActiveTool == EditorAction::RotateTool ? "ROTATE" : "SCALE");
                 ImGui::GetWindowDrawList()->AddText({ overlay.x, overlay.y + 18.0f }, IM_COL32(135, 165, 184, 190),
-                    "Drag mode: Pick / Orbit / Pan / Zoom | MMB orbit | RMB free-look | WASD move | Q/E height | F focus | wheel zoom");
+                    "Alt-drag orbit | Shift+MMB pan | RMB + WASD fly | F frame | wheel zoom");
                 const auto selected = m_State.SelectedEntity();
                 if (selected.has_value())
                 {
                     const auto& position = m_Project.Scene().Transform(*selected).Local.Translation;
                     ImGui::GetWindowDrawList()->AddText({ overlay.x, overlay.y + 36.0f }, IM_COL32(140, 208, 170, 220),
-                        ("Focus: " + m_Project.Scene().Name(*selected).Value).c_str());
+                        ("Selected: " + m_Project.Scene().Name(*selected).Value).c_str());
                     (void)position;
                 }
                 (void)camera;
@@ -1685,7 +1690,7 @@ export namespace kairo::editor
             m_History.Execute(std::move(command));
             const auto entity = placed->CreatedEntity();
             m_State.Select(entity);
-            m_ViewportController.Focus(m_Project.Scene().Transform(entity).Local.Translation);
+            // Placement selects the entity; camera framing is explicit (F).
         }
 
         void DrawViewportToolButton(EditorAction tool, const char* label)
@@ -1736,8 +1741,7 @@ export namespace kairo::editor
             if (command == nullptr)
             {
                 m_State.Select(created->CreatedEntity());
-                m_ViewportController.Focus(
-                    m_Project.Scene().Transform(created->CreatedEntity()).Local.Translation);
+                // Creating an object does not reposition the editor camera.
             }
         }
 
@@ -1749,7 +1753,7 @@ export namespace kairo::editor
             if (command == nullptr)
             {
                 m_State.Select(created->CreatedEntity());
-                m_ViewportController.Focus(m_Project.Scene().Transform(created->CreatedEntity()).Local.Translation);
+                // Preserve the current authoring view.
             }
         }
 
@@ -1816,7 +1820,7 @@ export namespace kairo::editor
             };
             for (const auto [key, native] : keys)
                 if (ImGui::IsKeyPressed(native, false) &&
-                    ShouldRouteWorldKeyAsAction(key, viewportOwnsKeyboard, modifiers))
+                    ShouldRouteWorldKeyAsAction(key, m_ViewportFlyCursorCaptured, modifiers))
                     (void)m_InputRouter.Route({ { key, modifiers } });
 
             if (!m_Project.HasProject()) return;
@@ -1845,7 +1849,7 @@ export namespace kairo::editor
                 else
                     StopPlay();
             }
-            if (context == InputContext::Scene) DispatchSceneActions();
+            if (context == InputContext::Scene && !m_ViewportFlyCursorCaptured) DispatchSceneActions();
             if (context == InputContext::Graph)
                 for (const EditorAction action : { EditorAction::GraphAddNode, EditorAction::GraphDelete,
                     EditorAction::GraphDuplicate, EditorAction::GraphCopy, EditorAction::GraphPaste,
@@ -1858,6 +1862,8 @@ export namespace kairo::editor
             const auto selected = m_State.SelectedEntity();
             if (!selected.has_value()) return;
             m_ViewportSceneCamera.reset();
+            m_ViewportNavigationProjection.reset();
+            m_ViewportRenderLayers = kairo::engine::AllRenderLayers;
             m_ViewportController.Focus(
                 m_Project.Scene().WorldTransform(*selected).Translation,
                 m_ViewportController.Distance());
@@ -1943,13 +1949,13 @@ export namespace kairo::editor
             const bool pointerFly = pointerNavigation && rightDown;
             m_ViewportFlyCursorCaptured = pointerFly;
 
-            // A focused scene image owns unmodified WASD/QE and arrow keys,
-            // even WITHOUT RMB/Shift. Do not move a world while typing into an
-            // inspector, selecting a menu, or holding Cmd/Ctrl shortcuts.
+            // Flight owns WASD/QE only while an RMB gesture is captured.
+            // Otherwise Q/W/E/R are transform tools; clicking or selecting
+            // does not alter the camera pose.
             const bool viewportKeyboard = keyboardActive && m_ViewportFocused &&
                 !io.WantTextInput && !io.KeySuper && !io.KeyCtrl && !io.KeyAlt &&
                 !ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId);
-            const bool keyboardMove = viewportKeyboard &&
+            const bool keyboardMove = viewportKeyboard && pointerFly &&
                 (ImGui::IsKeyDown(ImGuiKey_W) || ImGui::IsKeyDown(ImGuiKey_A) ||
                  ImGui::IsKeyDown(ImGuiKey_S) || ImGui::IsKeyDown(ImGuiKey_D) ||
                  ImGui::IsKeyDown(ImGuiKey_Q) || ImGui::IsKeyDown(ImGuiKey_E) ||
@@ -1960,7 +1966,10 @@ export namespace kairo::editor
             const bool wheel = hovered &&
                 (io.MouseWheel != 0.0f || io.MouseWheelH != 0.0f);
             if (pointerNavigation || keyboardMove || wheel)
+            {
                 m_ViewportSceneCamera.reset();
+                m_ViewportRenderLayers = kairo::engine::AllRenderLayers;
+            }
 
             if (!pointerNavigation && !keyboardMove && !hovered && !viewportKeyboard) return;
 
@@ -1983,10 +1992,11 @@ export namespace kairo::editor
             input.Dolly = pointerNavigation &&
                 ((m_ViewportDragTool == ViewportDragTool::Zoom && leftDown && !io.KeyAlt) ||
                  (optionLeft && io.KeyCtrl && !io.KeyShift));
-            input.Fly = pointerFly || keyboardMove;
+            input.Fly = pointerFly;
+            if (pointerFly) input.Orbit = input.Pan = input.Dolly = false;
             if (wheel && m_NavigationSettings.ScrollBehavior == ViewportScrollBehavior::Dolly)
                 input.WheelDelta = io.MouseWheel;
-            if (wheel && m_NavigationSettings.ScrollBehavior == ViewportScrollBehavior::Pan)
+            if (wheel && !pointerNavigation && m_NavigationSettings.ScrollBehavior == ViewportScrollBehavior::Pan)
             {
                 input.Pan = true;
                 input.MouseDeltaX = io.MouseWheelH * 24.0f;
@@ -2007,7 +2017,7 @@ export namespace kairo::editor
             }
             if (input.Fly)
             {
-                if (pointerFly) ImGui::SetMouseCursor(ImGuiMouseCursor_None);
+                ImGui::SetMouseCursor(ImGuiMouseCursor_None);
                 input.MoveForward =
                     (ImGui::IsKeyDown(ImGuiKey_W) || ImGui::IsKeyDown(ImGuiKey_UpArrow) ? 1.0f : 0.0f) -
                     (ImGui::IsKeyDown(ImGuiKey_S) || ImGui::IsKeyDown(ImGuiKey_DownArrow) ? 1.0f : 0.0f);
@@ -2017,11 +2027,7 @@ export namespace kairo::editor
                 input.MoveUp =
                     (ImGui::IsKeyDown(ImGuiKey_E) ? 1.0f : 0.0f) -
                     (ImGui::IsKeyDown(ImGuiKey_Q) ? 1.0f : 0.0f);
-                if (!pointerFly)
-                {
-                    input.MouseDeltaX = 0.0f;
-                    input.MouseDeltaY = 0.0f;
-                }
+                if (!keyboardMove) input.MoveForward = input.MoveRight = input.MoveUp = 0.0f;
             }
             m_ViewportController.Update(input, m_NavigationSettings);
         }
@@ -2239,15 +2245,15 @@ export namespace kairo::editor
             return result.Active || result.Hovered;
         }
 
-        void DrawOrientationGizmo(ImVec2 viewportMin, ImVec2 viewportSize)
+        void DrawOrientationGizmo()
         {
             constexpr float button = 26.0f;
             constexpr float spacing = 2.0f;
             constexpr float perspectiveWidth = 48.0f;
             constexpr float cameraWidth = 58.0f;
-            ImGui::SetCursorScreenPos({ viewportMin.x + viewportSize.x -
-                (button * 3.0f + perspectiveWidth + cameraWidth + spacing * 4.0f) - 16.0f,
-                viewportMin.y + 12.0f });
+            ImGui::AlignTextToFramePadding();
+            ImGui::TextDisabled("View");
+            ImGui::SameLine();
             ImGui::PushID("ViewportOrientation");
             if (ImGui::Button("X", { button, button }))
             {
