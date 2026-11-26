@@ -112,6 +112,7 @@ export namespace kairo::editor
                 return;
             }
             DrawController(assets,instance.SceneAsset,*gltf,root,canEdit);
+            ImGui::BeginDisabled(m_ControllerPreview.has_value());
             auto& state=m_State;
             state.ClipIndex=std::min<std::uint32_t>(state.ClipIndex,
                 static_cast<std::uint32_t>(gltf->Animations.size()-1u));
@@ -180,6 +181,7 @@ export namespace kairo::editor
                 state.TrackIndex=std::min(state.TrackIndex,clip.Channels.size()-1);
                 DrawTracks(clip,*gltf,duration);
             }
+            ImGui::EndDisabled();
             if(m_ControllerPreview)
             {
                 try
@@ -543,6 +545,8 @@ export namespace kairo::editor
                 m_ControllerPreview.reset();m_Parameters.Clear();m_ControllerError.clear();
                 if(preview)
                 {
+                    m_State.Playing=false;
+                    m_State.Enabled=false;
                     try
                     {
                         m_ControllerPreview.emplace(*definition,source);
