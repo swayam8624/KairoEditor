@@ -37,7 +37,7 @@ namespace kairo::editor::detail
         std::size_t vertexCount,std::span<const std::uint32_t> indices,Position position,
         std::size_t faceBudget=MaximumContourFaces)
     {
-        if(!vertexCount||vertexCount>MaximumContourFaces*3||
+        if(!vertexCount||vertexCount>MaximumContourFaces*3||vertexCount>indices.size()||
             indices.empty()||indices.size()%3||indices.size()/3>std::min(faceBudget,MaximumContourFaces))
             return std::nullopt;
         ContourTopology result;
