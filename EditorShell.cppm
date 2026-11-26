@@ -1033,7 +1033,7 @@ export namespace kairo::editor
                 ImGui::TextDisabled("Select an entity to inspect it.");
                 ImGui::End(); return;
             }
-            auto& scene = m_Project.EditScene();
+            const auto& scene = m_Project.Scene();
             ImGui::TextUnformatted(scene.Name(*selected).Value.c_str());
             ImGui::SameLine();
             ImGui::TextDisabled("#%u", selected->Value);
