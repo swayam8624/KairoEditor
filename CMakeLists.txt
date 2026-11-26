@@ -298,6 +298,10 @@ if(KAIRO_EDITOR_BUILD_TESTS)
     target_compile_features(KairoEditorSelectionBoundsTests PRIVATE cxx_std_23)
     set_property(TARGET KairoEditorSelectionBoundsTests PROPERTY COMPILE_WARNING_AS_ERROR ON)
     add_test(NAME KairoEditorSelectionBoundsTests COMMAND KairoEditorSelectionBoundsTests)
+    add_executable(KairoEditorAssetPreviewPixelsTests tests/AssetPreviewPixelsTests.cpp)
+    target_compile_features(KairoEditorAssetPreviewPixelsTests PRIVATE cxx_std_23)
+    set_property(TARGET KairoEditorAssetPreviewPixelsTests PROPERTY COMPILE_WARNING_AS_ERROR ON)
+    add_test(NAME KairoEditorAssetPreviewPixelsTests COMMAND KairoEditorAssetPreviewPixelsTests)
     add_test(NAME KairoEditorPhase4Tests COMMAND KairoEditorPhase4Tests)
     # MSVC 19.44 ICEs in symbols.c while destroying the imported module types
     # used by this boundary harness. Keep the production modules and the main
