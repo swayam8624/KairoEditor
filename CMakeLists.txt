@@ -20,13 +20,24 @@ set(KAIRO_EDITOR_NATIVE_GAMEPLAY_TARGETS "" CACHE STRING
 # Immutable standalone fallback revisions. Local source directories and sibling
 # checkouts still take precedence for active workspace development.
 set(KAIRO_EDITOR_CORE_REVISION 29d7f6bd1efec3eb17df49abdf8a99ec300945e7)
-set(KAIRO_EDITOR_RENDERER_REVISION 9d692020f3e51d22a087ad6e426bda4bf002b876)
-set(KAIRO_EDITOR_REALTIME_BRIDGE_REVISION c5b6781a13aa805221e58ba3bd32d1ecb942546e)
+set(KAIRO_EDITOR_RENDERER_REVISION 40f471c13919d7ecf642320bdd911b8ae04a07e8)
+set(KAIRO_EDITOR_ASSETS_REVISION 8b479f596fa71a02f774af0634f7d870a7f63066)
+set(KAIRO_EDITOR_REALTIME_BRIDGE_REVISION 405c5d547d41583890a94c4725aabc20e60007de)
 set(KAIRO_EDITOR_AI_REVISION 34d6b79727ea0bf11a369244e03c32895da9bd14)
 set(KAIRO_EDITOR_JSON_REVISION 65ee68451d8eb2b5f3a30b410476ab83deb3289b)
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
     add_compile_options(-Wall -Wextra -Wpedantic -Wno-unused-parameter)
+endif()
+
+# The editor uses compound-import APIs newer than the Core fallback pin.
+# FetchContent's first declaration wins, while explicit local source paths
+# and umbrella targets continue to take precedence.
+if(NOT TARGET KairoAssets)
+    include(FetchContent)
+    FetchContent_Declare(KairoAssets
+        GIT_REPOSITORY https://github.com/swayam8624/KairoAssets.git
+        GIT_TAG ${KAIRO_EDITOR_ASSETS_REVISION})
 endif()
 
 if(NOT TARGET KairoAI)
@@ -329,6 +340,10 @@ if(KAIRO_EDITOR_BUILD_TESTS)
         add_test(NAME KairoEditorDocumentCompilerTests COMMAND KairoEditorDocumentCompilerTests)
     endif()
     if(TARGET KairoEditorApp)
+        add_executable(KairoEditorAssetImportBatchTests tests/AssetImportBatchTests.cpp)
+        target_link_libraries(KairoEditorAssetImportBatchTests PRIVATE KairoEditorRendererBridge Catch2::Catch2WithMain)
+        set_property(TARGET KairoEditorAssetImportBatchTests PROPERTY COMPILE_WARNING_AS_ERROR ON)
+        add_test(NAME KairoEditorAssetImportBatchTests COMMAND KairoEditorAssetImportBatchTests)
         add_executable(KairoEditorRenderBridgeTests tests/SceneRenderBridgeTests.cpp)
         target_link_libraries(KairoEditorRenderBridgeTests PRIVATE KairoEditorRendererBridge Catch2::Catch2WithMain)
         if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 23)
