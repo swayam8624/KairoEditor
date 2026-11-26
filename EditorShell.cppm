@@ -35,6 +35,7 @@ module;
 #include <string>
 #include <string_view>
 #include <utility>
+#include <unordered_set>
 #include <variant>
 #include <vector>
 
@@ -140,6 +141,7 @@ export namespace kairo::editor
                     RunCommand([this] { m_OfflineRender->Refresh(); });
             }
             DrawMainBar();
+            DrawWorkspaceBar();
             DrawStatusBar();
             const ImGuiID dockspace = ImGui::GetID("KairoEditorDockspace");
             BuildDefaultLayout(dockspace);
@@ -392,6 +394,9 @@ export namespace kairo::editor
         bool m_RebuildLayout = true;
         bool m_DocumentPanelFocused = false;
         std::array<char, 256> m_AssetFilter{};
+        std::array<char, 256> m_HierarchyFilter{};
+        std::optional<kairo::assets::AssetID> m_SelectedBrowserAsset;
+        bool m_AssetGrid = true;
         const kairo::assets::ImportDatabase* m_AssetImports = nullptr;
         AssetThumbnailScheduler m_AssetThumbnailScheduler;
         AssetBrowserRequestQueue m_AssetBrowserRequests;
@@ -463,6 +468,8 @@ export namespace kairo::editor
         void DrawMainBar()
         {
             if (!ImGui::BeginMainMenuBar()) return;
+            ImGui::TextUnformatted("KAIRO");
+            ImGui::Separator();
             if (ImGui::BeginMenu("File"))
             {
                 if (ImGui::MenuItem("New Project...")) m_RequestNewProjectPopup = true;
@@ -569,25 +576,73 @@ export namespace kairo::editor
                 ImGui::EndMenu();
             }
 
-            ImGui::Separator();
-            constexpr std::array workspaces{ Workspace::Scene, Workspace::World, Workspace::Logic, Workspace::Materials,
-                Workspace::Animation, Workspace::Simulation, Workspace::Audio, Workspace::Profiling };
-            for (const Workspace workspace : workspaces)
-            {
-                const bool isActive = workspace == m_State.ActiveWorkspace();
-                if (ToolbarButton(Name(workspace), isActive)) m_State.SwitchWorkspace(workspace);
-                ImGui::SameLine();
-            }
-            ImGui::Separator();
-            DrawPlayControls();
+            // Project identity is kept separate from command buttons.
             if (m_Project.HasProject())
             {
-                ImGui::Separator();
-                ImGui::TextDisabled("%s%s", m_Project.Descriptor().Name.c_str(),
-                    (m_Project.HasUnsavedChanges() || m_AuthoringWorkspace.HasDirtyTextDrafts()) ? " *" : "");
+                const std::string label = m_Project.Descriptor().Name +
+                    ((m_Project.HasUnsavedChanges() || m_AuthoringWorkspace.HasDirtyTextDrafts()) ? " *" : "");
+                const float right = ImGui::GetWindowWidth() - ImGui::CalcTextSize(label.c_str()).x - 14.0f;
+                if (right > ImGui::GetCursorPosX() + 12.0f)
+                {
+                    ImGui::SameLine(right);
+                    MutedText(label);
+                }
             }
             ImGui::EndMainMenuBar();
+        }
 
+        // A separate, fixed-height workspace command rail reserves space
+        // before the dockspace; no tools or play controls overflow the menu.
+        void DrawWorkspaceBar()
+        {
+            constexpr ImGuiWindowFlags flags = ImGuiWindowFlags_NoScrollbar |
+                ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_MenuBar;
+            if (!ImGui::BeginViewportSideBar("##KairoWorkspaceBar", nullptr, ImGuiDir_Up,
+                ImGui::GetFrameHeight()+4.0f, flags))
+            {
+                ImGui::End();
+                return;
+            }
+            if (ImGui::BeginMenuBar())
+            {
+                if (ActionButton("Save", UIButtonTone::Neutral, m_Project.HasProject()))
+                    RunCommand([this] { SaveAllWithDrafts(); });
+                ImGui::Separator();
+                constexpr std::array workspaces{ Workspace::Scene, Workspace::World, Workspace::Logic,
+                    Workspace::Materials, Workspace::Animation, Workspace::Simulation, Workspace::Audio, Workspace::Profiling };
+                // At laptop widths, retain every workspace in a compact
+                // selector rather than clipping the last commands.
+                if (ImGui::GetWindowWidth() >= 1180.0f)
+                {
+                    for (const Workspace workspace : workspaces)
+                    {
+                        if (ToolbarButton(Name(workspace), workspace == m_State.ActiveWorkspace()))
+                            m_State.SwitchWorkspace(workspace);
+                        ImGui::SameLine();
+                    }
+                }
+                else
+                {
+                    ImGui::SetNextItemWidth(160.0f);
+                    if (ImGui::BeginCombo("##Workspace", Name(m_State.ActiveWorkspace()).data()))
+                    {
+                        for (const Workspace workspace : workspaces)
+                        {
+                            const bool active = workspace == m_State.ActiveWorkspace();
+                            if (ImGui::Selectable(Name(workspace).data(), active)) m_State.SwitchWorkspace(workspace);
+                            if (active) ImGui::SetItemDefaultFocus();
+                        }
+                        ImGui::EndCombo();
+                    }
+                    ImGui::SameLine();
+                }
+                ImGui::Separator();
+                const float right = ImGui::GetWindowWidth()-215.0f;
+                if (right > ImGui::GetCursorPosX()) ImGui::SameLine(right);
+                DrawPlayControls();
+                ImGui::EndMenuBar();
+            }
+            ImGui::End();
         }
 
         void QueueProjectOperation(ProjectOperation operation, std::filesystem::path path,
@@ -765,6 +820,9 @@ export namespace kairo::editor
                 ImGui::Separator();
                 ImGui::TextDisabled("%s", m_State.Mode() == EditorMode::Edit ? "Edit" :
                     (m_State.Mode() == EditorMode::Play ? "Playing" : "Paused"));
+                const float fps = std::max(ImGui::GetIO().Framerate, 1.0f);
+                ImGui::Separator();
+                ImGui::TextDisabled("%.1f ms | %.0f FPS", 1000.0f/fps, fps);
                 if (!m_RecoveryStatus.empty())
                 {
                     ImGui::Separator();
@@ -787,11 +845,11 @@ export namespace kairo::editor
             ImGui::DockBuilderAddNode(dockspace, ImGuiDockNodeFlags_DockSpace);
             ImGui::DockBuilderSetNodeSize(dockspace, ImGui::GetMainViewport()->WorkSize);
             ImGuiID center = dockspace;
-            const ImGuiID left = ImGui::DockBuilderSplitNode(center, ImGuiDir_Left, 0.19f, nullptr, &center);
-            const ImGuiID right = ImGui::DockBuilderSplitNode(center, ImGuiDir_Right, 0.23f, nullptr, &center);
-            const ImGuiID bottom = ImGui::DockBuilderSplitNode(center, ImGuiDir_Down, 0.25f, nullptr, &center);
+            const ImGuiID left = ImGui::DockBuilderSplitNode(center, ImGuiDir_Left, 0.18f, nullptr, &center);
+            const ImGuiID right = ImGui::DockBuilderSplitNode(center, ImGuiDir_Right, 0.28f, nullptr, &center);
+            const ImGuiID bottom = ImGui::DockBuilderSplitNode(center, ImGuiDir_Down, 0.28f, nullptr, &center);
             ImGui::DockBuilderDockWindow("Hierarchy", left);
-            ImGui::DockBuilderDockWindow("Content Browser", left);
+            ImGui::DockBuilderDockWindow("Content Browser", bottom);
             ImGui::DockBuilderDockWindow("Inspector", right);
             ImGui::DockBuilderDockWindow("Statistics", right);
             ImGui::DockBuilderDockWindow("Kairo AI", right);
@@ -831,12 +889,12 @@ export namespace kairo::editor
         void DrawHierarchy()
         {
             if (!ImGui::Begin("Hierarchy")) { ImGui::End(); return; }
-            if (ActionButton("+ Add", UIButtonTone::Primary)) ImGui::OpenPopup("Add Scene Object");
+            if (ActionButton("+ Add")) ImGui::OpenPopup("Add Scene Object");
             if (ImGui::IsItemHovered()) ImGui::SetTooltip("Add scene object (Shift+A)");
             DrawAddSceneObjectPopup();
             ImGui::SameLine();
             const auto selectedEntity = m_State.SelectedEntity();
-            if (ActionButton("- Entity", UIButtonTone::Destructive, selectedEntity.has_value()) && selectedEntity.has_value())
+            if (ActionButton("Delete", UIButtonTone::Destructive, selectedEntity.has_value()) && selectedEntity.has_value())
             {
                 RunCommand([this, entity = *selectedEntity]
                 {
@@ -847,28 +905,54 @@ export namespace kairo::editor
             if (ImGui::IsItemHovered()) ImGui::SetTooltip("Delete selected entity");
             ImGui::Separator();
             const auto& scene = m_Project.Scene();
-            if (ImGui::Button("Drop here to make root", ImVec2(-1.0f, 0.0f))) {}
-            AcceptHierarchyDrop(std::nullopt);
+            (void)SearchField("##HierarchyFilter", "Search entities", m_HierarchyFilter.data(), m_HierarchyFilter.size());
+            const auto filter = Lower(m_HierarchyFilter.data());
+            std::unordered_set<std::uint32_t> matches;
+            if (!filter.empty())
+                for (const auto entity : scene.RootEntities())
+                    (void)CollectHierarchyMatches(scene, entity, filter, matches);
+            if (const auto* payload = ImGui::GetDragDropPayload(); payload && payload->IsDataType("KAIRO_SCENE_ENTITY"))
+            {
+                (void)ImGui::Button("Move to scene root", ImVec2(-1.0f, 0.0f));
+                AcceptHierarchyDrop(std::nullopt);
+            }
+            MutedText(std::to_string(scene.Size())+" entities");
             for (const auto entity : scene.RootEntities())
-                DrawHierarchyEntity(scene, entity);
+                DrawHierarchyEntity(scene, entity, filter.empty() ? nullptr : &matches);
+            if (!filter.empty() && matches.empty()) MutedText("No matching entities.");
             ImGui::End();
         }
 
-        void DrawHierarchyEntity(const kairo::engine::Scene& scene, kairo::engine::Entity entity)
+        // One post-order traversal computes the filtered tree, retaining
+        // ancestors so matching children never lose their scene context.
+        bool CollectHierarchyMatches(const kairo::engine::Scene& scene, kairo::engine::Entity entity,
+            const std::string& filter, std::unordered_set<std::uint32_t>& matches)
         {
+            bool visible = Lower(scene.Name(entity).Value).find(filter) != std::string::npos;
+            for (const auto child : scene.Children(entity))
+                if (CollectHierarchyMatches(scene, child, filter, matches)) visible = true;
+            if (visible) matches.insert(entity.Value);
+            return visible;
+        }
+
+        void DrawHierarchyEntity(const kairo::engine::Scene& scene, kairo::engine::Entity entity,
+            const std::unordered_set<std::uint32_t>* matches)
+        {
+            if (matches && !matches->contains(entity.Value)) return;
             const bool selected = m_State.SelectedEntity().has_value() &&
                 *m_State.SelectedEntity() == entity;
             const bool leaf = scene.Children(entity).empty();
             ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow |
-                ImGuiTreeNodeFlags_OpenOnDoubleClick | ImGuiTreeNodeFlags_SpanAvailWidth;
+                ImGuiTreeNodeFlags_OpenOnDoubleClick | ImGuiTreeNodeFlags_SpanFullWidth | ImGuiTreeNodeFlags_FramePadding;
             if (selected) flags |= ImGuiTreeNodeFlags_Selected;
             if (leaf) flags |= ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
-            const char* marker = scene.HasCamera(entity) ? "[C] " : scene.HasLight(entity) ? "[L] " :
-                scene.HasEnvironment(entity) ? "[W] " : scene.HasSceneInstance(entity) ? "[S] " :
-                scene.HasMeshRenderer(entity) ? "[M] " : "[ ] ";
-            const std::string label = std::string(marker) + scene.Name(entity).Value +
-                "##" + std::to_string(entity.Value);
-            const bool open = ImGui::TreeNodeEx(label.c_str(), flags);
+            const char* kind = scene.HasCamera(entity) ? "Camera" : scene.HasLight(entity) ? "Light" :
+                scene.HasEnvironment(entity) ? "Environment" : scene.HasSceneInstance(entity) ? "Scene instance" :
+                scene.HasMeshRenderer(entity) ? "Mesh" : "Entity";
+            if (matches && !leaf) ImGui::SetNextItemOpen(true, ImGuiCond_Always);
+            ImGui::PushID(static_cast<int>(entity.Value));
+            const bool open = ImGui::TreeNodeEx("##Entity", flags, "%s", scene.Name(entity).Value.c_str());
+            if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort)) ImGui::SetTooltip("%s | #%u", kind, entity.Value);
             if (ImGui::IsItemClicked() && !ImGui::IsItemToggledOpen()) m_State.Select(entity);
             if (ImGui::BeginDragDropSource())
             {
@@ -879,9 +963,10 @@ export namespace kairo::editor
             AcceptHierarchyDrop(entity);
             if (open && !leaf)
             {
-                for (const auto child : scene.Children(entity)) DrawHierarchyEntity(scene, child);
+                for (const auto child : scene.Children(entity)) DrawHierarchyEntity(scene, child, matches);
                 ImGui::TreePop();
             }
+            ImGui::PopID();
         }
 
         void AcceptHierarchyDrop(std::optional<kairo::engine::Entity> parent)
@@ -917,6 +1002,11 @@ export namespace kairo::editor
                 ImGui::End(); return;
             }
             auto& scene = m_Project.EditScene();
+            ImGui::TextUnformatted(scene.Name(*selected).Value.c_str());
+            ImGui::SameLine();
+            ImGui::TextDisabled("#%u", selected->Value);
+            ImGui::Separator();
+            ImGui::PushItemWidth(ImGui::GetContentRegionAvail().x * 0.58f);
             DrawReflectedInspector(m_Reflection, scene, *selected,
                 [this, entity = *selected](std::string_view typeKey, std::string_view propertyKey,
                     const kairo::reflection::PropertyValue& value)
@@ -992,7 +1082,8 @@ export namespace kairo::editor
                     m_History.Execute(std::make_unique<SetPhysicsPreviewCommand>(m_Project, entity, enabled));
                 });
             }
-            ImGui::TextDisabled(physicsEnabled ? "Dynamic box collider on Play" : "Uses local scale for runtime box bounds");
+            ImGui::TextWrapped("%s", physicsEnabled ? "Dynamic box collider on Play" : "Uses local scale for runtime box bounds");
+            ImGui::PopItemWidth();
             ImGui::End();
         }
 
@@ -1263,7 +1354,9 @@ export namespace kairo::editor
                         const auto world = scene.WorldTransform(entity);
                         m_ViewportController.SetPose({ world.Translation,
                             world.Translation + world.Forward(), world.Up() });
+                        m_ViewportSceneCamera = entity;
                         m_ViewportRenderLayers = camera.RenderLayers;
+                        m_ViewportNavigationProjection = ViewportCamera();
                     }
                     ImGui::SameLine();
                     if (ActionButton("Remove##Camera", UIButtonTone::Destructive))
@@ -1432,7 +1525,7 @@ export namespace kairo::editor
                 if (!m_ViewportFocused && !m_ViewportPointerNavigationActive)
                     m_ViewportKeyboardActive = false;
                 const auto camera = m_ViewportController.Pose();
-                ImGui::TextDisabled("Free 3D");
+                ImGui::TextDisabled("Perspective");
                 ImGui::SameLine();
                 if (ImGui::BeginCombo("##ViewportShading", kairo::renderer::Name(m_ViewportShading).data(),
                     ImGuiComboFlags_WidthFitPreview))
@@ -1449,15 +1542,14 @@ export namespace kairo::editor
                     ImGui::EndCombo();
                 }
                 ImGui::SameLine();
-                ImGui::TextDisabled("|  %s", m_State.Mode() == EditorMode::Edit ? "Edit" : "Runtime");
+                ImGui::TextDisabled("%s", m_State.Mode() == EditorMode::Edit ? "Edit" : "Runtime");
+                DrawViewportToolButton(EditorAction::SelectTool, "Select");
                 ImGui::SameLine();
-                DrawViewportToolButton(EditorAction::SelectTool, "Q");
+                DrawViewportToolButton(EditorAction::TranslateTool, "Move");
                 ImGui::SameLine();
-                DrawViewportToolButton(EditorAction::TranslateTool, "W");
+                DrawViewportToolButton(EditorAction::RotateTool, "Rotate");
                 ImGui::SameLine();
-                DrawViewportToolButton(EditorAction::RotateTool, "E");
-                ImGui::SameLine();
-                DrawViewportToolButton(EditorAction::ScaleTool, "R");
+                DrawViewportToolButton(EditorAction::ScaleTool, "Scale");
                 ImGui::SameLine();
                 if (ToolbarButton(m_GizmoSpace == TransformGizmoSpace::World ? "World" : "Local", false))
                     m_GizmoSpace = m_GizmoSpace == TransformGizmoSpace::World
@@ -1467,7 +1559,7 @@ export namespace kairo::editor
                 if (ActionButton("+", UIButtonTone::Primary, true, 25.0f)) OpenAddPrimitivePopup();
                 if (ImGui::IsItemHovered()) ImGui::SetTooltip("Add primitive (Shift+A)");
                 DrawPrimitivePopup();
-                ImGui::SameLine();
+                if (ImGui::GetContentRegionAvail().x > 490.0f) ImGui::SameLine();
                 constexpr std::array dragToolLabels{ "Pick", "Orbit", "Pan", "Zoom" };
                 const auto currentDrag = static_cast<std::size_t>(m_ViewportDragTool);
                 if (ImGui::BeginCombo("##ViewDragTool", dragToolLabels.at(currentDrag),
@@ -1489,6 +1581,8 @@ export namespace kairo::editor
                 if (ImGui::IsItemHovered())
                     ImGui::SetTooltip("Scene left-drag: Pick objects, Orbit the view, Pan the view or Zoom. Trackpad-friendly, no middle button required.");
 
+                // Orientation controls live outside the pickable scene image.
+                DrawOrientationGizmo();
                 const ImVec2 viewportMin = ImGui::GetCursorScreenPos();
                 const ImVec2 viewportSize = ImGui::GetContentRegionAvail();
                 const ImVec2 framebufferScale = ImGui::GetIO().DisplayFramebufferScale;
@@ -1537,7 +1631,9 @@ export namespace kairo::editor
                 }
                 const bool gizmoOwnsPointer = m_ViewportDragTool == ViewportDragTool::Pick &&
                     DrawTransformGizmo(viewportMin, viewportSize);
-                const bool navigationClick = ImGui::GetIO().KeyAlt;
+                const bool navigationClick = ImGui::GetIO().KeyAlt ||
+                    m_ViewportPointerNavigationActive || ImGui::IsMouseDown(ImGuiMouseButton_Right) ||
+                    ImGui::IsMouseDown(ImGuiMouseButton_Middle);
                 if (hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left) &&
                     !navigationClick && m_ViewportDragTool == ViewportDragTool::Pick &&
                     !gizmoOwnsPointer &&
@@ -1553,7 +1649,6 @@ export namespace kairo::editor
                         static_cast<float>(m_RequestedViewportHeight - 1u)));
                     m_ViewportPickRequest = std::pair{ x, y };
                 }
-                DrawOrientationGizmo(viewportMin, viewportSize);
                 // The transform gizmo must not monopolize MMB/RMB camera motion
                 // merely because the cursor overlaps a rotation/scale handle.
                 // LMB manipulation still belongs to the gizmo unless Alt is held.
@@ -1571,13 +1666,13 @@ export namespace kairo::editor
                     m_ActiveTool == EditorAction::TranslateTool ? "MOVE" :
                     m_ActiveTool == EditorAction::RotateTool ? "ROTATE" : "SCALE");
                 ImGui::GetWindowDrawList()->AddText({ overlay.x, overlay.y + 18.0f }, IM_COL32(135, 165, 184, 190),
-                    "Drag mode: Pick / Orbit / Pan / Zoom | MMB orbit | RMB free-look | WASD move | Q/E height | F focus | wheel zoom");
+                    "Alt-drag orbit | Shift+MMB pan | RMB + WASD fly | F frame | wheel zoom");
                 const auto selected = m_State.SelectedEntity();
                 if (selected.has_value())
                 {
                     const auto& position = m_Project.Scene().Transform(*selected).Local.Translation;
                     ImGui::GetWindowDrawList()->AddText({ overlay.x, overlay.y + 36.0f }, IM_COL32(140, 208, 170, 220),
-                        ("Focus: " + m_Project.Scene().Name(*selected).Value).c_str());
+                        ("Selected: " + m_Project.Scene().Name(*selected).Value).c_str());
                     (void)position;
                 }
                 (void)camera;
@@ -1595,7 +1690,7 @@ export namespace kairo::editor
             m_History.Execute(std::move(command));
             const auto entity = placed->CreatedEntity();
             m_State.Select(entity);
-            m_ViewportController.Focus(m_Project.Scene().Transform(entity).Local.Translation);
+            // Placement selects the entity; camera framing is explicit (F).
         }
 
         void DrawViewportToolButton(EditorAction tool, const char* label)
@@ -1646,8 +1741,7 @@ export namespace kairo::editor
             if (command == nullptr)
             {
                 m_State.Select(created->CreatedEntity());
-                m_ViewportController.Focus(
-                    m_Project.Scene().Transform(created->CreatedEntity()).Local.Translation);
+                // Creating an object does not reposition the editor camera.
             }
         }
 
@@ -1659,7 +1753,7 @@ export namespace kairo::editor
             if (command == nullptr)
             {
                 m_State.Select(created->CreatedEntity());
-                m_ViewportController.Focus(m_Project.Scene().Transform(created->CreatedEntity()).Local.Translation);
+                // Preserve the current authoring view.
             }
         }
 
@@ -1726,7 +1820,7 @@ export namespace kairo::editor
             };
             for (const auto [key, native] : keys)
                 if (ImGui::IsKeyPressed(native, false) &&
-                    ShouldRouteWorldKeyAsAction(key, viewportOwnsKeyboard, modifiers))
+                    ShouldRouteWorldKeyAsAction(key, m_ViewportFlyCursorCaptured, modifiers))
                     (void)m_InputRouter.Route({ { key, modifiers } });
 
             if (!m_Project.HasProject()) return;
@@ -1755,7 +1849,7 @@ export namespace kairo::editor
                 else
                     StopPlay();
             }
-            if (context == InputContext::Scene) DispatchSceneActions();
+            if (context == InputContext::Scene && !m_ViewportFlyCursorCaptured) DispatchSceneActions();
             if (context == InputContext::Graph)
                 for (const EditorAction action : { EditorAction::GraphAddNode, EditorAction::GraphDelete,
                     EditorAction::GraphDuplicate, EditorAction::GraphCopy, EditorAction::GraphPaste,
@@ -1768,6 +1862,8 @@ export namespace kairo::editor
             const auto selected = m_State.SelectedEntity();
             if (!selected.has_value()) return;
             m_ViewportSceneCamera.reset();
+            m_ViewportNavigationProjection.reset();
+            m_ViewportRenderLayers = kairo::engine::AllRenderLayers;
             m_ViewportController.Focus(
                 m_Project.Scene().WorldTransform(*selected).Translation,
                 m_ViewportController.Distance());
@@ -1853,13 +1949,13 @@ export namespace kairo::editor
             const bool pointerFly = pointerNavigation && rightDown;
             m_ViewportFlyCursorCaptured = pointerFly;
 
-            // A focused scene image owns unmodified WASD/QE and arrow keys,
-            // even WITHOUT RMB/Shift. Do not move a world while typing into an
-            // inspector, selecting a menu, or holding Cmd/Ctrl shortcuts.
+            // Flight owns WASD/QE only while an RMB gesture is captured.
+            // Otherwise Q/W/E/R are transform tools; clicking or selecting
+            // does not alter the camera pose.
             const bool viewportKeyboard = keyboardActive && m_ViewportFocused &&
                 !io.WantTextInput && !io.KeySuper && !io.KeyCtrl && !io.KeyAlt &&
                 !ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId);
-            const bool keyboardMove = viewportKeyboard &&
+            const bool keyboardMove = viewportKeyboard && pointerFly &&
                 (ImGui::IsKeyDown(ImGuiKey_W) || ImGui::IsKeyDown(ImGuiKey_A) ||
                  ImGui::IsKeyDown(ImGuiKey_S) || ImGui::IsKeyDown(ImGuiKey_D) ||
                  ImGui::IsKeyDown(ImGuiKey_Q) || ImGui::IsKeyDown(ImGuiKey_E) ||
@@ -1870,7 +1966,10 @@ export namespace kairo::editor
             const bool wheel = hovered &&
                 (io.MouseWheel != 0.0f || io.MouseWheelH != 0.0f);
             if (pointerNavigation || keyboardMove || wheel)
+            {
                 m_ViewportSceneCamera.reset();
+                m_ViewportRenderLayers = kairo::engine::AllRenderLayers;
+            }
 
             if (!pointerNavigation && !keyboardMove && !hovered && !viewportKeyboard) return;
 
@@ -1893,10 +1992,11 @@ export namespace kairo::editor
             input.Dolly = pointerNavigation &&
                 ((m_ViewportDragTool == ViewportDragTool::Zoom && leftDown && !io.KeyAlt) ||
                  (optionLeft && io.KeyCtrl && !io.KeyShift));
-            input.Fly = pointerFly || keyboardMove;
+            input.Fly = pointerFly;
+            if (pointerFly) input.Orbit = input.Pan = input.Dolly = false;
             if (wheel && m_NavigationSettings.ScrollBehavior == ViewportScrollBehavior::Dolly)
                 input.WheelDelta = io.MouseWheel;
-            if (wheel && m_NavigationSettings.ScrollBehavior == ViewportScrollBehavior::Pan)
+            if (wheel && !pointerNavigation && m_NavigationSettings.ScrollBehavior == ViewportScrollBehavior::Pan)
             {
                 input.Pan = true;
                 input.MouseDeltaX = io.MouseWheelH * 24.0f;
@@ -1917,7 +2017,7 @@ export namespace kairo::editor
             }
             if (input.Fly)
             {
-                if (pointerFly) ImGui::SetMouseCursor(ImGuiMouseCursor_None);
+                ImGui::SetMouseCursor(ImGuiMouseCursor_None);
                 input.MoveForward =
                     (ImGui::IsKeyDown(ImGuiKey_W) || ImGui::IsKeyDown(ImGuiKey_UpArrow) ? 1.0f : 0.0f) -
                     (ImGui::IsKeyDown(ImGuiKey_S) || ImGui::IsKeyDown(ImGuiKey_DownArrow) ? 1.0f : 0.0f);
@@ -1927,11 +2027,7 @@ export namespace kairo::editor
                 input.MoveUp =
                     (ImGui::IsKeyDown(ImGuiKey_E) ? 1.0f : 0.0f) -
                     (ImGui::IsKeyDown(ImGuiKey_Q) ? 1.0f : 0.0f);
-                if (!pointerFly)
-                {
-                    input.MouseDeltaX = 0.0f;
-                    input.MouseDeltaY = 0.0f;
-                }
+                if (!keyboardMove) input.MoveForward = input.MoveRight = input.MoveUp = 0.0f;
             }
             m_ViewportController.Update(input, m_NavigationSettings);
         }
@@ -2149,15 +2245,15 @@ export namespace kairo::editor
             return result.Active || result.Hovered;
         }
 
-        void DrawOrientationGizmo(ImVec2 viewportMin, ImVec2 viewportSize)
+        void DrawOrientationGizmo()
         {
             constexpr float button = 26.0f;
             constexpr float spacing = 2.0f;
             constexpr float perspectiveWidth = 48.0f;
             constexpr float cameraWidth = 58.0f;
-            ImGui::SetCursorScreenPos({ viewportMin.x + viewportSize.x -
-                (button * 3.0f + perspectiveWidth + cameraWidth + spacing * 4.0f) - 16.0f,
-                viewportMin.y + 12.0f });
+            ImGui::AlignTextToFramePadding();
+            ImGui::TextDisabled("View");
+            ImGui::SameLine();
             ImGui::PushID("ViewportOrientation");
             if (ImGui::Button("X", { button, button }))
             {
@@ -2537,11 +2633,58 @@ export namespace kairo::editor
             ImGui::TextDisabled("Collider outlines and contact normals are drawn in the viewport.");
         }
 
+        // Type glyphs are drawn from vector strokes instead of emoji, bitmap
+        // placeholders or fake thumbnail images. All share the neutral ink.
+        static void DrawAssetGlyph(ImDrawList& draw, kairo::assets::AssetType type,
+            ImVec2 center, ImU32 ink)
+        {
+            using kairo::assets::AssetType;
+            const float x=center.x,y=center.y;
+            const auto line=[&](float ax,float ay,float bx,float by)
+            { draw.AddLine({x+ax,y+ay},{x+bx,y+by},ink,1.5f); };
+            if (type==AssetType::Mesh || type==AssetType::Scene)
+            {
+                line(0,-15,15,-7);line(15,-7,15,9);line(15,9,0,17);
+                line(0,17,-15,9);line(-15,9,-15,-7);line(-15,-7,0,-15);
+                line(-15,-7,0,1);line(15,-7,0,1);line(0,1,0,17);
+            }
+            else if (type==AssetType::Material)
+            {
+                draw.AddCircle(center,16,ink,32,1.5f);
+                draw.AddEllipse(center,{7,16},ink,0,32,1.2f);
+                line(-15,0,15,0);
+            }
+            else if (type==AssetType::Texture2D)
+            {
+                draw.AddRect({x-16,y-13},{x+16,y+13},ink,2,0,1.5f);
+                draw.AddCircle({x+7,y-6},3,ink,12,1.3f);
+                line(-13,10,-5,-1);line(-5,-1,1,5);line(1,5,6,0);line(6,0,13,10);
+            }
+            else if (type==AssetType::Audio)
+            {
+                for (int i=-3;i<=3;++i)
+                {
+                    const float length=5.0f+float(3-std::abs(i))*3.5f;
+                    line(float(i)*5,-length,float(i)*5,length);
+                }
+            }
+            else
+            {
+                line(-12,-16,4,-16);line(4,-16,12,-8);line(12,-8,12,16);
+                line(12,16,-12,16);line(-12,16,-12,-16);line(4,-16,4,-8);
+                line(4,-8,12,-8);line(-7,-2,7,-2);line(-7,4,7,4);line(-7,10,3,10);
+            }
+        }
+
         void DrawContentBrowser()
         {
-            (void)SearchField("##AssetFilter", "Filter assets", m_AssetFilter.data(), m_AssetFilter.size());
+            if (ToolbarButton("Grid", m_AssetGrid)) m_AssetGrid=true;
             ImGui::SameLine();
-            if (ImGui::SmallButton("Refresh")) m_RefreshAssetWorkspace = true;
+            if (ToolbarButton("List", !m_AssetGrid)) m_AssetGrid=false;
+            ImGui::SameLine();
+            if (ActionButton("Refresh")) m_RefreshAssetWorkspace = true;
+            ImGui::SameLine();
+            (void)SearchField("##AssetFilter", "Search assets by path or type", m_AssetFilter.data(), m_AssetFilter.size());
 
             const auto records = m_Project.Assets().Snapshot();
             const std::string filter = Lower(m_AssetFilter.data());
@@ -2558,24 +2701,6 @@ export namespace kairo::editor
                 }
                 return "Unknown";
             };
-            const auto previewName = [](kairo::assets::AssetType type) -> const char*
-            {
-                using kairo::assets::AssetType;
-                switch (type)
-                {
-                    case AssetType::Mesh: return "[MESH]";
-                    case AssetType::Material: return "[MAT]";
-                    case AssetType::Texture2D: return "[TEX]";
-                    case AssetType::Scene: return "[SCN]";
-                    case AssetType::Shader: return "[SHD]";
-                    case AssetType::Audio: return "[AUD]";
-                    case AssetType::Script: return "[SCR]";
-                    case AssetType::Document: return "[DOC]";
-                    case AssetType::Other: return "[---]";
-                }
-                return "[---]";
-            };
-
             // Fingerprinting is deliberately snapshot-driven rather than a
             // per-frame operation. ImportDatabase::Evaluate hashes source bytes;
             // doing that for every row every ImGui frame would make browser cost
@@ -2611,16 +2736,22 @@ export namespace kairo::editor
             else m_AssetWorkspaceSnapshot.reset();
 
             std::size_t visible = 0u;
-            if (ImGui::BeginTable("AssetRegistry", 5,
-                ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_ScrollY |
-                ImGuiTableFlags_Resizable | ImGuiTableFlags_SizingStretchProp))
+            const float width=ImGui::GetContentRegionAvail().x;
+            const int columns=m_AssetGrid?std::clamp(static_cast<int>(width/120.0f),1,12):4;
+            const ImGuiTableFlags flags=ImGuiTableFlags_ScrollY | ImGuiTableFlags_SizingStretchProp |
+                (m_AssetGrid?ImGuiTableFlags_None:ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_Resizable);
+            if (ImGui::BeginTable(m_AssetGrid?"AssetGrid":"AssetRegistry", columns, flags,
+                ImVec2(0.0f, std::max(30.0f, ImGui::GetContentRegionAvail().y - ImGui::GetTextLineHeightWithSpacing()))))
             {
-                ImGui::TableSetupColumn("Preview", ImGuiTableColumnFlags_WidthFixed, 64.0f);
-                ImGui::TableSetupColumn("State", ImGuiTableColumnFlags_WidthFixed, 82.0f);
-                ImGui::TableSetupColumn("Type", ImGuiTableColumnFlags_WidthFixed, 76.0f);
-                ImGui::TableSetupColumn("Path");
-                ImGui::TableSetupColumn("Info", ImGuiTableColumnFlags_WidthFixed, 72.0f);
-                ImGui::TableHeadersRow();
+                if (!m_AssetGrid)
+                {
+                    ImGui::TableSetupColumn("Asset");
+                    ImGui::TableSetupColumn("Type", ImGuiTableColumnFlags_WidthFixed, 76.0f);
+                    ImGui::TableSetupColumn("State", ImGuiTableColumnFlags_WidthFixed, 82.0f);
+                    ImGui::TableSetupColumn("Revision", ImGuiTableColumnFlags_WidthFixed, 72.0f);
+                    ImGui::TableSetupScrollFreeze(0,1);
+                    ImGui::TableHeadersRow();
+                }
                 for (const auto& asset : records)
                 {
                     const std::string path = asset.Path.generic_string();
@@ -2652,21 +2783,36 @@ export namespace kairo::editor
                     ++visible;
                     m_AssetThumbnailScheduler.Request(asset);
 
-                    ImGui::TableNextRow();
-                    ImGui::TableSetColumnIndex(0);
-                    ImGui::TextDisabled("%s", previewName(asset.Type));
-                    if (SupportsAssetThumbnail(asset.Type) && ImGui::IsItemHovered())
-                        ImGui::SetTooltip("Thumbnail requested for revision %llu",
-                            static_cast<unsigned long long>(asset.Revision));
-
-                    ImGui::TableSetColumnIndex(1);
-                    ImGui::TextUnformatted(statusName(status));
-                    ImGui::TableSetColumnIndex(2);
-                    ImGui::TextUnformatted(type.c_str());
-                    ImGui::TableSetColumnIndex(3);
-                    const std::string row = path + "##" + asset.ID.ToString();
-                    ImGui::Selectable(row.c_str(), false,
-                        ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_AllowDoubleClick);
+                    const std::string id=asset.ID.ToString();
+                    ImGui::PushID(id.c_str());
+                    if (m_AssetGrid)
+                    {
+                        ImGui::TableNextColumn();
+                        const float tileWidth=std::max(1.0f,ImGui::GetContentRegionAvail().x);
+                        if (ImGui::Selectable("##Asset",m_SelectedBrowserAsset==asset.ID,
+                            ImGuiSelectableFlags_AllowDoubleClick,{tileWidth,92.0f}))
+                            m_SelectedBrowserAsset=asset.ID;
+                        const auto min=ImGui::GetItemRectMin(),max=ImGui::GetItemRectMax();
+                        auto& draw=*ImGui::GetWindowDrawList();
+                        const bool active=m_SelectedBrowserAsset==asset.ID;
+                        draw.AddRect({min.x+1,min.y+1},{max.x-1,max.y-1},
+                            ImGui::GetColorU32(active?ImGuiCol_SliderGrab:ImGuiCol_Border),3.0f,0,1.0f);
+                        draw.PushClipRect({min.x+6,min.y+3},{max.x-6,max.y-3},true);
+                        DrawAssetGlyph(draw,asset.Type,{(min.x+max.x)*.5f,min.y+30},
+                            ImGui::GetColorU32(ImGuiCol_TextDisabled));
+                        const auto name=asset.Path.filename().generic_string();
+                        draw.AddText({min.x+8,min.y+54},ImGui::GetColorU32(ImGuiCol_Text),name.c_str());
+                        draw.AddText({min.x+8,min.y+72},ImGui::GetColorU32(ImGuiCol_TextDisabled),type.c_str());
+                        draw.PopClipRect();
+                    }
+                    else
+                    {
+                        ImGui::TableNextRow();
+                        ImGui::TableSetColumnIndex(0);
+                        if (ImGui::Selectable(path.c_str(),m_SelectedBrowserAsset==asset.ID,
+                            ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_AllowDoubleClick))
+                            m_SelectedBrowserAsset=asset.ID;
+                    }
                     if (asset.Type == kairo::assets::AssetType::Document &&
                         ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
                         OpenDocument(asset.Path);
@@ -2729,9 +2875,15 @@ export namespace kairo::editor
                         asset.ID.ToString().c_str(), kairo::assets::NameOfAssetOrigin(asset.Origin).data(),
                         statusName(status));
 
-                    ImGui::TableSetColumnIndex(4);
-                    ImGui::Text("r%llu", static_cast<unsigned long long>(asset.Revision));
-                    if (!blockers.empty()) ImGui::TextDisabled("%zu deps", blockers.size());
+                    if (!m_AssetGrid)
+                    {
+                        ImGui::TableSetColumnIndex(1);ImGui::TextUnformatted(type.c_str());
+                        ImGui::TableSetColumnIndex(2);ImGui::TextUnformatted(statusName(status));
+                        ImGui::TableSetColumnIndex(3);
+                        ImGui::Text("r%llu", static_cast<unsigned long long>(asset.Revision));
+                        if (!blockers.empty()) ImGui::TextDisabled("%zu deps", blockers.size());
+                    }
+                    ImGui::PopID();
                 }
                 ImGui::EndTable();
             }

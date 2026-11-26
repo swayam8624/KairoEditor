@@ -224,8 +224,8 @@ export namespace kairo::editor
         return result;
     }
 
-    /// Movement keys belong exclusively to the world camera while the image
-    /// has keyboard focus. A separate modifier chord (Cmd/Ctrl+...) is still
+    /// Movement keys belong exclusively to the world camera during captured
+    /// free-flight. Mere viewport focus retains editing shortcuts. A separate modifier chord (Cmd/Ctrl+...) is still
     /// routed to global actions such as Save or Undo.
     [[nodiscard]] constexpr bool IsViewportMotionKey(EditorKey key) noexcept
     {
@@ -239,9 +239,9 @@ export namespace kairo::editor
     }
 
     [[nodiscard]] constexpr bool ShouldRouteWorldKeyAsAction(
-        EditorKey key, bool viewportOwnsKeyboard, KeyModifiers modifiers) noexcept
+        EditorKey key, bool flightCaptured, KeyModifiers modifiers) noexcept
     {
-        if (!viewportOwnsKeyboard || !IsViewportMotionKey(key)) return true;
+        if (!flightCaptured || !IsViewportMotionKey(key)) return true;
         const auto bits = static_cast<std::uint8_t>(modifiers);
         return (bits & (static_cast<std::uint8_t>(KeyModifiers::Shortcut) |
             static_cast<std::uint8_t>(KeyModifiers::Alt))) != 0u;

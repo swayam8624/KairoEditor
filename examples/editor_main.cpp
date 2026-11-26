@@ -1,3 +1,5 @@
+#include "../detail/SelectionBounds.hpp"
+#include <array>
 #include <charconv>
 #include <cerrno>
 #include <chrono>
@@ -37,11 +39,12 @@ import Kairo.Editor.SceneRenderBridge;
 import Kairo.Editor.AnimationPreview;
 import Kairo.EngineCore;
 import Kairo.Renderer;
+import Kairo.Foundation.Math;
+import Kairo.Renderer.DebugDraw;
 #if defined(KAIRO_EDITOR_HAS_OFFLINE_RENDER)
 import Kairo.Runtime.RenderBridge.EditorOfflineService;
 import Kairo.Runtime.RenderBridge.SceneSnapshot;
 import Kairo.Foundation.RayTracer;
-import Kairo.Foundation.Math;
 import Kairo.Foundation.Geometry.Triangle;
 #endif
 #if defined(KAIRO_EDITOR_HAS_AI_CLOUD)
@@ -498,6 +501,19 @@ int main(int argc, char** argv)
         kairo::editor::EditorState state(project.Scene());
         if (const auto entities = project.Scene().Entities(); !entities.empty()) state.Select(entities.front());
         kairo::editor::RenderAssetBindings renderAssets(project.Assets());
+        using kairo::editor::detail::MeshBounds;
+        std::unordered_map<kairo::renderer::MeshHandle,MeshBounds> selectionBounds;
+        // Cache geometry bounds at upload, for both native meshes and glTF
+        // primitives. Never read vertices back from the GPU per frame.
+        const auto uploadMesh = [&](const kairo::renderer::Mesh& mesh)
+        {
+            const auto handle=renderer.CreateMesh(mesh);
+            kairo::editor::detail::BoundsBuilder builder;
+            for (const auto& vertex:mesh.Vertices())
+                (void)builder.Add({vertex.Position.x,vertex.Position.y,vertex.Position.z});
+            if (builder.Result()) selectionBounds.emplace(handle,*builder.Result());
+            return handle;
+        };
         kairo::assets::ImportDatabase meshImports;
         const kairo::assets::DerivedDataCache derivedCache(
             project.ProjectRoot() / ".kairo" / "derived-data");
@@ -578,14 +594,14 @@ int main(int argc, char** argv)
             {
                 auto imported = kairo::editor::ImportRenderMesh(
                     project.ProjectRoot(), { asset.ID }, project.Assets(), meshImports, derivedCache);
-                renderAssets.BindMesh({ asset.ID }, renderer.CreateMesh(imported.Geometry));
+                renderAssets.BindMesh({ asset.ID }, uploadMesh(imported.Geometry));
 #if defined(KAIRO_EDITOR_HAS_OFFLINE_RENDER)
                 offlineMeshes.emplace(asset.ID, std::move(imported.Geometry));
 #endif
             }
             else if (const auto builtin = kairo::editor::MakeBuiltinRenderMesh(asset); builtin.has_value())
             {
-                renderAssets.BindMesh({ asset.ID }, renderer.CreateMesh(*builtin));
+                renderAssets.BindMesh({ asset.ID }, uploadMesh(*builtin));
 #if defined(KAIRO_EDITOR_HAS_OFFLINE_RENDER)
                 offlineMeshes.emplace(asset.ID, *builtin);
 #endif
@@ -633,7 +649,7 @@ int main(int argc, char** argv)
             std::vector<kairo::renderer::MeshHandle> meshHandles;
             meshHandles.reserve(imported.RenderAsset.Primitives.size());
             for (const auto& primitive : imported.RenderAsset.Primitives)
-                meshHandles.push_back(renderer.CreateMesh(primitive.Geometry));
+                meshHandles.push_back(uploadMesh(primitive.Geometry));
             renderAssets.BindGltfScene({ asset.ID }, std::move(imported.Source),
                 imported.RenderAsset, meshHandles);
 #if defined(KAIRO_EDITOR_HAS_OFFLINE_RENDER)
@@ -846,10 +862,31 @@ int main(int argc, char** argv)
             }
             const auto camera = shell.ViewportCamera();
             renderer.SetCameraPose(camera);
-            renderer.SubmitRenderScene(kairo::editor::BuildRenderScene(
+            auto renderScene=kairo::editor::BuildRenderScene(
                 shell.RenderScene(), renderAssets, animationPreview.Overrides(),
-                shell.ViewportRenderLayers()));
-            renderer.SubmitDebugDraw(shell.PhysicsDebugDraw());
+                shell.ViewportRenderLayers());
+            auto debug=shell.PhysicsDebugDraw();
+            if (const auto selected=state.SelectedEntity(); selected.has_value())
+            {
+                using namespace kairo::foundation::math;
+                // Real draw IDs and model matrices are the selection authority,
+                // including imported child primitives and parent transforms.
+                // Skinned bounds are bind-pose approximations, not silhouettes.
+                for (const auto& draw:renderScene.Draws())
+                {
+                    if (draw.ObjectID!=selected->Value) continue;
+                    const auto found=selectionBounds.find(draw.Mesh);
+                    if (found==selectionBounds.end()) continue;
+                    const auto local=kairo::editor::detail::BoundsCorners(found->second);
+                    std::array<Vec3f,8> world{};
+                    for (unsigned i=0;i<world.size();++i)
+                        world[i]=TransformPoint(draw.Model,Vec3f{local[i][0],local[i][1],local[i][2]});
+                    for (const auto& edge:kairo::editor::detail::BoundsEdges)
+                        debug.AddLine(world[edge[0]],world[edge[1]],{0.16f,0.48f,1.0f,1.0f});
+                }
+            }
+            renderer.SubmitRenderScene(renderScene);
+            renderer.SubmitDebugDraw(debug);
             renderer.SetViewportShadingMode(shell.ViewportShading());
             if (options.Screenshot.has_value() && renderedFrames == 1u)
                 renderer.RequestViewportCapture();

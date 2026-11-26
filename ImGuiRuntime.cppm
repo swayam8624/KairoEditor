@@ -62,12 +62,30 @@ export namespace kairo::editor
 #if defined(__APPLE__)
                 io.ConfigMacOSXBehaviors = true;
 #endif
+                // Use a native sans face when available; never depend on a
+                // downloaded font or an absolute developer-machine path.
+                ImFont* uiFont = nullptr;
 #if defined(KAIRO_EDITOR_UI_FONT_PATH)
-                if (io.Fonts->AddFontFromFileTTF(KAIRO_EDITOR_UI_FONT_PATH, 15.0f) == nullptr)
-                    io.Fonts->AddFontDefault();
+                uiFont = io.Fonts->AddFontFromFileTTF(KAIRO_EDITOR_UI_FONT_PATH, 15.0f);
 #else
-                io.Fonts->AddFontDefault();
+#if defined(__APPLE__)
+                constexpr const char* systemFont = "/System/Library/Fonts/Supplemental/Arial.ttf";
+#elif defined(_WIN32)
+                constexpr const char* systemFont = "C:/Windows/Fonts/segoeui.ttf";
+#else
+                constexpr const char* systemFont = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf";
 #endif
+                std::error_code fontError;
+                if (std::filesystem::is_regular_file(systemFont, fontError))
+                    uiFont = io.Fonts->AddFontFromFileTTF(systemFont, 15.0f);
+#endif
+                if (uiFont == nullptr)
+                {
+                    ImFontConfig config;
+                    config.SizePixels = 15.0f;
+                    uiFont = io.Fonts->AddFontDefault(&config);
+                }
+                io.FontDefault = uiFont;
 #if defined(KAIRO_EDITOR_MONO_FONT_PATH)
                 (void)io.Fonts->AddFontFromFileTTF(KAIRO_EDITOR_MONO_FONT_PATH, 14.0f);
 #endif
