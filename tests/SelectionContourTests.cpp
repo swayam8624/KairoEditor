@@ -37,8 +37,9 @@ int main()
     const auto ortho=TraceContour(*solid,identity,{100,100,100},ContourPoint{0,0,-1});
     Check(ortho&&ortho->size()==3,"tetra orthographic");
     const auto mirrored=TraceContour(*solid,[](ContourPoint p){p[0]*=-2;p[1]*=3;return p;},
-        {0,0,-10},ContourPoint{0,0,-1});
+        {0,0,-10},ContourPoint{0,0,-1},MaximumContourLines,true);
     Check(mirrored&&mirrored->size()==3,"mirror and nonuniform scale");
+    for(const auto& e:*mirrored)Check(e[0][2]==0&&e[1][2]==0,"mirror retains base silhouette");
     std::mt19937 rng(2026);
     std::uniform_real_distribution<float> shift(-100,100),scale(.1f,10);
     for(unsigned k=0;k<10000;++k)
