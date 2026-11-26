@@ -301,6 +301,9 @@ export namespace kairo::editor
         void ReportHostError(std::string message)
         {
             m_LastError = std::move(message);
+            m_Diagnostics.ReplaceProducer("runtime-host",{{"runtime-host","HOST_ERROR",DiagnosticSeverity::Error,
+                m_LastError,std::monostate{}}});
+            m_State.Panels().SetVisible(Panel::Console,true);
             m_RequestErrorPopup = true;
         }
 
@@ -768,7 +771,7 @@ export namespace kairo::editor
                 if (ActionButton("Play", UIButtonTone::Primary))
                     RunCommand([this]
                     {
-                        if (BuildLogicForPlay()) m_RuntimeLaunchRequested = true;
+                        if (BuildLogicForPlay(false)) m_RuntimeLaunchRequested = true;
                     });
                 if (ImGui::IsItemHovered())
                     ImGui::SetTooltip("Launch the project's real runtime in a separate game window");
@@ -1854,7 +1857,7 @@ export namespace kairo::editor
                 if (m_State.Mode() == EditorMode::Edit)
                     RunCommand([this]
                     {
-                        if (BuildLogicForPlay()) m_RuntimeLaunchRequested = true;
+                        if (BuildLogicForPlay(false)) m_RuntimeLaunchRequested = true;
                     });
                 else
                     StopPlay();
@@ -3207,7 +3210,7 @@ export namespace kairo::editor
                 }
                 const bool ok=!HasErrors(diagnostics);
                 if (ok) messages.push_back({producer,"SCRIPT_OK",DiagnosticSeverity::Information,
-                    "Compile check passed (no files written).",AssetDiagnosticTarget{id}});
+                    "Last compile check passed (no files written).",AssetDiagnosticTarget{id}});
                 m_Diagnostics.ReplaceProducer(producer,std::move(messages));
                 m_State.Panels().SetVisible(Panel::Console,true);
                 return ok;
@@ -3221,7 +3224,7 @@ export namespace kairo::editor
             }
         }
 
-        bool BuildLogicForPlay()
+        bool BuildLogicForPlay(bool publish=true)
         {
             // Preflight every open attached script, including its unsaved text.
             // A failed check must not save or launch the game.
@@ -3242,6 +3245,7 @@ export namespace kairo::editor
             try
             {
                 SaveAllWithDrafts();
+                if (!publish) return true; // host compiles before launching the Player
                 const auto built=BuildProjectLogic(m_Project.ProjectFile());
                 m_Diagnostics.ReplaceProducer("script-build",{{"script-build","BUILD_OK",
                     DiagnosticSeverity::Information,"Built "+std::to_string(built.size())+
