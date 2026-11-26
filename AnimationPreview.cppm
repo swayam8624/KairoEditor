@@ -147,11 +147,9 @@ export namespace kairo::editor
                 duration,ImGui::GetIO().DeltaTime,state.Speed,state.Loop);
             state.TimeSeconds=clock.Time;
             state.Playing=clock.Playing;
-            if(duration>0&&ImGui::SliderFloat("Time",&state.TimeSeconds,0,duration,"%.3f s"))
-            {
-                state.Playing=false;
-                state.Enabled=true;
-            }
+            float fraction=duration>0?state.TimeSeconds/duration:0;
+            if(duration>0&&ImGui::SliderFloat("Scrub",&fraction,0,1,"%.3f"))
+                Seek(detail::TimelineTimeAt(fraction,duration));
             ImGui::TextDisabled("%zu tracks | %.3f / %.3f s",
                 clip.Channels.size(),state.TimeSeconds,duration);
 
@@ -285,8 +283,8 @@ export namespace kairo::editor
                     const unsigned bins=static_cast<unsigned>(std::clamp(width/4.f,1.f,256.f));
                     for(unsigned j=0;j<bins;++j)
                     {
-                        const float a=duration*float(j)/float(bins);
-                        const float b=duration*float(j+1)/float(bins);
+                        const float a=duration*(float(j)/float(bins));
+                        const float b=duration*(float(j+1)/float(bins));
                         if(!detail::HasKeyInBin(keys,a,b,j+1==bins))continue;
                         const float x=p.x+width*(float(j)+.5f)/float(bins);
                         const float y=p.y+height*.5f;
@@ -303,6 +301,23 @@ export namespace kairo::editor
             const auto& active=clip.Channels[state.TrackIndex];
             ImGui::TextDisabled("%s | %s | %zu keys",
                 PathName(active.Path),InterpolationName(active.Interpolation),active.Keyframes.size());
+            // Inspect the authored key nearest at or before the playhead.
+            // Rotation is the source quaternion (x,y,z,w), not Euler angles.
+            const auto after=std::upper_bound(active.Keyframes.begin(),active.Keyframes.end(),state.TimeSeconds,
+                [](float t,const auto& key){return t<key.TimeSeconds;});
+            if(!active.Keyframes.empty())
+            {
+                const auto& key=after==active.Keyframes.begin()?*after:*(after-1);
+                ImGui::Text("Source key %.3f s | %zu of %zu",key.TimeSeconds,
+                    static_cast<std::size_t>(&key-active.Keyframes.data())+1,active.Keyframes.size());
+                ImGui::SameLine();
+                if(ImGui::SmallButton("Jump to key"))Seek(key.TimeSeconds);
+                if(active.Path==kairo::assets::GltfAnimationPath::Rotation)
+                    ImGui::Text("Quaternion: %.4f, %.4f, %.4f, %.4f",
+                        key.Value[0],key.Value[1],key.Value[2],key.Value[3]);
+                else
+                    ImGui::Text("XYZ: %.4f, %.4f, %.4f",key.Value[0],key.Value[1],key.Value[2]);
+            }
         }
     };
 }
