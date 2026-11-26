@@ -1,4 +1,5 @@
 #include "../detail/SelectionBounds.hpp"
+#include "../detail/SelectionContour.hpp"
 #include "../detail/AssetPreviewPixels.hpp"
 #include <vector>
 #include <array>
@@ -506,6 +507,8 @@ int main(int argc, char** argv)
         kairo::editor::RenderAssetBindings renderAssets(project.Assets());
         using kairo::editor::detail::MeshBounds;
         std::unordered_map<kairo::renderer::MeshHandle,MeshBounds> selectionBounds;
+        std::unordered_map<kairo::renderer::MeshHandle,kairo::editor::detail::ContourTopology> selectionContours;
+        std::size_t cachedContourFaces=0;
         // Cache geometry bounds at upload, for both native meshes and glTF
         // primitives. Never read vertices back from the GPU per frame.
         const auto uploadMesh = [&](const kairo::renderer::Mesh& mesh)
@@ -515,6 +518,17 @@ int main(int argc, char** argv)
             for (const auto& vertex:mesh.Vertices())
                 (void)builder.Add({vertex.Position.x,vertex.Position.y,vertex.Position.z});
             if (builder.Result()) selectionBounds.emplace(handle,*builder.Result());
+            using namespace kairo::editor::detail;
+            if(!mesh.IsSkinned())
+                if(auto contour=BuildContourTopology(mesh.Vertices().size(),mesh.Indices(),
+                    [&](std::size_t i){
+                        const auto& p=mesh.Vertices()[i].Position;
+                        return ContourPoint{p.x,p.y,p.z};
+                    },MaximumCachedContourFaces-cachedContourFaces))
+                {
+                    cachedContourFaces+=mesh.Indices().size()/3;
+                    selectionContours.emplace(handle,std::move(*contour));
+                }
             return handle;
         };
         // Preview data is derived only from already imported, validated CPU
@@ -925,12 +939,46 @@ int main(int argc, char** argv)
             if (const auto selected=state.SelectedEntity(); selected.has_value())
             {
                 using namespace kairo::foundation::math;
-                // Real draw IDs and model matrices are the selection authority,
-                // including imported child primitives and parent transforms.
-                // Skinned bounds are bind-pose approximations, not silhouettes.
+                using namespace kairo::editor::detail;
+                const ContourPoint eye{camera.Position.x,camera.Position.y,camera.Position.z};
+                std::optional<ContourPoint> towardEye;
+                if(camera.Projection==kairo::renderer::CameraProjectionMode::Orthographic)
+                {
+                    const auto direction=camera.Position-camera.Target;
+                    towardEye=ContourPoint{direction.x,direction.y,direction.z};
+                }
+                std::size_t remainingFaces=MaximumCachedContourFaces;
+                std::size_t remainingLines=MaximumContourLines;
+                // Real draw IDs and model matrices are the selection authority.
+                // Trace only the selected static geometry; oversized, skinned,
+                // or budget-exhausted draws use the established bounds fallback.
                 for (const auto& draw:renderScene.Draws())
                 {
                     if (draw.ObjectID!=selected->Value) continue;
+                    const auto contour=selectionContours.find(draw.Mesh);
+                    if(contour!=selectionContours.end()&&
+                        contour->second.Faces.size()<=remainingFaces&&remainingLines>0)
+                    {
+                        remainingFaces-=contour->second.Faces.size();
+                        const auto& m=draw.Model;
+                        const double determinant=double(m(0,0))*(double(m(1,1))*m(2,2)-double(m(1,2))*m(2,1))
+                            -double(m(0,1))*(double(m(1,0))*m(2,2)-double(m(1,2))*m(2,0))
+                            +double(m(0,2))*(double(m(1,0))*m(2,1)-double(m(1,1))*m(2,0));
+                        const auto lines=TraceContour(contour->second,[&](ContourPoint p){
+                            const auto q=TransformPoint(draw.Model,Vec3f{p[0],p[1],p[2]});
+                            return ContourPoint{q.x,q.y,q.z};
+                        },eye,towardEye,remainingLines,determinant<0.0);
+                        if(lines&&!lines->empty())
+                        {
+                            remainingLines-=lines->size();
+                            for(const auto& line:*lines)
+                                debug.AddLine({line[0][0],line[0][1],line[0][2]},
+                                    {line[1][0],line[1][1],line[1][2]},{0.16f,0.48f,1.0f,1.0f});
+                            continue;
+                        }
+                    }
+                    if(remainingLines<BoundsEdges.size())continue;
+                    remainingLines-=BoundsEdges.size();
                     const auto found=selectionBounds.find(draw.Mesh);
                     if (found==selectionBounds.end()) continue;
                     const auto local=kairo::editor::detail::BoundsCorners(found->second);
