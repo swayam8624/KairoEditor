@@ -19,7 +19,7 @@ set(KAIRO_EDITOR_NATIVE_GAMEPLAY_TARGETS "" CACHE STRING
 
 # Immutable standalone fallback revisions. Local source directories and sibling
 # checkouts still take precedence for active workspace development.
-set(KAIRO_EDITOR_CORE_REVISION ae055592a0ca5d62f74dfde33a2686a7bcda5ec2)
+set(KAIRO_EDITOR_CORE_REVISION 29d7f6bd1efec3eb17df49abdf8a99ec300945e7)
 set(KAIRO_EDITOR_RENDERER_REVISION 9d692020f3e51d22a087ad6e426bda4bf002b876)
 set(KAIRO_EDITOR_REALTIME_BRIDGE_REVISION c5b6781a13aa805221e58ba3bd32d1ecb942546e)
 set(KAIRO_EDITOR_AI_REVISION 34d6b79727ea0bf11a369244e03c32895da9bd14)
