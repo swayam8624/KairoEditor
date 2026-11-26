@@ -374,8 +374,12 @@ namespace
     // a row never replays host effects or changes the player's physics state.
     class LogicTracePanel
     {
-        bool m_Enabled=false;
+        bool m_Enabled=false,m_BreakFirst=false,m_UseBreakpoint=false;
+        std::optional<kairo::editor::detail::TraceRow> m_Breakpoint;
         std::optional<kairo::assets::AssetID> m_Session;
+        std::uint32_t m_LiveStop=0,m_SentStop=0;
+        std::string m_LiveState,m_LiveError;
+        std::optional<kairo::editor::detail::TraceRow> m_LiveRow;
         kairo::editor::detail::TraceCapture m_Capture;
         std::array<char,128> m_Filter{};
         std::size_t m_Selected=0;
@@ -383,16 +387,30 @@ namespace
         std::uintmax_t m_LastSize=0;
         std::chrono::steady_clock::time_point m_LastPoll{};
     public:
-        [[nodiscard]] std::optional<kairo::assets::AssetID> NextSession() const
+        [[nodiscard]] std::optional<kairo::assets::AssetID> NextSession(const std::filesystem::path& root) const
         {
             if(!m_Enabled)return std::nullopt;
-            return kairo::assets::GenerateAssetID();
+            const auto id=kairo::assets::GenerateAssetID();
+            if(m_BreakFirst||(m_UseBreakpoint&&m_Breakpoint))
+            {
+                const auto base=root/".kairo",logs=base/"logs";
+                const auto path=logs/("logic-"+id.ToString()+".debug");
+                if(std::filesystem::is_symlink(base)||std::filesystem::is_symlink(logs)||
+                    std::filesystem::is_symlink(path)||std::filesystem::exists(path))
+                    throw std::runtime_error("Debug configuration path rejected.");
+                const std::string config=m_BreakFirst?"first\n":
+                    "break "+m_Breakpoint->Document+" "+m_Breakpoint->Revision+" "+
+                    std::to_string(m_Breakpoint->PC)+"\n";
+                kairo::engine::SaveTextFileAtomically(path,config,"logic debug configuration");
+            }
+            return id;
         }
         void Start(kairo::assets::AssetID id)
         {
             m_Session=id;m_Capture={};m_Selected=0;m_LastSize=0;
             m_Status="Waiting for Player trace.";
-            m_LastPoll={};
+            m_LastPoll={};m_LiveStop=m_SentStop=0;m_LiveState.clear();
+            m_LiveError.clear();m_LiveRow.reset();
         }
         void Draw(const std::filesystem::path& root,bool supported)
         {
@@ -401,7 +419,13 @@ namespace
             if(!supported)m_Enabled=false;
             ImGui::BeginDisabled(!supported);
             ImGui::Checkbox("Capture next Play session",&m_Enabled);
+            ImGui::BeginDisabled(!m_Enabled);
+            if(ImGui::Checkbox("Break on first instruction",&m_BreakFirst)&&m_BreakFirst)m_UseBreakpoint=false;
+            if(ImGui::Checkbox("Use selected breakpoint on next Play",&m_UseBreakpoint)&&m_UseBreakpoint)m_BreakFirst=false;
             ImGui::EndDisabled();
+            ImGui::EndDisabled();
+            if(m_Breakpoint)ImGui::TextWrapped("Breakpoint: %s | PC %u",m_Breakpoint->Document.c_str(),m_Breakpoint->PC);
+            else if(m_UseBreakpoint)ImGui::TextDisabled("Select a recorded instruction first.");
             ImGui::TextDisabled("Recorded steps | pre-instruction registers | max 4096 records");
             if(!supported)ImGui::TextDisabled("Custom Play executable: capture unavailable.");
             if(!m_Session){ImGui::TextDisabled("Enable capture, then press Play.");ImGui::End();return;}
@@ -436,7 +460,9 @@ namespace
                     }
                 }
                 catch(const std::exception& e){m_Status=e.what();}
+                try{ReadLive(root);}catch(const std::exception& e){m_LiveError=e.what();}
             }
+            DrawLive(root);
             if(!m_Status.empty())ImGui::TextWrapped("%s",m_Status.c_str());
             if(m_Capture.LimitReached)ImGui::TextDisabled("Capture limit reached.");
             if(!m_Capture.Error.empty())ImGui::TextWrapped("Runtime error: %s",m_Capture.Error.c_str());
@@ -451,6 +477,8 @@ namespace
             if(ImGui::Button("Next recorded step"))++m_Selected;
             ImGui::EndDisabled();
             const auto& selected=m_Capture.Rows[m_Selected];
+            if(ImGui::Button("Set selected instruction as breakpoint"))
+            {m_Breakpoint=selected;m_UseBreakpoint=true;m_BreakFirst=false;m_Enabled=true;}
             ImGui::Text("Step %u | Entity %u | %s | PC %u | %s",
                 selected.Sequence,selected.Entity,selected.Event.c_str(),selected.PC,selected.Opcode.c_str());
             ImGui::TextWrapped("Document: %s",selected.Document.c_str());
@@ -493,6 +521,81 @@ namespace
                 ImGui::EndTable();
             }
             ImGui::End();
+        }
+    private:
+        std::filesystem::path LivePath(const std::filesystem::path& root,std::string_view suffix) const
+        {
+            const auto base=root/".kairo",logs=base/"logs";
+            const auto path=logs/("logic-"+m_Session->ToString()+std::string(suffix));
+            if(std::filesystem::is_symlink(base)||std::filesystem::is_symlink(logs)||std::filesystem::is_symlink(path))
+                throw std::runtime_error("Linked debug path rejected.");
+            return path;
+        }
+        void ReadLive(const std::filesystem::path& root)
+        {
+            using namespace kairo::editor::detail;
+            const auto path=LivePath(root,".pause");
+            if(!std::filesystem::exists(path))return;
+            if(!std::filesystem::is_regular_file(path))throw std::runtime_error("Invalid live debug state.");
+            std::ifstream in(path,std::ios::binary);
+            std::array<char,2049> buffer{};
+            if(!in)throw std::runtime_error("Cannot open live debug state.");
+            in.read(buffer.data(),static_cast<std::streamsize>(buffer.size()));
+            if(in.bad()||in.gcount()>2048)throw std::runtime_error("Live debug state exceeds budget.");
+            std::string_view bytes(buffer.data(),static_cast<std::size_t>(in.gcount()));
+            const auto first=bytes.find('\n');
+            if(first==std::string_view::npos||bytes.substr(0,first)!="kairo.logic.pause.v1 "+m_Session->ToString())
+                throw std::runtime_error("Live debug session mismatch.");
+            bytes.remove_prefix(first+1);
+            const auto second=bytes.find('\n');
+            if(second==std::string_view::npos)throw std::runtime_error("Incomplete live debug state.");
+            auto line=bytes.substr(0,second);
+            const auto state=TraceToken(line);
+            const auto stop=TraceNumber(line);
+            bytes.remove_prefix(second+1);
+            if(stop==0||stop>4096||stop<m_LiveStop||
+                (state!="paused"&&state!="running"&&state!="detached"&&state!="timeout"))
+                throw std::runtime_error("Invalid live debug state.");
+            std::optional<TraceRow> row;
+            if(state=="paused")
+            {
+                auto capture=ParseTrace("kairo.logic.trace.v1 "+m_Session->ToString()+"\n"+std::string(bytes),
+                    m_Session->ToString());
+                if(capture.Rows.size()!=1)throw std::runtime_error("Invalid paused instruction.");
+                row=std::move(capture.Rows.front());
+            }
+            else if(!bytes.empty())throw std::runtime_error("Unexpected live debug record.");
+            m_LiveStop=stop;m_LiveState=state;m_LiveRow=std::move(row);m_LiveError.clear();
+        }
+        void SendLive(const std::filesystem::path& root,std::string_view action)
+        {
+            try
+            {
+                if(m_LiveState!="paused"||m_SentStop==m_LiveStop)return;
+                const auto path=LivePath(root,".cmd-"+std::to_string(m_LiveStop));
+                if(std::filesystem::exists(path))throw std::runtime_error("Command already exists for this stop.");
+                kairo::engine::SaveTextFileAtomically(path,std::to_string(m_LiveStop)+" "+std::string(action)+"\n","logic debug command");
+                m_SentStop=m_LiveStop;
+            }
+            catch(const std::exception& e){m_LiveError=e.what();}
+        }
+        void DrawLive(const std::filesystem::path& root)
+        {
+            if(!m_LiveState.empty())ImGui::Text("Live debugger: %s | Stop %u",m_LiveState.c_str(),m_LiveStop);
+            if(!m_LiveError.empty())ImGui::TextWrapped("%s",m_LiveError.c_str());
+            if(m_LiveState!="paused"||!m_LiveRow)return;
+            const auto& row=*m_LiveRow;
+            ImGui::TextWrapped("Paused BEFORE %s at PC %u | Entity %u",row.Opcode.c_str(),row.PC,row.Entity);
+            ImGui::TextWrapped("Document: %s | Revision: %s",row.Document.c_str(),row.Revision.c_str());
+            ImGui::TextWrapped("Registers: %s",row.Registers.c_str());
+            ImGui::TextDisabled("Player thread suspended; auto-detach after 120 seconds.");
+            ImGui::BeginDisabled(m_SentStop==m_LiveStop);
+            if(ImGui::Button("Continue"))SendLive(root,"continue");
+            ImGui::SameLine();
+            if(ImGui::Button("Step instruction"))SendLive(root,"step");
+            ImGui::SameLine();
+            if(ImGui::Button("Detach debugger"))SendLive(root,"detach");
+            ImGui::EndDisabled();
         }
     };
 
@@ -1011,13 +1114,13 @@ int main(int argc, char** argv)
 #if !defined(_WIN32)
                     if (launchedRuntime.has_value())
                         throw std::runtime_error("The game is already running. Close it before launching Play again.");
-                    const auto traceSession=logicTrace.NextSession();
+                    const auto traceSession=logicTrace.NextSession(project.ProjectRoot());
                     launchedRuntime = static_cast<pid_t>(LaunchProjectRuntime(
                         project, std::filesystem::absolute(argv[0]), options.BackendOverride,traceSession));
                     if(traceSession)logicTrace.Start(*traceSession);
                     runtimeLaunchedAt = std::chrono::steady_clock::now();
 #else
-                    const auto traceSession=logicTrace.NextSession();
+                    const auto traceSession=logicTrace.NextSession(project.ProjectRoot());
                     (void)LaunchProjectRuntime(project, std::filesystem::absolute(argv[0]),
                         options.BackendOverride,traceSession);
                     if(traceSession)logicTrace.Start(*traceSession);
