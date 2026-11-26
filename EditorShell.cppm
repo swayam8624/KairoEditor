@@ -428,6 +428,8 @@ export namespace kairo::editor
         int m_AssetTypeFilter=0;
         std::string m_AssetFolder;
         std::array<char,65> m_PrefabName{};
+        bool m_ReplacePrefab=false;
+        std::optional<std::string> m_ReviewedPrefabRevision;
         std::array<char,129> m_InstanceName{};
         std::optional<kairo::engine::Entity> m_PrefabCapture;
         bool m_RequestPrefabSave=false,m_RequestPrefabPlace=false,m_PrefabUnderSelected=false;
@@ -949,6 +951,8 @@ export namespace kairo::editor
             {
                 m_PrefabCapture=selectedEntity;
                 m_PrefabName.fill(0);
+                m_ReplacePrefab=false;
+                m_ReviewedPrefabRevision.reset();
                 m_RequestPrefabSave=true;
             }
             ImGui::SameLine();
@@ -2746,17 +2750,46 @@ export namespace kairo::editor
             if(ImGui::BeginPopupModal("Save prefab definition",nullptr,ImGuiWindowFlags_AlwaysAutoResize))
             {
                 ImGui::TextWrapped("Save the selected hierarchy as a reusable, independent project template.");
-                ImGui::InputText("Prefab name",m_PrefabName.data(),m_PrefabName.size());
-                if(ActionButton("Save definition",UIButtonTone::Primary,m_PrefabCapture.has_value()))
+                if(ImGui::InputText("Prefab name",m_PrefabName.data(),m_PrefabName.size()))
+                    m_ReviewedPrefabRevision.reset();
+                if(ImGui::Checkbox("Replace an existing definition",&m_ReplacePrefab))
+                    m_ReviewedPrefabRevision.reset();
+                const bool canSave=m_PrefabCapture.has_value()&&m_State.Mode()==EditorMode::Edit&&
+                    !m_Project.HasUnsavedChanges()&&!m_AuthoringWorkspace.HasDirtyTextDrafts();
+                if(m_ReplacePrefab)
+                {
+                    ImGui::TextWrapped("Enter the exact existing name. Existing instances will not change.");
+                    if(!m_ReviewedPrefabRevision)
+                    {
+                        if(ActionButton("Review replacement",UIButtonTone::Neutral,canSave))
+                            RunCommand([this]{
+                                (void)LoadProjectPrefab(m_Project,m_PrefabName.data());
+                                m_ReviewedPrefabRevision=ReadProjectPrefabRevision(m_Project,m_PrefabName.data());
+                            });
+                    }
+                    else
+                    {
+                        ImGui::TextWrapped("Replace the saved definition with the selected hierarchy? This file change is not scene undo.");
+                        if(ActionButton("Confirm replacement",UIButtonTone::Destructive,canSave))
+                            RunCommand([this]{
+                                // Consume the review even on failure, so a stale
+                                // revision cannot be confirmed again accidentally.
+                                auto revision=std::move(*m_ReviewedPrefabRevision);
+                                m_ReviewedPrefabRevision.reset();
+                                ReplaceProjectPrefab(m_Project,*m_PrefabCapture,m_PrefabName.data(),revision);
+                                m_PrefabCapture.reset();
+                                ImGui::CloseCurrentPopup();
+                            });
+                    }
+                }
+                else if(ActionButton("Save definition",UIButtonTone::Primary,canSave))
                     RunCommand([this]{
-                        if(m_AuthoringWorkspace.HasDirtyTextDrafts()||m_State.Mode()!=EditorMode::Edit)
-                            throw std::logic_error("Save all drafts and exit Play first.");
                         (void)SaveProjectPrefab(m_Project,*m_PrefabCapture,m_PrefabName.data());
                         m_PrefabCapture.reset();
                         ImGui::CloseCurrentPopup();
                     });
                 ImGui::SameLine();
-                if(ActionButton("Cancel")){m_PrefabCapture.reset();ImGui::CloseCurrentPopup();}
+                if(ActionButton("Cancel")){m_PrefabCapture.reset();m_ReviewedPrefabRevision.reset();ImGui::CloseCurrentPopup();}
                 ImGui::EndPopup();
             }
             if(m_RequestPrefabPlace)
