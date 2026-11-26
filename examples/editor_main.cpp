@@ -1,4 +1,6 @@
 #include "../detail/SelectionBounds.hpp"
+#include "../detail/AssetPreviewPixels.hpp"
+#include <vector>
 #include <array>
 #include <charconv>
 #include <cerrno>
@@ -514,6 +516,42 @@ int main(int argc, char** argv)
             if (builder.Result()) selectionBounds.emplace(handle,*builder.Result());
             return handle;
         };
+        // Preview data is derived only from already imported, validated CPU
+        // assets. Cap memory and work; no additional imports or GPU allocations.
+        using kairo::editor::detail::PreviewPixels;
+        struct CachedPreview {kairo::assets::AssetID ID;std::uint64_t Revision;PreviewPixels Pixels;};
+        std::vector<CachedPreview> previews;
+        const auto cacheMeshPreview=[&](const kairo::assets::AssetMetadata& asset,const kairo::renderer::Mesh& mesh)
+        {
+            if(previews.size()>=128)return;
+            const auto pixels=kairo::editor::detail::MeshPreview(mesh.Vertices().size(),mesh.Indices(),
+                [&](std::size_t i)
+                {
+                    const auto& p=mesh.Vertices()[i].Position;
+                    return kairo::editor::detail::PreviewPoint{p.x,p.y,p.z};
+                });
+            if(pixels)previews.push_back({asset.ID,asset.Revision,*pixels});
+        };
+        const auto cacheTexturePreview=[&](kairo::assets::AssetID id,const kairo::assets::TextureArtifactData& texture)
+        {
+            if(previews.size()>=128||texture.Mips.empty())return;
+            using kairo::assets::TexturePixelFormat;
+            const unsigned channels=texture.Format==TexturePixelFormat::R8?1u:
+                texture.Format==TexturePixelFormat::RG8?2u:texture.Format==TexturePixelFormat::RGBA8?4u:0u;
+            if(!channels)return; // HDR is deliberately not misrepresented as LDR.
+            const auto& mip=texture.Mips.front();
+            const auto pixels=kairo::editor::detail::TexturePreview(mip.Width,mip.Height,
+                [&](unsigned x,unsigned y)
+                {
+                    const std::size_t offset=(std::size_t(y)*mip.Width+x)*channels;
+                    const auto byte=[&](unsigned c){return unsigned(std::to_integer<std::uint8_t>(mip.Pixels.at(offset+c)));};
+                    const unsigned red=byte(0);
+                    if(channels==1)return std::array<unsigned,4>{red,red,red,255};
+                    if(channels==2)return std::array<unsigned,4>{red,byte(1),0,255};
+                    return std::array<unsigned,4>{red,byte(1),byte(2),byte(3)};
+                });
+            if(pixels)previews.push_back({id,project.Assets().At(id).Revision,*pixels});
+        };
         kairo::assets::ImportDatabase meshImports;
         const kairo::assets::DerivedDataCache derivedCache(
             project.ProjectRoot() / ".kairo" / "derived-data");
@@ -569,6 +607,7 @@ int main(int argc, char** argv)
                 settings, project.Assets(), meshImports, derivedCache);
             const auto handle = renderer.CreateTexture(texture);
             renderAssets.BindTexture({ id }, handle);
+            cacheTexturePreview(id,texture);
 #if defined(KAIRO_EDITOR_HAS_OFFLINE_RENDER)
             auto offline = MakeOfflineTexture(texture, id.ToString());
             offlineTextureHandles.emplace(handle, offline);
@@ -595,6 +634,7 @@ int main(int argc, char** argv)
                 auto imported = kairo::editor::ImportRenderMesh(
                     project.ProjectRoot(), { asset.ID }, project.Assets(), meshImports, derivedCache);
                 renderAssets.BindMesh({ asset.ID }, uploadMesh(imported.Geometry));
+                cacheMeshPreview(asset,imported.Geometry);
 #if defined(KAIRO_EDITOR_HAS_OFFLINE_RENDER)
                 offlineMeshes.emplace(asset.ID, std::move(imported.Geometry));
 #endif
@@ -602,6 +642,7 @@ int main(int argc, char** argv)
             else if (const auto builtin = kairo::editor::MakeBuiltinRenderMesh(asset); builtin.has_value())
             {
                 renderAssets.BindMesh({ asset.ID }, uploadMesh(*builtin));
+                cacheMeshPreview(asset,*builtin);
 #if defined(KAIRO_EDITOR_HAS_OFFLINE_RENDER)
                 offlineMeshes.emplace(asset.ID, *builtin);
 #endif
@@ -636,6 +677,7 @@ int main(int argc, char** argv)
                 textureSettings.emplace(metadata->ID, settings);
                 const auto handle = renderer.CreateTexture(texture);
                 renderAssets.BindTexture({ metadata->ID }, handle);
+                cacheTexturePreview(metadata->ID,texture);
 #if defined(KAIRO_EDITOR_HAS_OFFLINE_RENDER)
                 auto offline = MakeOfflineTexture(texture, metadata->ID.ToString());
                 offlineTextureHandles.emplace(handle, offline);
@@ -745,6 +787,8 @@ int main(int argc, char** argv)
             std::move(keymap), keymapSettings, navigationSettings, navigationSettingsPath,
             std::move(ai.Provider), std::move(ai.Model), std::move(offlineRender),
             &nativeGameplayRegistry, &meshImports);
+        for(const auto& preview:previews)shell.SetAssetPreview(preview.ID,preview.Revision,preview.Pixels);
+        previews.clear();previews.shrink_to_fit();
         if (recovered.has_value()) shell.RestoreRecoveryDrafts(*recovered);
         if (options.ViewportShading.has_value()) shell.SetViewportShading(*options.ViewportShading);
         if (options.AuthoringSurface.has_value()) state.SetAuthoringSurface(*options.AuthoringSurface);

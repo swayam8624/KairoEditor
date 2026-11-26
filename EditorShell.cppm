@@ -36,6 +36,8 @@ module;
 #include <string_view>
 #include <utility>
 #include <unordered_set>
+#include <unordered_map>
+#include "detail/AssetPreviewPixels.hpp"
 #include <variant>
 #include <vector>
 
@@ -317,6 +319,15 @@ export namespace kairo::editor
             else m_State.ClearSelection();
         }
 
+        // Host publishes display pixels from actual imported geometry/texture.
+        // Revision matching prevents an old image being shown for new metadata.
+        void SetAssetPreview(kairo::assets::AssetID id,std::uint64_t revision,
+            const std::array<std::uint32_t,1024>& pixels)
+        {
+            if(m_AssetPreviews.size()>=128 && !m_AssetPreviews.contains(id))return;
+            m_AssetPreviews.insert_or_assign(id,AssetPreview{revision,pixels});
+        }
+
         /// Output: visible visual assets whose revision-keyed previews are not yet
         /// scheduled by the host. The Editor never owns backend GPU resources.
         [[nodiscard]] std::vector<AssetThumbnailRequest> TakeAssetThumbnailRequests() noexcept
@@ -401,6 +412,13 @@ export namespace kairo::editor
         std::optional<kairo::assets::AssetID> m_SelectedBrowserAsset;
         bool m_AssetGrid = true;
         const kairo::assets::ImportDatabase* m_AssetImports = nullptr;
+        struct AssetPreview final
+        {
+            std::uint64_t Revision;
+            std::array<std::uint32_t,1024> Pixels;
+        };
+        std::unordered_map<kairo::assets::AssetID,AssetPreview,kairo::assets::AssetIDHash> m_AssetPreviews;
+        int m_AssetTypeFilter=0;
         AssetThumbnailScheduler m_AssetThumbnailScheduler;
         AssetBrowserRequestQueue m_AssetBrowserRequests;
         std::optional<AssetWorkspace> m_AssetWorkspaceSnapshot;
@@ -2699,6 +2717,12 @@ export namespace kairo::editor
             ImGui::SameLine();
             (void)SearchField("##AssetFilter", "Search assets by path or type", m_AssetFilter.data(), m_AssetFilter.size());
 
+            using kairo::assets::AssetType;
+            constexpr const char* typeLabels[]={"All types","Mesh","Texture","Material","Scene","Document","Audio"};
+            constexpr AssetType typeValues[]={AssetType::Other,AssetType::Mesh,AssetType::Texture2D,
+                AssetType::Material,AssetType::Scene,AssetType::Document,AssetType::Audio};
+            ImGui::SetNextItemWidth(124.0f);
+            ImGui::Combo("##AssetType",&m_AssetTypeFilter,typeLabels,static_cast<int>(std::size(typeLabels)));
             const auto records = m_Project.Assets().Snapshot();
             const std::string filter = Lower(m_AssetFilter.data());
             const auto statusName = [](AssetWorkspaceStatus status) -> const char*
@@ -2749,6 +2773,7 @@ export namespace kairo::editor
             else m_AssetWorkspaceSnapshot.reset();
 
             std::size_t visible = 0u;
+            unsigned drawnPreviews=0;
             const float width=ImGui::GetContentRegionAvail().x;
             const int columns=m_AssetGrid?std::clamp(static_cast<int>(width/120.0f),1,12):4;
             const ImGuiTableFlags flags=ImGuiTableFlags_ScrollY | ImGuiTableFlags_SizingStretchProp |
@@ -2767,6 +2792,7 @@ export namespace kairo::editor
                 }
                 for (const auto& asset : records)
                 {
+                    if(m_AssetTypeFilter!=0 && asset.Type!=typeValues[m_AssetTypeFilter])continue;
                     const std::string path = asset.Path.generic_string();
                     const std::string type(kairo::assets::NameOfAssetType(asset.Type));
                     if (!filter.empty() && Lower(path).find(filter) == std::string::npos &&
@@ -2794,7 +2820,7 @@ export namespace kairo::editor
                             blockers.push_back({ dependent.ID, dependent.Type });
                     }
                     ++visible;
-                    m_AssetThumbnailScheduler.Request(asset);
+
 
                     const std::string id=asset.ID.ToString();
                     ImGui::PushID(id.c_str());
@@ -2803,7 +2829,7 @@ export namespace kairo::editor
                         ImGui::TableNextColumn();
                         const float tileWidth=std::max(1.0f,ImGui::GetContentRegionAvail().x);
                         if (ImGui::Selectable("##Asset",m_SelectedBrowserAsset==asset.ID,
-                            ImGuiSelectableFlags_AllowDoubleClick,{tileWidth,92.0f}))
+                            ImGuiSelectableFlags_AllowDoubleClick,{tileWidth,116.0f}))
                             m_SelectedBrowserAsset=asset.ID;
                         const auto min=ImGui::GetItemRectMin(),max=ImGui::GetItemRectMax();
                         auto& draw=*ImGui::GetWindowDrawList();
@@ -2811,11 +2837,32 @@ export namespace kairo::editor
                         draw.AddRect({min.x+1,min.y+1},{max.x-1,max.y-1},
                             ImGui::GetColorU32(active?ImGuiCol_SliderGrab:ImGuiCol_Border),3.0f,0,1.0f);
                         draw.PushClipRect({min.x+6,min.y+3},{max.x-6,max.y-3},true);
-                        DrawAssetGlyph(draw,asset.Type,{(min.x+max.x)*.5f,min.y+30},
+                        const auto preview=m_AssetPreviews.find(asset.ID);
+                        if(ImGui::IsItemVisible() && drawnPreviews<16 && preview!=m_AssetPreviews.end() &&
+                            preview->second.Revision==asset.Revision)
+                        {
+                            ++drawnPreviews;
+                            const float side=std::max(1.0f,std::min(64.0f,max.x-min.x-16.0f));
+                            const float step=side/32.0f;
+                            const float px=(min.x+max.x-side)*.5f,py=min.y+6.0f;
+                            // Merge equal-color horizontal runs. Only visible
+                            // tiles emit geometry, with a hard per-frame budget.
+                            for(unsigned y=0;y<32;++y)
+                                for(unsigned x=0;x<32;)
+                                {
+                                    const auto pixel=preview->second.Pixels[y*32+x];
+                                    unsigned end=x+1;
+                                    while(end<32 && preview->second.Pixels[y*32+end]==pixel)++end;
+                                    draw.AddRectFilled({px+x*step,py+y*step},{px+end*step,py+(y+1)*step},
+                                        IM_COL32(pixel&255u,(pixel>>8u)&255u,(pixel>>16u)&255u,255));
+                                    x=end;
+                                }
+                        }
+                        else DrawAssetGlyph(draw,asset.Type,{(min.x+max.x)*.5f,min.y+37},
                             ImGui::GetColorU32(ImGuiCol_TextDisabled));
                         const auto name=asset.Path.filename().generic_string();
-                        draw.AddText({min.x+8,min.y+54},ImGui::GetColorU32(ImGuiCol_Text),name.c_str());
-                        draw.AddText({min.x+8,min.y+72},ImGui::GetColorU32(ImGuiCol_TextDisabled),type.c_str());
+                        draw.AddText({min.x+8,min.y+80},ImGui::GetColorU32(ImGuiCol_Text),name.c_str());
+                        draw.AddText({min.x+8,min.y+98},ImGui::GetColorU32(ImGuiCol_TextDisabled),type.c_str());
                         draw.PopClipRect();
                     }
                     else
