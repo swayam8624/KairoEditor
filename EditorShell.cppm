@@ -340,9 +340,9 @@ export namespace kairo::editor
         /// Output: explicit browser requests such as reimport. The native host
         /// performs them at a safe frame boundary and may restart/rebind runtime
         /// resources without coupling the ImGui shell to an importer backend.
-        [[nodiscard]] std::optional<std::filesystem::path> TakeOBJImportRequest() noexcept
+        [[nodiscard]] std::vector<std::filesystem::path> TakeAssetImportRequests() noexcept
         {
-            return std::exchange(m_OBJImportRequest,std::nullopt);
+            return std::exchange(m_AssetImportRequests,{});
         }
 
         [[nodiscard]] std::vector<AssetBrowserRequest> TakeAssetBrowserRequests() noexcept
@@ -436,9 +436,9 @@ export namespace kairo::editor
         std::vector<std::string> m_PrefabLibrary;
         int m_PrefabIndex=0;
         std::array<float,3> m_PrefabPosition{};
-        std::array<char,1024> m_OBJImportPath{};
-        bool m_RequestOBJImport=false;
-        std::optional<std::filesystem::path> m_OBJImportRequest;
+        std::array<char,16384> m_AssetImportPaths{};
+        bool m_RequestAssetImport=false;
+        std::vector<std::filesystem::path> m_AssetImportRequests;
         AssetThumbnailScheduler m_AssetThumbnailScheduler;
         AssetBrowserRequestQueue m_AssetBrowserRequests;
         std::optional<AssetWorkspace> m_AssetWorkspaceSnapshot;
@@ -2845,24 +2845,40 @@ export namespace kairo::editor
 
         void DrawAssetImportPopup()
         {
-            if(m_RequestOBJImport)
+            if(m_RequestAssetImport)
             {
-                ImGui::OpenPopup("Import standalone OBJ");
-                m_RequestOBJImport=false;
+                ImGui::OpenPopup("Import project assets");
+                m_RequestAssetImport=false;
             }
-            if(!ImGui::BeginPopupModal("Import standalone OBJ",nullptr,ImGuiWindowFlags_AlwaysAutoResize))return;
-            ImGui::TextWrapped("Copy a local geometry-only OBJ into the project. Save all changes first. The editor will reopen after import.");
+            if(!ImGui::BeginPopupModal("Import project assets",nullptr,ImGuiWindowFlags_AlwaysAutoResize))return;
+            ImGui::TextWrapped("Import OBJ geometry, glTF/GLB scenes, PNG/JPEG/TGA/BMP/HDR textures and WAV audio. Local glTF dependencies are copied automatically. Save changes first; the editor reopens after successful import.");
             ImGui::SetNextItemWidth(480.0f);
-            ImGui::InputText("Source file",m_OBJImportPath.data(),m_OBJImportPath.size());
-            ImGui::TextDisabled("Use an absolute path. External materials and textures are not imported.");
-            const bool ready=m_OBJImportPath[0]!='\0' && !m_Project.HasUnsavedChanges() &&
+            ImGui::InputTextMultiline("Source files",m_AssetImportPaths.data(),m_AssetImportPaths.size(),ImVec2(480,130));
+            ImGui::TextDisabled("One absolute path per line. OBJ remains geometry-only.");
+            const bool ready=m_AssetImportPaths[0]!='\0' && !m_Project.HasUnsavedChanges() &&
                 !m_AuthoringWorkspace.HasDirtyTextDrafts() && m_State.Mode()==EditorMode::Edit;
             if(ActionButton("Import",UIButtonTone::Primary,ready))
             {
                 RunCommand([this]{
-                    const std::filesystem::path path(m_OBJImportPath.data());
-                    if(!path.is_absolute())throw std::invalid_argument("Use an absolute OBJ path.");
-                    m_OBJImportRequest=path;
+                    std::vector<std::filesystem::path> paths;
+                    std::string_view input(m_AssetImportPaths.data());
+                    while(!input.empty())
+                    {
+                        const auto end=input.find('\n');
+                        auto line=input.substr(0,end);
+                        if(!line.empty()&&line.back()=='\r')line.remove_suffix(1);
+                        if(!line.empty())
+                        {
+                            std::filesystem::path path{std::string(line)};
+                            if(!path.is_absolute())throw std::invalid_argument("Use one absolute asset path per line.");
+                            paths.push_back(std::move(path));
+                            if(paths.size()>64)throw std::length_error("Import at most 64 primary files.");
+                        }
+                        if(end==std::string_view::npos)break;
+                        input.remove_prefix(end+1);
+                    }
+                    if(paths.empty())throw std::invalid_argument("Choose at least one asset.");
+                    m_AssetImportRequests=std::move(paths);
                     ImGui::CloseCurrentPopup();
                 });
             }
@@ -2873,9 +2889,9 @@ export namespace kairo::editor
 
         void DrawContentBrowser()
         {
-            if(ActionButton("Import OBJ",UIButtonTone::Primary,
+            if(ActionButton("Import Assets",UIButtonTone::Primary,
                 m_State.Mode()==EditorMode::Edit && !m_Project.HasUnsavedChanges() && !m_AuthoringWorkspace.HasDirtyTextDrafts()))
-                m_RequestOBJImport=true;
+                m_RequestAssetImport=true;
             ImGui::SameLine();
             if (ToolbarButton("Grid", m_AssetGrid)) m_AssetGrid=true;
             ImGui::SameLine();

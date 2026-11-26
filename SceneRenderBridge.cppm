@@ -27,6 +27,8 @@ export namespace kairo::editor
     using kairo::runtime::renderbridge::ImportRenderGltfSceneWithSource;
     using kairo::runtime::renderbridge::ImportRenderMesh;
     using kairo::runtime::renderbridge::ImportRenderTexture;
+    using kairo::runtime::renderbridge::GltfImageSettings;
+    using kairo::runtime::renderbridge::DecodeEmbeddedGltfTexture;
     using kairo::runtime::renderbridge::LoadRenderMaterial;
     using kairo::runtime::renderbridge::MakeBuiltinRenderMesh;
     using kairo::runtime::renderbridge::MakeRenderLight;
