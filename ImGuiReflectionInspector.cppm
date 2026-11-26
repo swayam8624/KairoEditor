@@ -50,11 +50,23 @@ export namespace kairo::editor
             kairo::engine::EnumerateReflectedComponents(scene, entity))
         {
             const TypeDescriptor& type = registry.Require(component.TypeKey);
-            SectionHeader(type.DisplayName);
             ImGui::PushID(type.Key.c_str());
-            for (const PropertyDescriptor& property : type.Properties)
+            const bool open = ImGui::CollapsingHeader(type.DisplayName.c_str(), ImGuiTreeNodeFlags_DefaultOpen);
+            if (open && ImGui::BeginTable("##Properties", 2, ImGuiTableFlags_SizingStretchProp))
             {
+                ImGui::TableSetupColumn("Property", ImGuiTableColumnFlags_WidthStretch, 0.42f);
+                ImGui::TableSetupColumn("Value", ImGuiTableColumnFlags_WidthStretch, 0.58f);
+                for (const PropertyDescriptor& property : type.Properties)
+                {
                 ImGui::PushID(property.Metadata.Key.c_str());
+                ImGui::TableNextRow();
+                ImGui::TableSetColumnIndex(0);
+                ImGui::AlignTextToFramePadding();
+                ImGui::TextWrapped("%s", property.Metadata.DisplayName.c_str());
+                if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort) && !property.Metadata.Tooltip.empty())
+                    ImGui::SetTooltip("%s", property.Metadata.Tooltip.c_str());
+                ImGui::TableSetColumnIndex(1);
+                ImGui::SetNextItemWidth(-1.0f);
                 const PropertyValue current = registry.Read(type.Key, property.Metadata.Key, component.Object);
                 PropertyValue edited = current;
                 const bool readOnly = HasFlag(property.Metadata.Flags, PropertyFlags::ReadOnly);
@@ -67,6 +79,8 @@ export namespace kairo::editor
                 if (changed && !readOnly && edited != current)
                     commit(type.Key, property.Metadata.Key, edited);
                 ImGui::PopID();
+                }
+                ImGui::EndTable();
             }
             ImGui::PopID();
         }
@@ -101,7 +115,7 @@ namespace kairo::editor
         const kairo::reflection::PropertyValue& current, kairo::reflection::PropertyValue& edited)
     {
         using namespace kairo::reflection;
-        const char* label = property.Metadata.DisplayName.c_str();
+        const char* label = "##Value";
         switch (property.ValueKind)
         {
         case PropertyValueKind::Boolean:
@@ -228,7 +242,7 @@ namespace kairo::editor
         case PropertyValueKind::Array:
         {
             const ArrayValue& value = current.Get<ArrayValue>();
-            ImGui::Text("%s: %zu item%s", label, value.Values.size(),
+            ImGui::Text("%zu item%s", value.Values.size(),
                 value.Values.size() == 1u ? "" : "s");
             return false;
         }
