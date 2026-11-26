@@ -81,7 +81,7 @@ namespace kairo::editor
             throw std::invalid_argument("A starter requires a fresh empty logic document.");
         const auto& schemas=logic_document_compiler_detail::Services().Schemas;
         // Construct a candidate so any error leaves the caller's graph intact.
-        AuthoringDocument candidate(document.ID(),DocumentKind::Logic,document.Name());
+        AuthoringDocument candidate(document); // retain reserved ID cursors
         const auto begin=candidate.AddNode(schemas.Require("kairo.logic.event-begin-play"),{0.0,0.0});
         const auto print=candidate.AddNode(schemas.Require("kairo.logic.print"),{260.0,0.0});
         const auto pin=[&](NodeID node,std::string_view key)
@@ -93,7 +93,7 @@ namespace kairo::editor
         candidate.Connect(pin(begin,"then"),pin(print,"in"));
         if (HasErrors(CheckCoreLogicDocument(candidate)))
             throw std::logic_error("Built-in logic starter did not compile.");
-        document=std::move(candidate);
+        document.SwapContents(candidate);
     }
 
     std::vector<std::byte> CompileCoreLogicDocumentFile(
