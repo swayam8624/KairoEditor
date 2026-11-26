@@ -24,7 +24,7 @@ using namespace kairo::editor;
 
 static_assert(!std::is_same_v<NodeID, PinID>);
 
-TEST_CASE("Viewport keyboard ownership suppresses tool hotkeys but preserves shortcuts", "[KairoEditor][Input][Viewport]")
+TEST_CASE("Captured free flight suppresses tool hotkeys but ordinary selection preserves them", "[KairoEditor][Input][Viewport]")
 {
     CHECK(IsViewportMotionKey(EditorKey::W));
     CHECK(IsViewportMotionKey(EditorKey::A));
@@ -53,6 +53,9 @@ TEST_CASE("Viewport keyboard ownership suppresses tool hotkeys but preserves sho
     if (ShouldRouteWorldKeyAsAction(EditorKey::W, true, KeyModifiers::None))
         (void)router.Route({ { EditorKey::W } });
     CHECK_FALSE(router.Triggered(EditorAction::TranslateTool));
+    CHECK(ShouldRouteWorldKeyAsAction(EditorKey::W, false, KeyModifiers::None));
+    CHECK(router.Route({ { EditorKey::W } }));
+    CHECK(router.Consume(EditorAction::TranslateTool));
     CHECK(ShouldRouteWorldKeyAsAction(EditorKey::S, true, KeyModifiers::Shortcut));
     CHECK(router.Route({ { EditorKey::S, KeyModifiers::Shortcut } }));
     CHECK(router.Consume(EditorAction::Save));
