@@ -3,6 +3,9 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <memory>
+#include <system_error>
+#include <exception>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -254,6 +257,58 @@ namespace
         }
         std::filesystem::remove_all(root);
     }
+    void TestStudioScriptLifecycle()
+    {
+        const auto root=std::filesystem::temp_directory_path()/
+            ("kairo-studio-script-"+kairo::assets::GenerateAssetID().ToString());
+        struct Cleanup { std::filesystem::path Path; ~Cleanup(){std::error_code e;std::filesystem::remove_all(Path,e);} } cleanup{root};
+        ProjectSession project;
+        project.CreateProject(root,"Studio Scripting");
+        const auto entity=project.EditScene().CreateEntity("Script Owner");
+        const auto id=project.CreateDocument(DocumentKind::Logic,"Startup","Logic/Startup.kdoc");
+        Expect(HasErrors(CheckCoreLogicDocument(project.Document(id))),"empty logic requires entry");
+        InitializeLogicStarter(project.EditDocument(id));
+        const auto text=SerializeDocument(project.Document(id));
+        Expect(!HasErrors(CheckCoreLogicDocument(project.Document(id))),"starter dry check");
+        Expect(SerializeDocument(project.Document(id))==text,"dry check must not mutate graph");
+        Expect(!std::filesystem::exists(root/"Logic/Startup.kdoc"),"dry check must not save source");
+        Expect(!std::filesystem::exists(kairo::engine::CompiledLogicPath(root,id)),"dry check must not publish artifact");
+        bool refused=false;
+        try { InitializeLogicStarter(project.EditDocument(id)); }
+        catch(const std::invalid_argument&) { refused=true; }
+        Expect(refused&&SerializeDocument(project.Document(id))==text,"starter never overwrites authored graph");
+        // A malformed text projection is rejected without changing its graph.
+        refused=false;
+        try { (void)ParseDocumentProjection("invalid draft",id,DocumentKind::Logic); }
+        catch(const std::exception&) { refused=true; }
+        Expect(refused&&SerializeDocument(project.Document(id))==text,"invalid text must preserve source graph");
+        CommandHistory history;
+        history.Execute(std::make_unique<SetLogicDocumentCommand>(project,entity,kairo::assets::DocumentAssetHandle{id}));
+        Expect(project.Scene().HasLogic(entity),"attach");
+        history.Undo();
+        Expect(!project.Scene().HasLogic(entity),"undo attachment");
+        history.Redo();
+        Expect(project.Scene().HasLogic(entity),"redo attachment");
+        project.SaveAll();
+        const auto built=BuildProjectLogic(project.ProjectFile());
+        Expect(built.size()==1u,"attached script compiled");
+        if (built.size()!=1u) return;
+        const auto artifact=kairo::engine::LoadCompiledLogicArtifact(built.front().ArtifactPath);
+        Expect(artifact.Source==id,"published source identity");
+        const auto payload=CompileCoreLogicDocumentFile(root/"Logic/Startup.kdoc",id.ToString());
+        const auto program=kairo::engine::ParseLogicProgram(payload);
+        RuntimeHost host;
+        kairo::engine::LogicInstance instance(program);
+        (void)instance.Dispatch(entity,{.Event=kairo::engine::LogicEventKind::BeginPlay,
+            .Action={},.DeltaSeconds=0.0,.ActionValue=0.0,.OtherEntity={}},host);
+        Expect(host.Messages==std::vector<std::string>{"Hello from Kairo!"},"starter executes real VM");
+        ProjectSession reopened;
+        reopened.OpenProject(project.ProjectFile());
+        const auto loaded=reopened.OpenDocument("Logic/Startup.kdoc");
+        Expect(loaded==id&&SerializeDocument(reopened.Document(loaded))==text,"save/reopen graph");
+        Expect(reopened.Scene().HasLogic(entity),"save/reopen attachment");
+    }
+
     void TestSuccessfulCompilation()
     {
         CompilerGraphFixture fixture;
@@ -330,6 +385,7 @@ int main()
     TestRejectedInputs();
     TestBackendFailures();
     TestCoreLogicCompiler();
+    TestStudioScriptLifecycle();
     TestCoreLogicCompilerRejectsCycles();
     TestProjectLogicBuildPublishesSourceBoundArtifacts();
 
