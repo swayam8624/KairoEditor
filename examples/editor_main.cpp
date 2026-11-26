@@ -960,10 +960,14 @@ int main(int argc, char** argv)
                         contour->second.Faces.size()<=remainingFaces&&remainingLines>0)
                     {
                         remainingFaces-=contour->second.Faces.size();
+                        const auto& m=draw.Model;
+                        const double determinant=double(m(0,0))*(double(m(1,1))*m(2,2)-double(m(1,2))*m(2,1))
+                            -double(m(0,1))*(double(m(1,0))*m(2,2)-double(m(1,2))*m(2,0))
+                            +double(m(0,2))*(double(m(1,0))*m(2,1)-double(m(1,1))*m(2,0));
                         const auto lines=TraceContour(contour->second,[&](ContourPoint p){
                             const auto q=TransformPoint(draw.Model,Vec3f{p[0],p[1],p[2]});
                             return ContourPoint{q.x,q.y,q.z};
-                        },eye,towardEye,remainingLines);
+                        },eye,towardEye,remainingLines,determinant<0.0);
                         if(lines&&!lines->empty())
                         {
                             remainingLines-=lines->size();
