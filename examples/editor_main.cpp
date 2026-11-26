@@ -708,7 +708,8 @@ int main(int argc, char** argv)
             for (const auto& primitive : imported.RenderAsset.Primitives)
                 meshHandles.push_back(uploadMesh(primitive.Geometry));
             renderAssets.BindGltfScene({ asset.ID }, std::move(imported.Source),
-                imported.RenderAsset, meshHandles, imported.CacheKey,std::move(imported.AuthoredRevision));
+                imported.RenderAsset, meshHandles, imported.CacheKey,std::move(imported.AuthoredRevision),
+                std::move(imported.Controller),std::move(imported.ControllerRevision));
 #if defined(KAIRO_EDITOR_HAS_OFFLINE_RENDER)
             offlineScenes.emplace(asset.ID, std::move(imported.RenderAsset));
 #endif
