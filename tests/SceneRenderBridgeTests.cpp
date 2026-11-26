@@ -3,8 +3,12 @@
 #include <filesystem>
 #include <fstream>
 #include <vector>
+#include <system_error>
 
 import Kairo.Editor.SceneRenderBridge;
+import Kairo.Editor.AssetImport;
+import Kairo.Editor.ProjectSession;
+import Kairo.Assets;
 import Kairo.EngineCore;
 import Kairo.Renderer;
 import Kairo.Foundation.Math;
@@ -234,4 +238,49 @@ TEST_CASE("Source OBJ meshes import through shared assets into renderer geometry
         kairo::assets::AssetOrigin::SourceFile, "Meshes/Triangle.obj", "kairo.unknown", 1u, {} });
     REQUIRE_THROWS_AS(ImportRenderMesh(
         root, { MeshID }, unsupportedRegistry, imports, cache), std::invalid_argument);
+}
+
+
+TEST_CASE("First OBJ import validates geometry and publishes only a clean candidate",
+    "[KairoEditor][Import]")
+{
+    const auto root=std::filesystem::temp_directory_path()/
+        ("kairo-import-"+kairo::assets::GenerateAssetID().ToString());
+    struct Cleanup {std::filesystem::path Path;~Cleanup(){std::error_code ec;std::filesystem::remove_all(Path,ec);}} cleanup{root};
+    std::filesystem::create_directories(root);
+    ProjectSession project;
+    project.CreateProject(root/"Game","Import Test");
+    const auto source=root/"Triangle.obj";
+    {std::ofstream out(source);out<<"v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n";}
+    const auto malformed=root/"Broken.obj";
+    {std::ofstream out(malformed);out<<"not valid geometry\n";}
+    const auto manifest=project.ProjectRoot()/project.Descriptor().AssetManifest;
+    const auto baseline=kairo::assets::SerializeAssetManifest(project.Assets());
+    CHECK_THROWS(ImportStandaloneOBJ(project,malformed));
+    kairo::assets::AssetRegistry disk;
+    kairo::assets::LoadAssetManifest(manifest,disk);
+    CHECK(kairo::assets::SerializeAssetManifest(disk)==baseline);
+    CHECK(std::filesystem::is_empty(project.ProjectRoot()/"Assets/Imported"));
+    const auto id=ImportStandaloneOBJ(project,source);
+    // The old session is deliberately unchanged until the native host reopens.
+    CHECK_FALSE(project.Assets().Contains(id));
+    CHECK(std::filesystem::exists(source));
+    project.OpenProject(project.ProjectFile());
+    REQUIRE(project.Assets().Contains(id));
+    const auto imported=project.Assets().At(id);
+    CHECK(imported.Type==kairo::assets::AssetType::Mesh);
+    CHECK(std::filesystem::is_regular_file(project.ProjectRoot()/imported.Path));
+    CHECK_FALSE(std::filesystem::exists((project.ProjectRoot()/imported.Path).parent_path()/".validation-cache"));
+    kairo::assets::ImportDatabase imports;
+    const kairo::assets::DerivedDataCache cache(project.ProjectRoot()/".kairo/derived-data");
+    const auto rendered=ImportRenderMesh(project.ProjectRoot(),{id},project.Assets(),imports,cache);
+    CHECK(rendered.Geometry.Indices().size()==3u);
+    const auto second=ImportStandaloneOBJ(project,source);
+    CHECK(second!=id);
+    CHECK_THROWS(ImportStandaloneOBJ(project,source)); // stale manifest/session
+    project.OpenProject(project.ProjectFile());
+    CHECK(project.Assets().Contains(id));
+    CHECK(project.Assets().Contains(second));
+    project.MarkSceneDirty();
+    CHECK_THROWS(ImportStandaloneOBJ(project,source));
 }

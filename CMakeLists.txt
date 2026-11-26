@@ -236,7 +236,8 @@ if(KAIRO_EDITOR_BUILD_APP)
 
     add_library(KairoEditorRendererBridge)
     target_sources(KairoEditorRendererBridge PUBLIC FILE_SET CXX_MODULES BASE_DIRS ${CMAKE_CURRENT_SOURCE_DIR} FILES
-        SceneRenderBridge.cppm)
+        SceneRenderBridge.cppm
+        AssetImport.cppm)
     target_link_libraries(KairoEditorRendererBridge PUBLIC
         KairoEditor KairoRenderer KairoRealtimeRenderBridge)
     set_property(TARGET KairoEditorRendererBridge PROPERTY COMPILE_WARNING_AS_ERROR ON)
