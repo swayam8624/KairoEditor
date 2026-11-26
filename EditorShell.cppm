@@ -896,6 +896,7 @@ export namespace kairo::editor
             ImGui::DockBuilderDockWindow("Statistics", right);
             ImGui::DockBuilderDockWindow("Kairo AI", right);
             ImGui::DockBuilderDockWindow("Console", bottom);
+            ImGui::DockBuilderDockWindow("Logic Trace", bottom);
             ImGui::DockBuilderDockWindow("Timeline", bottom);
             ImGui::DockBuilderDockWindow("Code", bottom);
             ImGui::DockBuilderDockWindow("Render Results", bottom);
