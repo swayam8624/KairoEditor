@@ -1,6 +1,9 @@
 #include "../detail/SelectionBounds.hpp"
 #include "../detail/SelectionContour.hpp"
 #include "../detail/AssetPreviewPixels.hpp"
+#include "../detail/LogicTraceCapture.hpp"
+#include <algorithm>
+#include <imgui.h>
 #include <vector>
 #include <array>
 #include <charconv>
@@ -367,9 +370,136 @@ namespace
             "Set play-executable in the .kproject or KAIRO_PLAYER_EXECUTABLE.");
     }
 
+    // This inspector reads a recorded execution, not the live VM. Selecting
+    // a row never replays host effects or changes the player's physics state.
+    class LogicTracePanel
+    {
+        bool m_Enabled=false;
+        std::optional<kairo::assets::AssetID> m_Session;
+        kairo::editor::detail::TraceCapture m_Capture;
+        std::array<char,128> m_Filter{};
+        std::size_t m_Selected=0;
+        std::string m_Status;
+        std::uintmax_t m_LastSize=0;
+        std::chrono::steady_clock::time_point m_LastPoll{};
+    public:
+        [[nodiscard]] std::optional<kairo::assets::AssetID> NextSession() const
+        {
+            if(!m_Enabled)return std::nullopt;
+            return kairo::assets::GenerateAssetID();
+        }
+        void Start(kairo::assets::AssetID id)
+        {
+            m_Session=id;m_Capture={};m_Selected=0;m_LastSize=0;
+            m_Status="Waiting for Player trace.";
+            m_LastPoll={};
+        }
+        void Draw(const std::filesystem::path& root,bool supported)
+        {
+            using namespace kairo::editor::detail;
+            if(!ImGui::Begin("Logic Trace")){ImGui::End();return;}
+            if(!supported)m_Enabled=false;
+            ImGui::BeginDisabled(!supported);
+            ImGui::Checkbox("Capture next Play session",&m_Enabled);
+            ImGui::EndDisabled();
+            ImGui::TextDisabled("Recorded steps | pre-instruction registers | max 4096 records");
+            if(!supported)ImGui::TextDisabled("Custom Play executable: capture unavailable.");
+            if(!m_Session){ImGui::TextDisabled("Enable capture, then press Play.");ImGui::End();return;}
+            ImGui::TextDisabled("Session %s",m_Session->ToString().c_str());
+            const bool refresh=ImGui::Button("Refresh");
+            const auto now=std::chrono::steady_clock::now();
+            if(refresh||now-m_LastPoll>=std::chrono::milliseconds(250))
+            {
+                m_LastPoll=now;
+                try
+                {
+                    const auto base=root/".kairo";
+                    const auto logs=base/"logs";
+                    const auto file=logs/("logic-"+m_Session->ToString()+".ktrace");
+                    if(std::filesystem::is_symlink(base)||std::filesystem::is_symlink(logs)||
+                        std::filesystem::is_symlink(file))throw std::runtime_error("Linked trace path rejected.");
+                    if(std::filesystem::exists(file))
+                    {
+                        if(!std::filesystem::is_regular_file(file))throw std::runtime_error("Trace is not a regular file.");
+                        const auto size=std::filesystem::file_size(file);
+                        if(size>TraceMaxBytes)throw std::length_error("Trace exceeds size budget.");
+                        if(size&& (refresh||size!=m_LastSize))
+                        {
+                            std::ifstream in(file,std::ios::binary);
+                            std::string bytes(static_cast<std::size_t>(size),'\0');
+                            if(!in||!in.read(bytes.data(),static_cast<std::streamsize>(bytes.size())))
+                                throw std::runtime_error("Trace read failed.");
+                            m_Capture=ParseTrace(bytes,m_Session->ToString());
+                            m_LastSize=size;
+                            m_Status.clear();
+                        }
+                    }
+                }
+                catch(const std::exception& e){m_Status=e.what();}
+            }
+            if(!m_Status.empty())ImGui::TextWrapped("%s",m_Status.c_str());
+            if(m_Capture.LimitReached)ImGui::TextDisabled("Capture limit reached.");
+            if(!m_Capture.Error.empty())ImGui::TextWrapped("Runtime error: %s",m_Capture.Error.c_str());
+            ImGui::InputText("Filter",m_Filter.data(),m_Filter.size());
+            if(m_Capture.Rows.empty()){ImGui::End();return;}
+            m_Selected=std::min(m_Selected,m_Capture.Rows.size()-1);
+            ImGui::BeginDisabled(m_Selected==0);
+            if(ImGui::Button("Previous recorded step"))--m_Selected;
+            ImGui::EndDisabled();
+            ImGui::SameLine();
+            ImGui::BeginDisabled(m_Selected+1>=m_Capture.Rows.size());
+            if(ImGui::Button("Next recorded step"))++m_Selected;
+            ImGui::EndDisabled();
+            const auto& selected=m_Capture.Rows[m_Selected];
+            ImGui::Text("Step %u | Entity %u | %s | PC %u | %s",
+                selected.Sequence,selected.Entity,selected.Event.c_str(),selected.PC,selected.Opcode.c_str());
+            ImGui::TextWrapped("Document: %s",selected.Document.c_str());
+            ImGui::TextWrapped("Source SHA-256: %s",selected.Revision.c_str());
+            ImGui::Text("Operands A B C D: %s",selected.Operands.c_str());
+            ImGui::TextWrapped("Registers before instruction: %s",selected.Registers.c_str());
+            const std::string_view filter=m_Filter.data();
+            std::vector<std::size_t> visible;
+            for(std::size_t i=0;i<m_Capture.Rows.size();++i)
+            {
+                const auto& row=m_Capture.Rows[i];
+                if(filter.empty()||row.Opcode.find(filter)!=std::string::npos||
+                    row.Event.find(filter)!=std::string::npos||row.Document.find(filter)!=std::string::npos||
+                    std::to_string(row.Entity).find(filter)!=std::string::npos)
+                    visible.push_back(i);
+            }
+            ImGui::TextDisabled("%zu matching / %zu captured",visible.size(),m_Capture.Rows.size());
+            if(ImGui::BeginTable("Trace steps",5,ImGuiTableFlags_ScrollY|ImGuiTableFlags_RowBg|
+                ImGuiTableFlags_BordersInnerV|ImGuiTableFlags_Resizable,ImVec2(0,160)))
+            {
+                ImGui::TableSetupColumn("Step");ImGui::TableSetupColumn("Entity");
+                ImGui::TableSetupColumn("Event");ImGui::TableSetupColumn("PC");ImGui::TableSetupColumn("Opcode");
+                ImGui::TableHeadersRow();
+                ImGuiListClipper clipper;clipper.Begin(static_cast<int>(visible.size()));
+                while(clipper.Step())
+                    for(int i=clipper.DisplayStart;i<clipper.DisplayEnd;++i)
+                    {
+                        const auto index=visible[static_cast<std::size_t>(i)];
+                        const auto& row=m_Capture.Rows[index];
+                        ImGui::PushID(static_cast<int>(index));ImGui::TableNextRow();
+                        ImGui::TableSetColumnIndex(0);
+                        if(ImGui::Selectable(std::to_string(row.Sequence).c_str(),index==m_Selected,
+                            ImGuiSelectableFlags_SpanAllColumns))m_Selected=index;
+                        ImGui::TableSetColumnIndex(1);ImGui::Text("%u",row.Entity);
+                        ImGui::TableSetColumnIndex(2);ImGui::TextUnformatted(row.Event.c_str());
+                        ImGui::TableSetColumnIndex(3);ImGui::Text("%u",row.PC);
+                        ImGui::TableSetColumnIndex(4);ImGui::TextUnformatted(row.Opcode.c_str());
+                        ImGui::PopID();
+                    }
+                ImGui::EndTable();
+            }
+            ImGui::End();
+        }
+    };
+
     [[nodiscard]] std::intptr_t LaunchProjectRuntime(const kairo::editor::ProjectSession& project,
         const std::filesystem::path& editorExecutable,
-        std::optional<kairo::renderer::GraphicsBackend> backendOverride)
+        std::optional<kairo::renderer::GraphicsBackend> backendOverride,
+        std::optional<kairo::assets::AssetID> traceSession=std::nullopt)
     {
         const auto executable = ResolveRuntimeExecutable(project, editorExecutable);
         const auto descriptor = project.ProjectFile();
@@ -392,14 +522,16 @@ namespace
         }
         // Custom project-owned Play executables have their own argv contracts.
         backendOverride = backendText.empty() ? std::nullopt : backendOverride;
+        if(traceSession&&project.Descriptor().PlayExecutable)
+            throw std::invalid_argument("Logic tracing requires the built-in KairoPlayer executable.");
+        std::string traceText=traceSession?traceSession->ToString():std::string{};
 
 #if defined(_WIN32)
-        const intptr_t child = backendOverride.has_value()
-            ? _spawnl(_P_NOWAIT, executableText.c_str(), executableText.c_str(),
-                descriptorText.c_str(), "--renderer", backendText.c_str(),
-                static_cast<char*>(nullptr))
-            : _spawnl(_P_NOWAIT, executableText.c_str(), executableText.c_str(),
-                descriptorText.c_str(), static_cast<char*>(nullptr));
+        std::vector<const char*> args{executableText.c_str(),descriptorText.c_str()};
+        if(backendOverride){args.push_back("--renderer");args.push_back(backendText.c_str());}
+        if(traceSession){args.push_back("--logic-trace");args.push_back(traceText.c_str());}
+        args.push_back(nullptr);
+        const intptr_t child=_spawnv(_P_NOWAIT,executableText.c_str(),args.data());
         if (child == -1)
             throw std::runtime_error(
                 "Cannot launch project runtime: " + executableText);
@@ -410,13 +542,10 @@ namespace
         return 0;
 #else
         pid_t child = 0;
-        char* childArguments[] = {
-            executableText.data(),
-            descriptorText.data(),
-            backendOverride.has_value() ? const_cast<char*>("--renderer") : nullptr,
-            backendOverride.has_value() ? backendText.data() : nullptr,
-            nullptr
-        };
+        std::vector<char*> childArguments{executableText.data(),descriptorText.data()};
+        if(backendOverride){childArguments.push_back(const_cast<char*>("--renderer"));childArguments.push_back(backendText.data());}
+        if(traceSession){childArguments.push_back(const_cast<char*>("--logic-trace"));childArguments.push_back(traceText.data());}
+        childArguments.push_back(nullptr);
         const auto logPath = project.ProjectRoot() / ".kairo" / "logs" / "player-last-run.log";
         std::filesystem::create_directories(logPath.parent_path());
         const int logFd = ::open(logPath.c_str(), O_CREAT | O_WRONLY | O_TRUNC, 0600);
@@ -435,7 +564,7 @@ namespace
                 status = posix_spawn_file_actions_addclose(&actions, logFd);
             if (status == 0)
                 status = posix_spawn(&child, executableText.c_str(), &actions,
-                    nullptr, childArguments, environ);
+                    nullptr, childArguments.data(), environ);
             posix_spawn_file_actions_destroy(&actions);
         }
         ::close(logFd);
@@ -809,6 +938,7 @@ int main(int argc, char** argv)
         if (options.ViewportShading.has_value()) shell.SetViewportShading(*options.ViewportShading);
         if (options.AuthoringSurface.has_value()) state.SetAuthoringSurface(*options.AuthoringSurface);
         kairo::editor::AnimationPreviewController animationPreview;
+        LogicTracePanel logicTrace;
 
         std::uint64_t renderedFrames = 0u;
         std::optional<kairo::renderer::ViewportCapture> screenshot;
@@ -867,6 +997,7 @@ int main(int argc, char** argv)
                 }
             }
 #endif
+            logicTrace.Draw(project.ProjectRoot(),!project.Descriptor().PlayExecutable);
             if (shell.TakeRuntimeLaunchRequest())
             {
                 try
@@ -880,12 +1011,16 @@ int main(int argc, char** argv)
 #if !defined(_WIN32)
                     if (launchedRuntime.has_value())
                         throw std::runtime_error("The game is already running. Close it before launching Play again.");
+                    const auto traceSession=logicTrace.NextSession();
                     launchedRuntime = static_cast<pid_t>(LaunchProjectRuntime(
-                        project, std::filesystem::absolute(argv[0]), options.BackendOverride));
+                        project, std::filesystem::absolute(argv[0]), options.BackendOverride,traceSession));
+                    if(traceSession)logicTrace.Start(*traceSession);
                     runtimeLaunchedAt = std::chrono::steady_clock::now();
 #else
+                    const auto traceSession=logicTrace.NextSession();
                     (void)LaunchProjectRuntime(project, std::filesystem::absolute(argv[0]),
-                        options.BackendOverride);
+                        options.BackendOverride,traceSession);
+                    if(traceSession)logicTrace.Start(*traceSession);
 #endif
                 }
                 catch (const std::exception& error)
