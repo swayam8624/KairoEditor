@@ -396,6 +396,7 @@ export namespace kairo::editor
         std::array<char, 256> m_AssetFilter{};
         std::array<char, 256> m_HierarchyFilter{};
         std::optional<kairo::assets::AssetID> m_SelectedBrowserAsset;
+        bool m_AssetGrid = true;
         const kairo::assets::ImportDatabase* m_AssetImports = nullptr;
         AssetThumbnailScheduler m_AssetThumbnailScheduler;
         AssetBrowserRequestQueue m_AssetBrowserRequests;
@@ -2626,8 +2627,55 @@ export namespace kairo::editor
             ImGui::TextDisabled("Collider outlines and contact normals are drawn in the viewport.");
         }
 
+        // Type glyphs are drawn from vector strokes instead of emoji, bitmap
+        // placeholders or fake thumbnail images. All share the neutral ink.
+        static void DrawAssetGlyph(ImDrawList& draw, kairo::assets::AssetType type,
+            ImVec2 center, ImU32 ink)
+        {
+            using kairo::assets::AssetType;
+            const float x=center.x,y=center.y;
+            const auto line=[&](float ax,float ay,float bx,float by)
+            { draw.AddLine({x+ax,y+ay},{x+bx,y+by},ink,1.5f); };
+            if (type==AssetType::Mesh || type==AssetType::Scene)
+            {
+                line(0,-15,15,-7);line(15,-7,15,9);line(15,9,0,17);
+                line(0,17,-15,9);line(-15,9,-15,-7);line(-15,-7,0,-15);
+                line(-15,-7,0,1);line(15,-7,0,1);line(0,1,0,17);
+            }
+            else if (type==AssetType::Material)
+            {
+                draw.AddCircle(center,16,ink,32,1.5f);
+                draw.AddEllipse(center,{7,16},ink,0,32,1.2f);
+                line(-15,0,15,0);
+            }
+            else if (type==AssetType::Texture2D)
+            {
+                draw.AddRect({x-16,y-13},{x+16,y+13},ink,2,0,1.5f);
+                draw.AddCircle({x+7,y-6},3,ink,12,1.3f);
+                line(-13,10,-5,-1);line(-5,-1,1,5);line(1,5,6,0);line(6,0,13,10);
+            }
+            else if (type==AssetType::Audio)
+            {
+                for (int i=-3;i<=3;++i)
+                {
+                    const float length=5.0f+float(3-std::abs(i))*3.5f;
+                    line(float(i)*5,-length,float(i)*5,length);
+                }
+            }
+            else
+            {
+                line(-12,-16,4,-16);line(4,-16,12,-8);line(12,-8,12,16);
+                line(12,16,-12,16);line(-12,16,-12,-16);line(4,-16,4,-8);
+                line(4,-8,12,-8);line(-7,-2,7,-2);line(-7,4,7,4);line(-7,10,3,10);
+            }
+        }
+
         void DrawContentBrowser()
         {
+            if (ToolbarButton("Grid", m_AssetGrid)) m_AssetGrid=true;
+            ImGui::SameLine();
+            if (ToolbarButton("List", !m_AssetGrid)) m_AssetGrid=false;
+            ImGui::SameLine();
             if (ActionButton("Refresh")) m_RefreshAssetWorkspace = true;
             ImGui::SameLine();
             (void)SearchField("##AssetFilter", "Search assets by path or type", m_AssetFilter.data(), m_AssetFilter.size());
@@ -2647,24 +2695,6 @@ export namespace kairo::editor
                 }
                 return "Unknown";
             };
-            const auto previewName = [](kairo::assets::AssetType type) -> const char*
-            {
-                using kairo::assets::AssetType;
-                switch (type)
-                {
-                    case AssetType::Mesh: return "[MESH]";
-                    case AssetType::Material: return "[MAT]";
-                    case AssetType::Texture2D: return "[TEX]";
-                    case AssetType::Scene: return "[SCN]";
-                    case AssetType::Shader: return "[SHD]";
-                    case AssetType::Audio: return "[AUD]";
-                    case AssetType::Script: return "[SCR]";
-                    case AssetType::Document: return "[DOC]";
-                    case AssetType::Other: return "[---]";
-                }
-                return "[---]";
-            };
-
             // Fingerprinting is deliberately snapshot-driven rather than a
             // per-frame operation. ImportDatabase::Evaluate hashes source bytes;
             // doing that for every row every ImGui frame would make browser cost
@@ -2700,18 +2730,22 @@ export namespace kairo::editor
             else m_AssetWorkspaceSnapshot.reset();
 
             std::size_t visible = 0u;
-            if (ImGui::BeginTable("AssetRegistry", 5,
-                ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_ScrollY |
-                ImGuiTableFlags_Resizable | ImGuiTableFlags_SizingStretchProp,
+            const float width=ImGui::GetContentRegionAvail().x;
+            const int columns=m_AssetGrid?std::clamp(static_cast<int>(width/120.0f),1,12):4;
+            const ImGuiTableFlags flags=ImGuiTableFlags_ScrollY | ImGuiTableFlags_SizingStretchProp |
+                (m_AssetGrid?ImGuiTableFlags_None:ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_Resizable);
+            if (ImGui::BeginTable(m_AssetGrid?"AssetGrid":"AssetRegistry", columns, flags,
                 ImVec2(0.0f, std::max(30.0f, ImGui::GetContentRegionAvail().y - ImGui::GetTextLineHeightWithSpacing()))))
             {
-                ImGui::TableSetupColumn("Preview", ImGuiTableColumnFlags_WidthFixed, 64.0f);
-                ImGui::TableSetupColumn("State", ImGuiTableColumnFlags_WidthFixed, 82.0f);
-                ImGui::TableSetupColumn("Type", ImGuiTableColumnFlags_WidthFixed, 76.0f);
-                ImGui::TableSetupColumn("Path");
-                ImGui::TableSetupColumn("Info", ImGuiTableColumnFlags_WidthFixed, 72.0f);
-                ImGui::TableSetupScrollFreeze(0, 1);
-                ImGui::TableHeadersRow();
+                if (!m_AssetGrid)
+                {
+                    ImGui::TableSetupColumn("Asset");
+                    ImGui::TableSetupColumn("Type", ImGuiTableColumnFlags_WidthFixed, 76.0f);
+                    ImGui::TableSetupColumn("State", ImGuiTableColumnFlags_WidthFixed, 82.0f);
+                    ImGui::TableSetupColumn("Revision", ImGuiTableColumnFlags_WidthFixed, 72.0f);
+                    ImGui::TableSetupScrollFreeze(0,1);
+                    ImGui::TableHeadersRow();
+                }
                 for (const auto& asset : records)
                 {
                     const std::string path = asset.Path.generic_string();
@@ -2743,22 +2777,36 @@ export namespace kairo::editor
                     ++visible;
                     m_AssetThumbnailScheduler.Request(asset);
 
-                    ImGui::TableNextRow();
-                    ImGui::TableSetColumnIndex(0);
-                    ImGui::TextDisabled("%s", previewName(asset.Type));
-                    if (SupportsAssetThumbnail(asset.Type) && ImGui::IsItemHovered())
-                        ImGui::SetTooltip("Thumbnail requested for revision %llu",
-                            static_cast<unsigned long long>(asset.Revision));
-
-                    ImGui::TableSetColumnIndex(1);
-                    ImGui::TextUnformatted(statusName(status));
-                    ImGui::TableSetColumnIndex(2);
-                    ImGui::TextUnformatted(type.c_str());
-                    ImGui::TableSetColumnIndex(3);
-                    const std::string row = path + "##" + asset.ID.ToString();
-                    if (ImGui::Selectable(row.c_str(), m_SelectedBrowserAsset == asset.ID,
-                        ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_AllowDoubleClick))
-                        m_SelectedBrowserAsset = asset.ID;
+                    const std::string id=asset.ID.ToString();
+                    ImGui::PushID(id.c_str());
+                    if (m_AssetGrid)
+                    {
+                        ImGui::TableNextColumn();
+                        const float tileWidth=std::max(1.0f,ImGui::GetContentRegionAvail().x);
+                        if (ImGui::Selectable("##Asset",m_SelectedBrowserAsset==asset.ID,
+                            ImGuiSelectableFlags_AllowDoubleClick,{tileWidth,92.0f}))
+                            m_SelectedBrowserAsset=asset.ID;
+                        const auto min=ImGui::GetItemRectMin(),max=ImGui::GetItemRectMax();
+                        auto& draw=*ImGui::GetWindowDrawList();
+                        const bool active=m_SelectedBrowserAsset==asset.ID;
+                        draw.AddRect({min.x+1,min.y+1},{max.x-1,max.y-1},
+                            ImGui::GetColorU32(active?ImGuiCol_SliderGrab:ImGuiCol_Border),3.0f,0,1.0f);
+                        draw.PushClipRect({min.x+6,min.y+3},{max.x-6,max.y-3},true);
+                        DrawAssetGlyph(draw,asset.Type,{(min.x+max.x)*.5f,min.y+30},
+                            ImGui::GetColorU32(ImGuiCol_TextDisabled));
+                        const auto name=asset.Path.filename().generic_string();
+                        draw.AddText({min.x+8,min.y+54},ImGui::GetColorU32(ImGuiCol_Text),name.c_str());
+                        draw.AddText({min.x+8,min.y+72},ImGui::GetColorU32(ImGuiCol_TextDisabled),type.c_str());
+                        draw.PopClipRect();
+                    }
+                    else
+                    {
+                        ImGui::TableNextRow();
+                        ImGui::TableSetColumnIndex(0);
+                        if (ImGui::Selectable(path.c_str(),m_SelectedBrowserAsset==asset.ID,
+                            ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_AllowDoubleClick))
+                            m_SelectedBrowserAsset=asset.ID;
+                    }
                     if (asset.Type == kairo::assets::AssetType::Document &&
                         ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
                         OpenDocument(asset.Path);
@@ -2821,9 +2869,15 @@ export namespace kairo::editor
                         asset.ID.ToString().c_str(), kairo::assets::NameOfAssetOrigin(asset.Origin).data(),
                         statusName(status));
 
-                    ImGui::TableSetColumnIndex(4);
-                    ImGui::Text("r%llu", static_cast<unsigned long long>(asset.Revision));
-                    if (!blockers.empty()) ImGui::TextDisabled("%zu deps", blockers.size());
+                    if (!m_AssetGrid)
+                    {
+                        ImGui::TableSetColumnIndex(1);ImGui::TextUnformatted(type.c_str());
+                        ImGui::TableSetColumnIndex(2);ImGui::TextUnformatted(statusName(status));
+                        ImGui::TableSetColumnIndex(3);
+                        ImGui::Text("r%llu", static_cast<unsigned long long>(asset.Revision));
+                        if (!blockers.empty()) ImGui::TextDisabled("%zu deps", blockers.size());
+                    }
+                    ImGui::PopID();
                 }
                 ImGui::EndTable();
             }
