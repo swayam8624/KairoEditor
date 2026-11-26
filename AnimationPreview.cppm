@@ -6,6 +6,8 @@ module;
 #include <filesystem>
 #include <exception>
 #include <stdexcept>
+#include <vector>
+#include <variant>
 #include <cmath>
 #include <cstdint>
 #include <optional>
@@ -54,6 +56,9 @@ export namespace kairo::editor
                 m_Asset.reset();
                 m_State={};
                 m_Draft.reset();
+                m_ControllerDraft.reset();
+                m_ControllerPreview.reset();
+                m_Parameters.Clear();
             }
         }
 
@@ -106,6 +111,8 @@ export namespace kairo::editor
                 ImGui::End();
                 return;
             }
+            DrawController(assets,instance.SceneAsset,*gltf,root,canEdit);
+            ImGui::BeginDisabled(m_ControllerPreview.has_value());
             auto& state=m_State;
             state.ClipIndex=std::min<std::uint32_t>(state.ClipIndex,
                 static_cast<std::uint32_t>(gltf->Animations.size()-1u));
@@ -174,7 +181,17 @@ export namespace kairo::editor
                 state.TrackIndex=std::min(state.TrackIndex,clip.Channels.size()-1);
                 DrawTracks(clip,*gltf,duration);
             }
-            if(state.Enabled)
+            ImGui::EndDisabled();
+            if(m_ControllerPreview)
+            {
+                try
+                {
+                    m_Overrides.SetPose(entity,instance.SceneAsset.ID,m_ControllerPreview->Advance(*gltf,m_Parameters,
+                        std::clamp(ImGui::GetIO().DeltaTime,0.f,1.f)));
+                }
+                catch(const std::exception& e){m_ControllerError=e.what();m_ControllerPreview.reset();m_Overrides.Clear(entity);}
+            }
+            else if(state.Enabled)
                 m_Overrides.Set(entity,{
                     .ClipIndex=state.ClipIndex,
                     .TimeSeconds=state.TimeSeconds,
@@ -190,6 +207,11 @@ export namespace kairo::editor
         std::optional<kairo::assets::AssetID> m_Asset;
         AnimationPreviewState m_State;
         std::optional<kairo::assets::GltfAnimationClipData> m_Draft;
+        std::optional<kairo::engine::AnimationControllerDefinition> m_ControllerDraft;
+        std::optional<kairo::engine::AnimationControllerRuntime> m_ControllerPreview;
+        kairo::engine::AnimationParameterSet m_Parameters;
+        std::string m_ControllerError;
+        int m_ControllerState=0,m_ControllerTransition=0;
         std::array<char,129> m_DraftName{};
         std::string m_DraftError;
         int m_EditTrack=0,m_EditKey=0,m_NewNode=0,m_NewPath=0;
@@ -378,6 +400,7 @@ export namespace kairo::editor
                     m_State.TrackIndex=m_State.FirstTrack=0;
                     Seek(0);
                     m_Draft.reset();
+                    m_ControllerPreview.reset();
                     ImGui::CloseCurrentPopup();
                 }
                 catch(const std::exception& e){m_DraftError=e.what();}
@@ -390,6 +413,169 @@ export namespace kairo::editor
                 ImGui::CloseCurrentPopup();
             }
             ImGui::EndPopup();
+        }
+
+        static void EditControllerName(const char* label,std::string& value)
+        {
+            std::array<char,129> buffer{};
+            std::copy_n(value.begin(),std::min(value.size(),buffer.size()-1),buffer.begin());
+            if(ImGui::InputText(label,buffer.data(),buffer.size()))value=buffer.data();
+        }
+
+        void DrawController(kairo::runtime::renderbridge::RenderAssetBindings& assets,
+            kairo::assets::SceneAssetHandle asset,const kairo::assets::GltfSceneArtifactData& source,
+            const std::filesystem::path& root,bool canEdit)
+        {
+            using namespace kairo::engine;
+            const auto* definition=assets.ResolveController(asset);
+            ImGui::BeginDisabled(!canEdit||!assets.CanAuthorClip(asset));
+            if(ImGui::Button(definition?"Edit state machine":"Create state machine"))
+            {
+                m_ControllerDraft=definition?*definition:AnimationControllerDefinition{};
+                if(!definition)m_ControllerDraft->States.push_back({"Entry",0,1,AnimationTimeMode::Loop});
+                m_ControllerState=m_ControllerTransition=0;
+                m_ControllerError.clear();
+                m_ControllerPreview.reset();
+                ImGui::OpenPopup("Animation state machine");
+            }
+            ImGui::EndDisabled();
+            if(ImGui::BeginPopupModal("Animation state machine",nullptr,ImGuiWindowFlags_AlwaysAutoResize))
+            {
+                if(!m_ControllerDraft){ImGui::CloseCurrentPopup();ImGui::EndPopup();return;}
+                auto& draft=*m_ControllerDraft;
+                ImGui::TextWrapped("Asset-wide state machine. Conditions are optional boolean equality; parameters start false.");
+                auto indexField=[](const char* label,std::size_t& value,std::size_t count)
+                {
+                    int v=static_cast<int>(value);
+                    if(ImGui::InputInt(label,&v))value=static_cast<std::size_t>(std::clamp(v,0,static_cast<int>(count-1)));
+                };
+                indexField("Entry state",draft.EntryState,draft.States.size());
+                ImGui::BeginDisabled(draft.States.size()>=64);
+                if(ImGui::Button("Add state"))
+                {
+                    draft.States.push_back({"State "+std::to_string(draft.States.size()),0,1,AnimationTimeMode::Loop});
+                    m_ControllerState=static_cast<int>(draft.States.size()-1);
+                }
+                ImGui::EndDisabled();
+                ImGui::InputInt("State index",&m_ControllerState);
+                m_ControllerState=std::clamp(m_ControllerState,0,static_cast<int>(draft.States.size()-1));
+                auto& state=draft.States[static_cast<std::size_t>(m_ControllerState)];
+                EditControllerName("State name",state.Name);
+                indexField("Clip index",state.ClipIndex,source.Animations.size());
+                ImGui::TextDisabled("Clip: %s",source.Animations[state.ClipIndex].Name.c_str());
+                ImGui::InputFloat("State speed",&state.Speed);
+                bool loop=state.TimeMode==AnimationTimeMode::Loop;
+                if(ImGui::Checkbox("State loops",&loop))state.TimeMode=loop?AnimationTimeMode::Loop:AnimationTimeMode::Clamp;
+                ImGui::BeginDisabled(draft.States.size()<2);
+                if(ImGui::Button("Delete state"))
+                {
+                    const auto removed=static_cast<std::size_t>(m_ControllerState);
+                    // Remove incident transitions and repair surviving indices.
+                    std::erase_if(draft.Transitions,[&](const auto& t){return t.FromState==removed||t.ToState==removed;});
+                    for(auto& t:draft.Transitions){if(t.FromState>removed)--t.FromState;if(t.ToState>removed)--t.ToState;}
+                    draft.States.erase(draft.States.begin()+m_ControllerState);
+                    if(draft.EntryState==removed)draft.EntryState=0;
+                    else if(draft.EntryState>removed)--draft.EntryState;
+                    m_ControllerState=m_ControllerTransition=0;
+                }
+                ImGui::EndDisabled();
+                ImGui::Separator();
+                ImGui::BeginDisabled(draft.States.size()<2||draft.Transitions.size()>=256);
+                if(ImGui::Button("Add transition"))
+                {
+                    AnimationControllerTransition t;
+                    t.FromState=0;t.ToState=1;t.MinimumNormalizedTime=1;
+                    draft.Transitions.push_back(std::move(t));
+                    m_ControllerTransition=static_cast<int>(draft.Transitions.size()-1);
+                }
+                ImGui::EndDisabled();
+                if(!draft.Transitions.empty())
+                {
+                    ImGui::InputInt("Transition index",&m_ControllerTransition);
+                    m_ControllerTransition=std::clamp(m_ControllerTransition,0,static_cast<int>(draft.Transitions.size()-1));
+                    auto& t=draft.Transitions[static_cast<std::size_t>(m_ControllerTransition)];
+                    indexField("From state",t.FromState,draft.States.size());
+                    indexField("To state",t.ToState,draft.States.size());
+                    ImGui::InputFloat("Blend seconds",&t.BlendSeconds);
+                    ImGui::InputFloat("Minimum normalized time",&t.MinimumNormalizedTime);
+                    int priority=t.Priority;
+                    if(ImGui::InputInt("Priority",&priority))t.Priority=priority;
+                    bool conditional=!t.Conditions.empty();
+                    if(ImGui::Checkbox("Require parameter",&conditional))
+                    {
+                        t.Conditions.clear();
+                        if(conditional)t.Conditions.push_back({"active",AnimationConditionOperator::Equal,true});
+                    }
+                    if(!t.Conditions.empty())
+                    {
+                        auto& condition=t.Conditions.front();
+                        EditControllerName("Parameter name",condition.Parameter);
+                        bool expected=std::get<bool>(condition.Value);
+                        if(ImGui::Checkbox("Required value",&expected))condition.Value=expected;
+                    }
+                    if(ImGui::Button("Delete transition"))
+                    {
+                        draft.Transitions.erase(draft.Transitions.begin()+m_ControllerTransition);
+                        m_ControllerTransition=0;
+                    }
+                }
+                if(!m_ControllerError.empty())ImGui::TextWrapped("%s",m_ControllerError.c_str());
+                ImGui::BeginDisabled(!canEdit);
+                if(ImGui::Button("Save state machine"))
+                {
+                    try
+                    {
+                        assets.CommitController(root,asset,draft);
+                        m_ControllerDraft.reset();
+                        m_ControllerError.clear();
+                        ImGui::CloseCurrentPopup();
+                    }
+                    catch(const std::exception& e){m_ControllerError=e.what();}
+                }
+                ImGui::EndDisabled();
+                ImGui::SameLine();
+                if(ImGui::Button("Cancel state machine")){m_ControllerDraft.reset();ImGui::CloseCurrentPopup();}
+                ImGui::EndPopup();
+            }
+            definition=assets.ResolveController(asset);
+            if(!definition)return;
+            bool preview=m_ControllerPreview.has_value();
+            if(ImGui::Checkbox("Preview state machine",&preview))
+            {
+                m_ControllerPreview.reset();m_Parameters.Clear();m_ControllerError.clear();
+                if(preview)
+                {
+                    m_State.Playing=false;
+                    m_State.Enabled=false;
+                    try
+                    {
+                        m_ControllerPreview.emplace(*definition,source);
+                        for(const auto& t:definition->Transitions)
+                            for(const auto& c:t.Conditions)m_Parameters.SetBool(c.Parameter,false);
+                    }
+                    catch(const std::exception& e){m_ControllerError=e.what();}
+                }
+            }
+            if(m_ControllerPreview)
+            {
+                ImGui::Text("State: %s | blend %.2f",
+                    std::string(m_ControllerPreview->CurrentStateName()).c_str(),m_ControllerPreview->TransitionAlpha());
+                if(ImGui::Button("Reset machine"))m_ControllerPreview->Reset();
+                // Each declared parameter appears only once, even when
+                // several transitions consume it.
+                std::vector<std::string> shown;
+                for(const auto& t:definition->Transitions)
+                    for(const auto& c:t.Conditions)
+                    {
+                        if(std::find(shown.begin(),shown.end(),c.Parameter)!=shown.end())continue;
+                        shown.push_back(c.Parameter);
+                        bool value=std::get<bool>(*m_Parameters.Find(c.Parameter));
+                        ImGui::PushID(static_cast<int>(shown.size()));
+                        if(ImGui::Checkbox(c.Parameter.c_str(),&value))m_Parameters.SetBool(c.Parameter,value);
+                        ImGui::PopID();
+                    }
+            }
+            if(!m_ControllerError.empty())ImGui::TextWrapped("%s",m_ControllerError.c_str());
         }
 
         static const char* PathName(kairo::assets::GltfAnimationPath path) noexcept
