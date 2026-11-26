@@ -330,6 +330,15 @@ export namespace kairo::editor
     /// File-to-bytecode build entry point. The declaration lives in the module
     /// interface, but its body is compiled in a same-module implementation unit
     /// so MSVC does not encode the build-helper lifetime graph into the BMI.
+    // In-memory compile check uses the exact production compiler and validates
+    // its runtime payload, but never publishes an artifact or writes a source.
+    [[nodiscard]] std::vector<DocumentDiagnostic> CheckCoreLogicDocument(
+        const AuthoringDocument& document);
+
+    // A real, executable Begin Play -> Print graph for new scripts.
+    // Only a fresh empty logic document may be initialized.
+    void InitializeLogicStarter(AuthoringDocument& document);
+
     [[nodiscard]] std::vector<std::byte> CompileCoreLogicDocumentFile(
         const std::filesystem::path& sourcePath, std::string_view expectedDocumentID);
 }

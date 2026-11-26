@@ -6,6 +6,9 @@ module;
 #include <string>
 #include <string_view>
 #include <vector>
+#include <utility>
+#include <optional>
+#include <exception>
 
 // Keep this file as an implementation unit of the compiler module. MSVC 19.44
 // ICEs while synthesizing destruction for the imported schema/compiler object
@@ -19,6 +22,7 @@ import Kairo.Editor.DocumentCompiler;
 import Kairo.Editor.DocumentSchema;
 import Kairo.Editor.DocumentSerialization;
 import Kairo.Editor.DocumentTypes;
+import Kairo.Editor.DocumentValidation;
 import Kairo.EngineCore.LogicArtifact;
 
 namespace kairo::editor
@@ -53,6 +57,43 @@ namespace kairo::editor
             return ValidateRuntimePayload(CompileDocumentPayloadOrThrow(
                 document, services.Schemas, services.Compiler));
         }
+    }
+
+    std::vector<DocumentDiagnostic> CheckCoreLogicDocument(const AuthoringDocument& document)
+    {
+        const auto& services=logic_document_compiler_detail::Services();
+        auto result=CompileDocument(document,services.Schemas,services.Compiler);
+        if (result.Succeeded())
+        {
+            try { kairo::engine::ValidateCompiledLogicPayload(result.Artifact->Payload); }
+            catch (const std::exception& error)
+            {
+                result.Diagnostics.push_back({DiagnosticSeverity::Error,"runtime-payload",
+                    error.what(),std::nullopt,std::nullopt});
+            }
+        }
+        return std::move(result.Diagnostics);
+    }
+
+    void InitializeLogicStarter(AuthoringDocument& document)
+    {
+        if (document.Kind()!=DocumentKind::Logic || document.NodeCount()!=0u)
+            throw std::invalid_argument("A starter requires a fresh empty logic document.");
+        const auto& schemas=logic_document_compiler_detail::Services().Schemas;
+        // Construct a candidate so any error leaves the caller's graph intact.
+        AuthoringDocument candidate(document); // retain reserved ID cursors
+        const auto begin=candidate.AddNode(schemas.Require("kairo.logic.event-begin-play"),{0.0,0.0});
+        const auto print=candidate.AddNode(schemas.Require("kairo.logic.print"),{260.0,0.0});
+        const auto pin=[&](NodeID node,std::string_view key)
+        {
+            for (const auto& p:candidate.Node(node).Pins) if (p.Key==key) return p.ID;
+            throw std::logic_error("Starter schema is missing a required pin.");
+        };
+        candidate.SetPinDefault(pin(print,"message"),DocumentValue(std::string("Hello from Kairo!")));
+        candidate.Connect(pin(begin,"then"),pin(print,"in"));
+        if (HasErrors(CheckCoreLogicDocument(candidate)))
+            throw std::logic_error("Built-in logic starter did not compile.");
+        document.SwapContents(candidate);
     }
 
     std::vector<std::byte> CompileCoreLogicDocumentFile(

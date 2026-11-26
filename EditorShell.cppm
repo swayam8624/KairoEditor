@@ -301,6 +301,9 @@ export namespace kairo::editor
         void ReportHostError(std::string message)
         {
             m_LastError = std::move(message);
+            m_Diagnostics.ReplaceProducer("runtime-host",{{"runtime-host","HOST_ERROR",DiagnosticSeverity::Error,
+                m_LastError,std::monostate{}}});
+            m_State.Panels().SetVisible(Panel::Console,true);
             m_RequestErrorPopup = true;
         }
 
@@ -407,6 +410,8 @@ export namespace kairo::editor
         std::array<char, 4096> m_AIPrompt{};
         std::array<char, 256> m_NewProjectName{};
         int m_NewDocumentKind = 0;
+        bool m_NewLogicStarter = true;
+        std::optional<kairo::engine::Entity> m_NewLogicAttach;
         bool m_RequestNewDocumentPopup = false;
         bool m_RequestCloseDocumentPopup = false;
         std::optional<kairo::assets::AssetID> m_PendingDocumentClose;
@@ -766,8 +771,7 @@ export namespace kairo::editor
                 if (ActionButton("Play", UIButtonTone::Primary))
                     RunCommand([this]
                     {
-                        SaveAllWithDrafts();
-                        m_RuntimeLaunchRequested = true;
+                        if (BuildLogicForPlay(false)) m_RuntimeLaunchRequested = true;
                     });
                 if (ImGui::IsItemHovered())
                     ImGui::SetTooltip("Launch the project's real runtime in a separate game window");
@@ -1031,7 +1035,7 @@ export namespace kairo::editor
             }
             ImGui::TextDisabled("Rotation is stored as a normalized quaternion.");
             DrawRenderingComponentEditors(*selected);
-            SectionHeader("Gameplay Logic");
+            SectionHeader("Scripting");
             const char* logicPreview = "None";
             std::string logicPath;
             if (scene.HasLogic(*selected))
@@ -1046,8 +1050,10 @@ export namespace kairo::editor
                     if (metadata.Type != kairo::assets::AssetType::Document) continue;
                     try
                     {
-                        if (LoadDocument(m_Project.ProjectRoot() / metadata.Path).Kind() != DocumentKind::Logic)
-                            continue;
+                        const auto kind = m_Project.Documents().Contains(metadata.ID)
+                            ? m_Project.Document(metadata.ID).Kind()
+                            : LoadDocument(m_Project.ProjectRoot() / metadata.Path).Kind();
+                        if (kind != DocumentKind::Logic) continue;
                     }
                     catch (const std::exception&) { continue; }
                     const bool active = scene.HasLogic(*selected) &&
@@ -1064,6 +1070,14 @@ export namespace kairo::editor
                 }
                 ImGui::EndCombo();
             }
+            if (scene.HasLogic(*selected))
+            {
+                if (ActionButton("Edit Script", UIButtonTone::Primary))
+                    OpenDocument(m_Project.Assets().Resolve(scene.Logic(*selected).Document).Path);
+                ImGui::SameLine();
+            }
+            else if (ActionButton("Create & Attach Script", UIButtonTone::Primary, m_State.Mode()==EditorMode::Edit))
+                RequestNewDocument(*selected);
             if (scene.HasLogic(*selected) && ActionButton("Remove Logic", UIButtonTone::Destructive))
             {
                 RunCommand([this, entity = *selected]
@@ -1843,8 +1857,7 @@ export namespace kairo::editor
                 if (m_State.Mode() == EditorMode::Edit)
                     RunCommand([this]
                     {
-                        SaveAllWithDrafts();
-                        m_RuntimeLaunchRequested = true;
+                        if (BuildLogicForPlay(false)) m_RuntimeLaunchRequested = true;
                     });
                 else
                     StopPlay();
@@ -2929,6 +2942,22 @@ export namespace kairo::editor
                 document.ConnectionCount());
             ImGui::SameLine();
             if (ActionButton("Save", UIButtonTone::Primary)) RunCommand([this, id] { SaveDocumentWithDraft(id); });
+            if (document.Kind()==DocumentKind::Logic)
+            {
+                ImGui::SameLine();
+                if (ActionButton("Check"))
+                    RunCommand([this,id] { (void)CheckLogicDraft(id); });
+                ImGui::SameLine();
+                if (ActionButton("Build Project", UIButtonTone::Neutral, m_State.Mode()==EditorMode::Edit))
+                    RunCommand([this] { (void)BuildLogicForPlay(); });
+                if (const auto selected=m_State.SelectedEntity(); selected.has_value())
+                {
+                    const auto& scene=m_Project.Scene();
+                    if (scene.Contains(*selected) && !scene.HasLogic(*selected))
+                        if (ActionButton("Attach to Selected", UIButtonTone::Neutral, m_State.Mode()==EditorMode::Edit))
+                            RunCommand([this,id,entity=*selected] { AttachLogic(entity,id); });
+                }
+            }
             if (panel == Panel::CodeEditor)
                 DrawCodeEditor(id);
             else
@@ -2942,11 +2971,13 @@ export namespace kairo::editor
             }
         }
 
-        void RequestNewDocument()
+        void RequestNewDocument(std::optional<kairo::engine::Entity> attach=std::nullopt)
         {
             std::snprintf(m_NewDocumentName.data(), m_NewDocumentName.size(), "%s", "Untitled Logic");
             std::snprintf(m_NewDocumentPath.data(), m_NewDocumentPath.size(), "%s", "Logic/Untitled.kdoc");
             m_NewDocumentKind = 0;
+            m_NewLogicStarter = true;
+            m_NewLogicAttach = attach;
             m_RequestNewDocumentPopup = true;
         }
 
@@ -2996,22 +3027,40 @@ export namespace kairo::editor
                 ImGui::SetNextItemWidth(420.0f);
                 ImGui::InputText("Project path", m_NewDocumentPath.data(), m_NewDocumentPath.size());
                 ImGui::SetNextItemWidth(220.0f);
+                ImGui::BeginDisabled(m_NewLogicAttach.has_value());
                 ImGui::Combo("Kind", &m_NewDocumentKind, kinds, static_cast<int>(std::size(kinds)));
+                ImGui::EndDisabled();
+                if (m_NewDocumentKind==0)
+                {
+                    ImGui::Checkbox("Start with Begin Play and Print", &m_NewLogicStarter);
+                    if (m_NewLogicAttach) ImGui::TextDisabled("The new script will be attached to the selected entity.");
+                }
                 if (ActionButton("Create", UIButtonTone::Primary, true, 110.0f))
                 {
                     RunCommand([this]
                     {
                         const auto kind = static_cast<DocumentKind>(m_NewDocumentKind);
+                        if (m_NewLogicAttach && (!m_Project.Scene().Contains(*m_NewLogicAttach) ||
+                            m_Project.Scene().HasLogic(*m_NewLogicAttach) || m_State.Mode()!=EditorMode::Edit))
+                            throw std::logic_error("The attachment target changed. Cancel and select it again.");
                         const auto id = m_Project.CreateDocument(kind, m_NewDocumentName.data(),
                             m_NewDocumentPath.data());
+                        if (kind==DocumentKind::Logic && m_NewLogicStarter)
+                            InitializeLogicStarter(m_Project.EditDocument(id));
                         (void)m_AuthoringWorkspace.Open(m_Project.Document(id));
+                        if (m_NewLogicAttach) AttachLogic(*m_NewLogicAttach,id);
+                        m_NewLogicAttach.reset();
                         m_State.SwitchWorkspace(WorkspaceFor(kind));
                         m_State.SetAuthoringSurface(AuthoringSurface::CodeAndGraph);
                         ImGui::CloseCurrentPopup();
                     });
                 }
                 ImGui::SameLine();
-                if (ActionButton("Cancel", UIButtonTone::Neutral, true, 110.0f)) ImGui::CloseCurrentPopup();
+                if (ActionButton("Cancel", UIButtonTone::Neutral, true, 110.0f))
+                {
+                    m_NewLogicAttach.reset();
+                    ImGui::CloseCurrentPopup();
+                }
                 ImGui::EndPopup();
             }
 
@@ -3129,6 +3178,89 @@ export namespace kairo::editor
             view.TextApplySucceeded(document);
         }
 
+        void AttachLogic(kairo::engine::Entity entity,kairo::assets::AssetID id)
+        {
+            if (m_State.Mode()!=EditorMode::Edit || m_Project.Document(id).Kind()!=DocumentKind::Logic ||
+                !m_Project.Scene().Contains(entity) || m_Project.Scene().HasLogic(entity))
+                throw std::logic_error("Attach requires an editable entity with no existing script.");
+            m_History.Execute(std::make_unique<SetLogicDocumentCommand>(
+                m_Project,entity,kairo::assets::DocumentAssetHandle{id}));
+        }
+
+        bool CheckLogicDraft(kairo::assets::AssetID id)
+        {
+            const auto& current=m_Project.Document(id);
+            const std::string producer="script:"+id.ToString();
+            std::vector<EditorDiagnostic> messages;
+            try
+            {
+                auto& view=m_AuthoringWorkspace.At(id);
+                view.Synchronize(current);
+                if (view.HasExternalConflict())
+                    throw std::logic_error("Revert the conflicting text draft before checking.");
+                const auto diagnostics=view.IsTextDirty()
+                    ? CheckCoreLogicDocument(ParseDocumentProjection(view.TextDraft(),id,current.Kind()))
+                    : CheckCoreLogicDocument(current);
+                for (const auto& d:diagnostics)
+                {
+                    DiagnosticTarget target=AssetDiagnosticTarget{id};
+                    if (!view.IsTextDirty() && d.Node)
+                        target=GraphDiagnosticTarget{id,d.Node->Value,d.Pin?d.Pin->Value:0u};
+                    messages.push_back({producer,d.Code,d.Severity,d.Message,std::move(target)});
+                }
+                const bool ok=!HasErrors(diagnostics);
+                if (ok) messages.push_back({producer,"SCRIPT_OK",DiagnosticSeverity::Information,
+                    "Last compile check passed (no files written).",AssetDiagnosticTarget{id}});
+                m_Diagnostics.ReplaceProducer(producer,std::move(messages));
+                m_State.Panels().SetVisible(Panel::Console,true);
+                return ok;
+            }
+            catch(const std::exception& error)
+            {
+                m_Diagnostics.ReplaceProducer(producer,{{producer,"SCRIPT_PARSE",DiagnosticSeverity::Error,
+                    error.what(),AssetDiagnosticTarget{id}}});
+                m_State.Panels().SetVisible(Panel::Console,true);
+                return false;
+            }
+        }
+
+        bool BuildLogicForPlay(bool publish=true)
+        {
+            // Preflight every open attached script, including its unsaved text.
+            // A failed check must not save or launch the game.
+            bool ok=true;
+            std::unordered_set<std::string> checked;
+            const auto& scene=m_Project.Scene();
+            for (const auto entity:scene.Entities())
+                if (scene.HasLogic(entity))
+                {
+                    const auto id=scene.Logic(entity).Document.ID;
+                    if (m_Project.Documents().Contains(id) && checked.insert(id.ToString()).second)
+                    {
+                        (void)m_AuthoringWorkspace.Open(m_Project.Document(id));
+                        if (!CheckLogicDraft(id)) ok=false;
+                    }
+                }
+            if (!ok) return false;
+            try
+            {
+                SaveAllWithDrafts();
+                if (!publish) return true; // host compiles before launching the Player
+                const auto built=BuildProjectLogic(m_Project.ProjectFile());
+                m_Diagnostics.ReplaceProducer("script-build",{{"script-build","BUILD_OK",
+                    DiagnosticSeverity::Information,"Built "+std::to_string(built.size())+
+                    " attached startup-scene script(s).",std::monostate{}}});
+                return true;
+            }
+            catch(const std::exception& error)
+            {
+                m_Diagnostics.ReplaceProducer("script-build",{{"script-build","BUILD_FAILED",
+                    DiagnosticSeverity::Error,error.what(),std::monostate{}}});
+                m_State.Panels().SetVisible(Panel::Console,true);
+                return false;
+            }
+        }
+
         void SaveDocumentWithDraft(kairo::assets::AssetID id)
         {
             if (m_AuthoringWorkspace.Contains(id) && m_AuthoringWorkspace.At(id).IsTextDirty())
@@ -3242,6 +3374,14 @@ export namespace kairo::editor
                 {
                     m_Project.ActivateDocument(graph->Document);
                     m_State.SwitchWorkspace(Workspace::Logic);
+                    m_State.SetAuthoringSurface(AuthoringSurface::CodeAndGraph);
+                    auto& view=m_AuthoringWorkspace.Open(m_Project.Document(graph->Document));
+                    const NodeID node{graph->Node};
+                    if (m_Project.Document(graph->Document).Contains(node))
+                    {
+                        view.Selection().Apply(node,GraphSelectionMode::Replace);
+                        m_GraphCanvas.QueueAction(EditorAction::GraphFrameSelection);
+                    }
                 }
             }
         }
