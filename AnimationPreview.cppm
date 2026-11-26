@@ -2,6 +2,10 @@ module;
 
 #include "detail/AnimationTimeline.hpp"
 #include <algorithm>
+#include <array>
+#include <filesystem>
+#include <exception>
+#include <stdexcept>
 #include <cmath>
 #include <cstdint>
 #include <optional>
@@ -49,12 +53,14 @@ export namespace kairo::editor
                 m_Entity.reset();
                 m_Asset.reset();
                 m_State={};
+                m_Draft.reset();
             }
         }
 
         void Draw(std::optional<kairo::engine::Entity> selected,
             const kairo::engine::Scene& scene,
-            const kairo::runtime::renderbridge::RenderAssetBindings& assets)
+            kairo::runtime::renderbridge::RenderAssetBindings& assets,
+            const std::filesystem::path& root,bool canEdit)
         {
             if(!selected||!scene.Contains(*selected)||!scene.HasSceneInstance(*selected))
                 selected.reset();
@@ -76,11 +82,11 @@ export namespace kairo::editor
                 m_Asset=instance.SceneAsset.ID;
             }
             const auto* gltf=assets.ResolveGltfSource(instance.SceneAsset);
-            if(!gltf||gltf->Animations.empty())
+            if(!gltf)
             {
                 m_Overrides.Clear(entity);
                 m_State={};
-                if(visible)ImGui::TextDisabled("No imported animation clips on this instance.");
+                if(visible)ImGui::TextDisabled("No glTF source on this instance.");
                 ImGui::End();
                 return;
             }
@@ -92,12 +98,22 @@ export namespace kairo::editor
                 return;
             }
 
+            DrawAuthoring(assets,instance.SceneAsset,*gltf,root,canEdit);
+            if(gltf->Animations.empty())
+            {
+                m_Overrides.Clear(entity);
+                ImGui::TextDisabled("Create a project animation to begin.");
+                ImGui::End();
+                return;
+            }
             auto& state=m_State;
             state.ClipIndex=std::min<std::uint32_t>(state.ClipIndex,
                 static_cast<std::uint32_t>(gltf->Animations.size()-1u));
             if(ImGui::Checkbox("Preview",&state.Enabled)&&!state.Enabled)state.Playing=false;
             ImGui::SameLine();
-            ImGui::TextDisabled("Imported clip | source read-only");
+            const bool authored=assets.HasAuthoredClip(instance.SceneAsset)&&
+                state.ClipIndex==gltf->Animations.size()-1;
+            ImGui::TextDisabled("%s",authored?"Project-authored clip":"Imported clip | source read-only");
 
             const auto clipLabel=[&](std::uint32_t index)
             {
@@ -173,7 +189,208 @@ export namespace kairo::editor
         std::optional<kairo::engine::Entity> m_Entity;
         std::optional<kairo::assets::AssetID> m_Asset;
         AnimationPreviewState m_State;
+        std::optional<kairo::assets::GltfAnimationClipData> m_Draft;
+        std::array<char,129> m_DraftName{};
+        std::string m_DraftError;
+        int m_EditTrack=0,m_EditKey=0,m_NewNode=0,m_NewPath=0;
         kairo::runtime::renderbridge::SceneAnimationOverrides m_Overrides;
+
+        // Draft edits never touch the bound asset until explicit Save. A
+        // modal owns the draft so selection and ordinary scene editing cannot
+        // accidentally switch its target during authoring.
+        void DrawAuthoring(kairo::runtime::renderbridge::RenderAssetBindings& assets,
+            kairo::assets::SceneAssetHandle asset,const kairo::assets::GltfSceneArtifactData& source,
+            const std::filesystem::path& root,bool canEdit)
+        {
+            using namespace kairo::assets;
+            const bool existing=assets.HasAuthoredClip(asset);
+            ImGui::BeginDisabled(!canEdit||!assets.CanAuthorClip(asset));
+            if(ImGui::Button(existing?"Edit project clip":"Create project clip"))
+            {
+                m_Draft=GltfAnimationClipData{};
+                m_DraftName.fill(0);
+                m_DraftError.clear();
+                m_EditTrack=m_EditKey=m_NewNode=m_NewPath=0;
+                if(existing&&!source.Animations.empty())
+                    *m_Draft=source.Animations.back();
+                else
+                    m_Draft->Name="New animation";
+                const auto n=std::min(m_Draft->Name.size(),m_DraftName.size()-1);
+                std::copy_n(m_Draft->Name.begin(),n,m_DraftName.begin());
+                ImGui::OpenPopup("Project animation");
+            }
+            ImGui::EndDisabled();
+            if(!ImGui::BeginPopupModal("Project animation",nullptr,ImGuiWindowFlags_AlwaysAutoResize))return;
+            if(!m_Draft){ImGui::CloseCurrentPopup();ImGui::EndPopup();return;}
+            auto& draft=*m_Draft;
+            ImGui::TextWrapped("One project-authored clip per asset. Changes affect all instances using this asset. Imported clips stay unchanged.");
+            ImGui::InputText("Name",m_DraftName.data(),m_DraftName.size());
+            if(!existing&&draft.Channels.empty()&&!source.Animations.empty())
+            {
+                if(ImGui::Button("Copy selected imported clip"))
+                {
+                    try
+                    {
+                        const auto& original=source.Animations.at(std::min<std::size_t>(
+                            m_State.ClipIndex,source.Animations.size()-1));
+                        std::size_t total=0;
+                        if(original.Channels.size()>256)throw std::length_error("Too many source tracks.");
+                        for(const auto& c:original.Channels)
+                        {
+                            if(c.Keyframes.size()>32768-total)throw std::length_error("Too many source keys.");
+                            total+=c.Keyframes.size();
+                        }
+                        draft.Channels=original.Channels;
+                        m_DraftError.clear();
+                    }
+                    catch(const std::exception& e){m_DraftError=e.what();}
+                }
+            }
+            ImGui::Separator();
+            ImGui::InputInt("Node index",&m_NewNode);
+            if(m_NewNode>=0&&static_cast<std::size_t>(m_NewNode)<source.Nodes.size())
+            {
+                const auto& node=source.Nodes[static_cast<std::size_t>(m_NewNode)];
+                ImGui::TextDisabled("%s%s",node.Name.c_str(),node.HasRestTRS?"":" (matrix-only)");
+            }
+            constexpr const char* paths[]={"Position","Rotation","Scale"};
+            ImGui::Combo("Property",&m_NewPath,paths,3);
+            if(ImGui::Button("Add track"))
+            {
+                try
+                {
+                    if(m_NewNode<0||static_cast<std::size_t>(m_NewNode)>=source.Nodes.size()||
+                        !source.Nodes[static_cast<std::size_t>(m_NewNode)].HasRestTRS)
+                        throw std::invalid_argument("Select a node with rest TRS.");
+                    const auto path=static_cast<GltfAnimationPath>(m_NewPath+1);
+                    if(draft.Channels.size()>=256||std::any_of(draft.Channels.begin(),draft.Channels.end(),
+                        [&](const auto& c){return c.TargetNode==static_cast<std::uint32_t>(m_NewNode)&&c.Path==path;}))
+                        throw std::invalid_argument("Track already exists or track budget exceeded.");
+                    const auto& node=source.Nodes[static_cast<std::size_t>(m_NewNode)];
+                    GltfAnimationChannelData channel;
+                    channel.TargetNode=static_cast<std::uint32_t>(m_NewNode);
+                    channel.Path=path;
+                    GltfAnimationKeyframe key;
+                    if(path==GltfAnimationPath::Rotation)key.Value=node.RestRotation;
+                    else
+                    {
+                        const auto& v=path==GltfAnimationPath::Translation?node.RestTranslation:node.RestScale;
+                        key.Value={v[0],v[1],v[2],0};
+                    }
+                    std::size_t total=0;
+                    for(const auto& c:draft.Channels)total+=c.Keyframes.size();
+                    if(total>=32768)throw std::length_error("Key budget exceeded.");
+                    channel.Keyframes.push_back(key);
+                    draft.Channels.push_back(std::move(channel));
+                    m_EditTrack=static_cast<int>(draft.Channels.size()-1);m_EditKey=0;
+                    m_DraftError.clear();
+                }
+                catch(const std::exception& e){m_DraftError=e.what();}
+            }
+            if(!draft.Channels.empty())
+            {
+                m_EditTrack=std::clamp(m_EditTrack,0,static_cast<int>(draft.Channels.size()-1));
+                if(ImGui::InputInt("Track index",&m_EditTrack))
+                {
+                    m_EditTrack=std::clamp(m_EditTrack,0,static_cast<int>(draft.Channels.size()-1));
+                    m_EditKey=0;
+                }
+                auto& channel=draft.Channels[static_cast<std::size_t>(m_EditTrack)];
+                ImGui::Text("Track %d / %zu | Node %u | %s",m_EditTrack+1,draft.Channels.size(),
+                    channel.TargetNode,PathName(channel.Path));
+                int interpolation=static_cast<int>(channel.Interpolation)-1;
+                constexpr const char* modes[]={"Linear","Step","Cubic spline"};
+                if(ImGui::Combo("Interpolation",&interpolation,modes,3))
+                    channel.Interpolation=static_cast<GltfAnimationInterpolation>(interpolation+1);
+                m_EditKey=std::clamp(m_EditKey,0,static_cast<int>(channel.Keyframes.size()-1));
+                if(ImGui::InputInt("Key index",&m_EditKey))
+                    m_EditKey=std::clamp(m_EditKey,0,static_cast<int>(channel.Keyframes.size()-1));
+                auto& key=channel.Keyframes[static_cast<std::size_t>(m_EditKey)];
+                ImGui::Text("Key %d / %zu",m_EditKey+1,channel.Keyframes.size());
+                ImGui::InputFloat("Seconds",&key.TimeSeconds);
+                if(channel.Path==GltfAnimationPath::Rotation)
+                {
+                    ImGui::InputFloat4("Quaternion XYZW",key.Value.data());
+                    if(ImGui::Button("Normalize rotation"))
+                    {
+                        double norm=0;
+                        for(float v:key.Value)norm+=double(v)*v;
+                        if(std::isfinite(norm)&&norm>0)
+                            for(float& v:key.Value)v=static_cast<float>(v/std::sqrt(norm));
+                        else m_DraftError="Rotation must be finite and nonzero.";
+                    }
+                }
+                else ImGui::InputFloat3("XYZ",key.Value.data());
+                if(channel.Interpolation==GltfAnimationInterpolation::CubicSpline)
+                {
+                    ImGui::InputFloat4("In tangent",key.InTangent.data());
+                    ImGui::InputFloat4("Out tangent",key.OutTangent.data());
+                }
+                if(ImGui::Button("Duplicate key"))
+                {
+                    std::size_t total=0;
+                    for(const auto& c:draft.Channels)total+=c.Keyframes.size();
+                    if(total>=32768)m_DraftError="Key budget exceeded.";
+                    else
+                    {
+                        auto copy=key;
+                        copy.TimeSeconds=channel.Keyframes.back().TimeSeconds+1.f;
+                        channel.Keyframes.push_back(copy);
+                        m_EditKey=static_cast<int>(channel.Keyframes.size()-1);
+                    }
+                }
+                ImGui::SameLine();
+                ImGui::BeginDisabled(channel.Keyframes.size()<=1);
+                if(ImGui::Button("Delete key"))
+                {
+                    channel.Keyframes.erase(channel.Keyframes.begin()+m_EditKey);
+                    m_EditKey=0;
+                }
+                ImGui::EndDisabled();
+                ImGui::SameLine();
+                if(ImGui::Button("Sort key times"))
+                {
+                    // A non-finite comparison is not a strict weak ordering.
+                    if(std::all_of(channel.Keyframes.begin(),channel.Keyframes.end(),
+                        [](const auto& k){return std::isfinite(k.TimeSeconds);}))
+                    {
+                        std::sort(channel.Keyframes.begin(),channel.Keyframes.end(),
+                            [](const auto& a,const auto& b){return a.TimeSeconds<b.TimeSeconds;});
+                        m_EditKey=0;
+                    }
+                    else m_DraftError="All key times must be finite.";
+                }
+                if(ImGui::Button("Delete track"))
+                {
+                    draft.Channels.erase(draft.Channels.begin()+m_EditTrack);
+                    m_EditTrack=m_EditKey=0;
+                }
+            }
+            if(!m_DraftError.empty())ImGui::TextWrapped("%s",m_DraftError.c_str());
+            ImGui::BeginDisabled(!canEdit||draft.Channels.empty());
+            if(ImGui::Button("Save project clip"))
+            {
+                try
+                {
+                    draft.Name=m_DraftName.data();
+                    const auto index=assets.CommitAuthoredClip(root,asset,draft);
+                    m_State.ClipIndex=static_cast<std::uint32_t>(index);
+                    m_State.TrackIndex=m_State.FirstTrack=0;
+                    Seek(0);
+                    m_Draft.reset();
+                    ImGui::CloseCurrentPopup();
+                }
+                catch(const std::exception& e){m_DraftError=e.what();}
+            }
+            ImGui::EndDisabled();
+            ImGui::SameLine();
+            if(ImGui::Button("Cancel draft"))
+            {
+                m_Draft.reset();
+                ImGui::CloseCurrentPopup();
+            }
+            ImGui::EndPopup();
+        }
 
         static const char* PathName(kairo::assets::GltfAnimationPath path) noexcept
         {
