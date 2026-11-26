@@ -2314,4 +2314,38 @@ TEST_CASE("Project prefab files preserve hierarchy and asset identity through in
     CHECK(project.Scene().Contains(instance));
     CHECK(project.Scene().Contains(lid));
     CHECK(LoadProjectPrefab(project,"Crate").Fragment.Entities.size()==2);
+
+    // The definition is an independent disk snapshot. Changing it must not
+    // rewrite already authored instances or leave a stale review usable.
+    const auto original=ReadProjectPrefabRevision(project,"Crate");
+    project.EditScene().Transform(child).Local.Translation.y=7.f;
+    CHECK_THROWS(ReplaceProjectPrefab(project,source,"Crate",original));
+    CHECK(ReadProjectPrefabRevision(project,"Crate")==original);
+    project.SaveAll();
+    CHECK_THROWS(ReplaceProjectPrefab(project,source,"crate",original));
+    CHECK_THROWS(ReplaceProjectPrefab(project,source,"Missing",original));
+    CHECK_THROWS(ReplaceProjectPrefab(project,source,"Crate","stale source"));
+    CHECK(ReadProjectPrefabRevision(project,"Crate")==original);
+    ReplaceProjectPrefab(project,source,"Crate",original);
+    const auto revised=ReadProjectPrefabRevision(project,"Crate");
+    CHECK(revised!=original);
+    CHECK_FALSE(project.HasUnsavedChanges());
+    CHECK(project.Scene().Transform(lid).Local.Translation.y==2.f);
+    CHECK_THROWS(ReplaceProjectPrefab(project,source,"Crate",original));
+    CHECK(ReadProjectPrefabRevision(project,"Crate")==revised);
+    project.OpenProject(project.ProjectFile());
+    auto revisedPrefab=LoadProjectPrefab(project,"Crate");
+    auto newCommand=std::make_unique<PlaceProjectPrefabCommand>(project,std::move(revisedPrefab));
+    auto* newPlaced=newCommand.get();
+    CommandHistory revisionHistory;
+    revisionHistory.Execute(std::move(newCommand));
+    const auto newRoot=newPlaced->Root();
+    REQUIRE(project.Scene().Children(newRoot).size()==1);
+    CHECK(project.Scene().Transform(project.Scene().Children(newRoot).front()).Local.Translation.y==7.f);
+    CHECK(project.Scene().Transform(lid).Local.Translation.y==2.f);
+    revisionHistory.Undo();
+    CHECK_FALSE(project.Scene().Contains(newRoot));
+    CHECK(ReadProjectPrefabRevision(project,"Crate")==revised);
+    revisionHistory.Redo();
+    CHECK(project.Scene().Contains(newRoot));
 }
