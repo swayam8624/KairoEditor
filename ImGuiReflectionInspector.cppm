@@ -41,13 +41,26 @@ export namespace kairo::editor
     /// Reflection V2 composite, enumeration, and stable-reference kinds are
     /// rendered without importing concrete subsystem value types here.
     inline void DrawReflectedInspector(const kairo::reflection::ReflectionRegistry& registry,
-        kairo::engine::Scene& scene, kairo::engine::Entity entity,
+        const kairo::engine::Scene& scene, kairo::engine::Entity entity,
         const ReflectedPropertyCommit& commit)
     {
         using namespace kairo::reflection;
 
-        for (const kairo::engine::ReflectedSceneComponent component :
-            kairo::engine::EnumerateReflectedComponents(scene, entity))
+        // Reflection reads const objects. Merely inspecting an entity must not
+        // mark the project dirty; only the command callback performs edits.
+        struct ReadComponent {std::string_view TypeKey;const void* Object;};
+        std::vector<ReadComponent> components;
+        components.reserve(9);
+        components.push_back({"Kairo.Engine.NameComponent",&scene.Name(entity)});
+        components.push_back({"Kairo.Engine.TransformComponent",&scene.Transform(entity)});
+        if(scene.HasCamera(entity))components.push_back({"Kairo.Engine.CameraComponent",&scene.Camera(entity)});
+        if(scene.HasEnvironment(entity))components.push_back({"Kairo.Engine.EnvironmentComponent",&scene.Environment(entity)});
+        if(scene.HasLight(entity))components.push_back({"Kairo.Engine.LightComponent",&scene.Light(entity)});
+        if(scene.HasMeshRenderer(entity))components.push_back({"Kairo.Engine.MeshRendererComponent",&scene.MeshRenderer(entity)});
+        if(scene.HasLogic(entity))components.push_back({"Kairo.Engine.LogicComponent",&scene.Logic(entity)});
+        if(scene.HasRigidBody(entity))components.push_back({"Kairo.Engine.RigidBodyComponent",&scene.RigidBody(entity)});
+        if(scene.HasCollider(entity))components.push_back({"Kairo.Engine.ColliderComponent",&scene.Collider(entity)});
+        for(const auto& component:components)
         {
             const TypeDescriptor& type = registry.Require(component.TypeKey);
             ImGui::PushID(type.Key.c_str());
