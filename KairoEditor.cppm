@@ -43,6 +43,7 @@ export import Kairo.Editor.AssetScenePlacement;
 export import Kairo.Editor.SceneSelection;
 export import Kairo.Editor.Diagnostics;
 export import Kairo.Editor.SceneFragment;
+export import Kairo.Editor.ScenePrefab;
 export import Kairo.Editor.ProjectLifecycle;
 export import Kairo.Editor.NavigationSettings;
 export import Kairo.Editor.NativeDialogs;
