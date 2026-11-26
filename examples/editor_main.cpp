@@ -38,6 +38,7 @@ import Kairo.Editor.Theme;
 import Kairo.Editor.ImGuiRuntime;
 import Kairo.Editor.ImGuiShell;
 import Kairo.Editor.SceneRenderBridge;
+import Kairo.Editor.AssetImport;
 import Kairo.Editor.AnimationPreview;
 import Kairo.EngineCore;
 import Kairo.Renderer;
@@ -887,6 +888,17 @@ int main(int argc, char** argv)
                 viewportCursorCaptured = wantsCursorCapture;
             }
             imgui.EndFrame();
+            if(auto source=shell.TakeOBJImportRequest())
+            {
+                try
+                {
+                    const auto imported=kairo::editor::ImportStandaloneOBJ(project,*source);
+                    std::cout<<"Imported OBJ "<<imported.ToString()<<'\n';
+                    projectTransition=project.ProjectFile();
+                    break;
+                }
+                catch(const std::exception& error){shell.ReportHostError(error.what());}
+            }
             bool assetReloadRequested = false;
             for (const auto& request : shell.TakeAssetBrowserRequests())
             {
