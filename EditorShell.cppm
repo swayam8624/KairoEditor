@@ -155,6 +155,7 @@ export namespace kairo::editor
                 RunCommand([this] { m_PhysicsPreview.Step(*m_RuntimeScene, ImGui::GetIO().DeltaTime); });
             DrawDocumentLifecyclePopups();
             DrawProjectLifecyclePopups();
+            DrawAssetImportPopup();
             DrawNavigationPreferences();
             DrawNavigationHelp();
             DrawKeymapEditor();
@@ -338,6 +339,11 @@ export namespace kairo::editor
         /// Output: explicit browser requests such as reimport. The native host
         /// performs them at a safe frame boundary and may restart/rebind runtime
         /// resources without coupling the ImGui shell to an importer backend.
+        [[nodiscard]] std::optional<std::filesystem::path> TakeOBJImportRequest() noexcept
+        {
+            return std::exchange(m_OBJImportRequest,std::nullopt);
+        }
+
         [[nodiscard]] std::vector<AssetBrowserRequest> TakeAssetBrowserRequests() noexcept
         {
             return m_AssetBrowserRequests.Take();
@@ -419,6 +425,10 @@ export namespace kairo::editor
         };
         std::unordered_map<kairo::assets::AssetID,AssetPreview,kairo::assets::AssetIDHash> m_AssetPreviews;
         int m_AssetTypeFilter=0;
+        std::string m_AssetFolder;
+        std::array<char,1024> m_OBJImportPath{};
+        bool m_RequestOBJImport=false;
+        std::optional<std::filesystem::path> m_OBJImportRequest;
         AssetThumbnailScheduler m_AssetThumbnailScheduler;
         AssetBrowserRequestQueue m_AssetBrowserRequests;
         std::optional<AssetWorkspace> m_AssetWorkspaceSnapshot;
@@ -2707,8 +2717,40 @@ export namespace kairo::editor
             }
         }
 
+        void DrawAssetImportPopup()
+        {
+            if(m_RequestOBJImport)
+            {
+                ImGui::OpenPopup("Import standalone OBJ");
+                m_RequestOBJImport=false;
+            }
+            if(!ImGui::BeginPopupModal("Import standalone OBJ",nullptr,ImGuiWindowFlags_AlwaysAutoResize))return;
+            ImGui::TextWrapped("Copy a local geometry-only OBJ into the project. Save all changes first. The editor will reopen after import.");
+            ImGui::SetNextItemWidth(480.0f);
+            ImGui::InputText("Source file",m_OBJImportPath.data(),m_OBJImportPath.size());
+            ImGui::TextDisabled("Use an absolute path. External materials and textures are not imported.");
+            const bool ready=m_OBJImportPath[0]!='\0' && !m_Project.HasUnsavedChanges() &&
+                !m_AuthoringWorkspace.HasDirtyTextDrafts() && m_State.Mode()==EditorMode::Edit;
+            if(ActionButton("Import",UIButtonTone::Primary,ready))
+            {
+                RunCommand([this]{
+                    const std::filesystem::path path(m_OBJImportPath.data());
+                    if(!path.is_absolute())throw std::invalid_argument("Use an absolute OBJ path.");
+                    m_OBJImportRequest=path;
+                    ImGui::CloseCurrentPopup();
+                });
+            }
+            ImGui::SameLine();
+            if(ActionButton("Cancel"))ImGui::CloseCurrentPopup();
+            ImGui::EndPopup();
+        }
+
         void DrawContentBrowser()
         {
+            if(ActionButton("Import OBJ",UIButtonTone::Primary,
+                m_State.Mode()==EditorMode::Edit && !m_Project.HasUnsavedChanges() && !m_AuthoringWorkspace.HasDirtyTextDrafts()))
+                m_RequestOBJImport=true;
+            ImGui::SameLine();
             if (ToolbarButton("Grid", m_AssetGrid)) m_AssetGrid=true;
             ImGui::SameLine();
             if (ToolbarButton("List", !m_AssetGrid)) m_AssetGrid=false;
@@ -2724,6 +2766,24 @@ export namespace kairo::editor
             ImGui::SetNextItemWidth(124.0f);
             ImGui::Combo("##AssetType",&m_AssetTypeFilter,typeLabels,static_cast<int>(std::size(typeLabels)));
             const auto records = m_Project.Assets().Snapshot();
+            std::vector<std::string> folders;
+            for(const auto& asset:records)
+                for(auto path=asset.Path.parent_path();!path.empty();path=path.parent_path())
+                {
+                    const auto key=path.generic_string();
+                    if(std::ranges::find(folders,key)==folders.end())folders.push_back(key);
+                }
+            std::ranges::sort(folders);
+            if(!m_AssetFolder.empty() && std::ranges::find(folders,m_AssetFolder)==folders.end())m_AssetFolder.clear();
+            ImGui::SameLine();
+            ImGui::SetNextItemWidth(200.0f);
+            if(ImGui::BeginCombo("##AssetFolder",m_AssetFolder.empty()?"All folders":m_AssetFolder.c_str()))
+            {
+                if(ImGui::Selectable("All folders",m_AssetFolder.empty()))m_AssetFolder.clear();
+                for(const auto& folder:folders)
+                    if(ImGui::Selectable(folder.c_str(),m_AssetFolder==folder))m_AssetFolder=folder;
+                ImGui::EndCombo();
+            }
             const std::string filter = Lower(m_AssetFilter.data());
             const auto statusName = [](AssetWorkspaceStatus status) -> const char*
             {
@@ -2794,6 +2854,7 @@ export namespace kairo::editor
                 {
                     if(m_AssetTypeFilter!=0 && asset.Type!=typeValues[m_AssetTypeFilter])continue;
                     const std::string path = asset.Path.generic_string();
+                    if(!m_AssetFolder.empty() && !Lower(path).starts_with(Lower(m_AssetFolder)+"/"))continue;
                     const std::string type(kairo::assets::NameOfAssetType(asset.Type));
                     if (!filter.empty() && Lower(path).find(filter) == std::string::npos &&
                         Lower(type).find(filter) == std::string::npos &&
