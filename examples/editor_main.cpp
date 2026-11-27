@@ -1,5 +1,6 @@
 #include "../detail/SelectionBounds.hpp"
 #include "../detail/SelectionContour.hpp"
+#include "../detail/ViewportInteraction.hpp"
 #include "../detail/AssetPreviewPixels.hpp"
 #include "../detail/LogicTraceCapture.hpp"
 #include <algorithm>
@@ -735,6 +736,9 @@ int main(int argc, char** argv)
                     project.Descriptor().GraphicsBackend));
         kairo::renderer::RendererRuntime renderer({
             project.Descriptor().Name, 1600u, 1000u, true, backend });
+        // Establish the exact initial render extent instead of inferring it from dock geometry.
+        renderer.ResizeViewport(1600u,1000u);
+        kairo::editor::detail::ResizePolicy viewportResize({1600u,1000u});
         kairo::editor::EditorState state(project.Scene());
         if (const auto entities = project.Scene().Entities(); !entities.empty()) state.Select(entities.front());
         kairo::editor::RenderAssetBindings renderAssets(project.Assets());
@@ -1090,7 +1094,8 @@ int main(int argc, char** argv)
             if (const auto picked = renderer.TakeViewportPickResult(); picked.has_value())
                 shell.ApplyViewportPick(*picked);
             imgui.BeginFrame(shell.ViewportKeyboardActive());
-            shell.SetViewportTexture(imgui.ViewportTexture());
+            const auto displayed=viewportResize.Current();
+            shell.SetViewportTexture(imgui.ViewportTexture(),displayed.W,displayed.H);
             shell.SetRendererProfile(renderer.LastFrameProfile());
             shell.Draw();
 #if !defined(_WIN32)
@@ -1271,7 +1276,8 @@ int main(int argc, char** argv)
             if (auto capture = renderer.TakeViewportCapture(); capture.has_value())
                 screenshot = std::move(capture);
             const auto [viewportWidth, viewportHeight] = shell.RequestedViewportExtent();
-            renderer.ResizeViewport(viewportWidth, viewportHeight);
+            if(const auto next=viewportResize.Observe({viewportWidth,viewportHeight}))
+                renderer.ResizeViewport(next->W,next->H);
             ++renderedFrames;
         }
         if (options.Screenshot.has_value())
