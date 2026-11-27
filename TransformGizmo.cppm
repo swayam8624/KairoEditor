@@ -16,6 +16,24 @@ export namespace kairo::editor
     enum class TransformGizmoOperation : std::uint8_t { Translate, Rotate, Scale };
     enum class TransformGizmoSpace : std::uint8_t { Local, World };
 
+    // Invert the Scene::WorldTransform composition contract, not an
+    // arbitrary sheared matrix. Only the active channel changes.
+    [[nodiscard]] inline kairo::foundation::math::Transformf LocalGizmoChannel(
+        const kairo::foundation::math::Transformf& parent,
+        kairo::foundation::math::Transformf local,
+        const kairo::foundation::math::Transformf& world,
+        TransformGizmoOperation operation)
+    {
+        using namespace kairo::foundation::math;
+        if(operation==TransformGizmoOperation::Translate)
+            local.Translation=WorldToLocal(parent,world.Translation);
+        else if(operation==TransformGizmoOperation::Rotate)
+            local.Rotation=(Inverse(parent.Rotation)*world.Rotation).Normalized();
+        else
+            local.Scale={world.Scale.x/parent.Scale.x,world.Scale.y/parent.Scale.y,world.Scale.z/parent.Scale.z};
+        return local;
+    }
+
     struct TransformGizmoFrame final
     {
         kairo::foundation::math::Mat4f View;
