@@ -388,6 +388,7 @@ export namespace kairo::editor
         TransformGizmoSpace m_GizmoSpace = TransformGizmoSpace::World;
         std::optional<kairo::foundation::math::Transformf> m_GizmoBefore;
         std::optional<kairo::engine::Entity> m_GizmoEntity;
+        bool m_GizmoCancelled=false;
         ViewportController m_ViewportController;
         std::optional<kairo::engine::Entity> m_ViewportSceneCamera;
         // Keep authored FOV and clipping when first orbiting a scene camera.
@@ -924,6 +925,7 @@ export namespace kairo::editor
                 m_ViewportKeyboardActive = false;
                 m_ViewportPointerNavigationActive = false;
                 m_Gesture.Cancel();
+                if(m_GizmoBefore)CancelGizmoDrag();
             }
             for (std::uint8_t value = static_cast<std::uint8_t>(Panel::ContentBrowser); value < static_cast<std::uint8_t>(Panel::Count); ++value)
             {
@@ -1645,6 +1647,7 @@ export namespace kairo::editor
                             m_ViewportDragTool = static_cast<ViewportDragTool>(index);
                             m_ViewportPointerNavigationActive = false;
                             m_Gesture.Cancel();
+                            if(m_GizmoBefore)CancelGizmoDrag();
                         }
                         if (selected) ImGui::SetItemDefaultFocus();
                     }
@@ -1746,7 +1749,8 @@ export namespace kairo::editor
                 }
                 (void)camera;
             }
-            else {m_Gesture.Cancel();m_ViewportPointerNavigationActive=false;m_ViewportKeyboardActive=false;}
+            else {m_Gesture.Cancel();m_ViewportPointerNavigationActive=false;m_ViewportKeyboardActive=false;
+                if(m_GizmoBefore)CancelGizmoDrag();}
             ImGui::End();
         }
 
@@ -2247,9 +2251,22 @@ export namespace kairo::editor
             ImGui::EndPopup();
         }
 
+        void CancelGizmoDrag()
+        {
+            if(m_GizmoBefore&&m_GizmoEntity&&m_Project.Scene().Contains(*m_GizmoEntity))
+                m_Project.EditScene().Transform(*m_GizmoEntity).Local=*m_GizmoBefore;
+            m_GizmoBefore.reset();m_GizmoEntity.reset();m_GizmoCancelled=true;
+        }
+
         [[nodiscard]] bool DrawTransformGizmo(ImVec2 viewportMin, ImVec2 viewportSize)
         {
             const auto selected = m_State.SelectedEntity();
+            if(!ImGui::IsMouseDown(ImGuiMouseButton_Left))m_GizmoCancelled=false;
+            if(m_GizmoBefore&&(!selected||selected!=m_GizmoEntity||m_ActiveTool==EditorAction::SelectTool||
+                m_State.Mode()!=EditorMode::Edit||ImGui::GetIO().AppFocusLost||
+                ImGui::IsKeyPressed(ImGuiKey_Escape,false)))
+                CancelGizmoDrag();
+            if(m_GizmoCancelled)return false;
             if (!selected.has_value() || m_ActiveTool == EditorAction::SelectTool ||
                 m_State.Mode() != EditorMode::Edit) return false;
             using namespace kairo::foundation::math;
@@ -2258,16 +2275,28 @@ export namespace kairo::editor
             kairo::renderer::ShowcaseCamera projectionCamera;
             projectionCamera.SetPose(camera);
             Mat4f projection = projectionCamera.Projection(
-                static_cast<std::uint32_t>(std::max(viewportSize.x, 1.0f)),
-                static_cast<std::uint32_t>(std::max(viewportSize.y, 1.0f)));
+                std::max(m_DisplayedExtent.W,1u),std::max(m_DisplayedExtent.H,1u));
             const TransformGizmoOperation operation = m_ActiveTool == EditorAction::TranslateTool
                 ? TransformGizmoOperation::Translate : m_ActiveTool == EditorAction::RotateTool
                 ? TransformGizmoOperation::Rotate : TransformGizmoOperation::Scale;
             const float snap = ImGui::GetIO().KeyCtrl || ImGui::GetIO().KeySuper
                 ? (operation == TransformGizmoOperation::Rotate ? 15.0f : 0.5f) : 0.0f;
+            // The gizmo's model is the same composed world TRS used by
+            // scene rendering. Convert just the manipulated channel back
+            // through the parent's TRS to avoid editing unrelated fields.
+            const auto& scene=m_Project.Scene();
+            const auto parentID=scene.Parent(*selected);
+            const auto parent=parentID?scene.WorldTransform(*parentID):Transformf::Identity();
+            if(!std::isfinite(parent.Scale.x)||!std::isfinite(parent.Scale.y)||!std::isfinite(parent.Scale.z)||
+                std::abs(parent.Scale.x)<1.e-6f||std::abs(parent.Scale.y)<1.e-6f||std::abs(parent.Scale.z)<1.e-6f)
+            {
+                if(m_GizmoBefore)CancelGizmoDrag();
+                return false;
+            }
             const auto result = m_TransformGizmo.Draw({ view, projection,
-                m_Project.Scene().Transform(*selected).Local, viewportMin.x, viewportMin.y,
-                viewportSize.x, viewportSize.y, snap, operation, m_GizmoSpace });
+                scene.WorldTransform(*selected), viewportMin.x, viewportMin.y,
+                viewportSize.x, viewportSize.y, snap, operation, m_GizmoSpace,
+                camera.Projection==kairo::renderer::CameraProjectionMode::Orthographic });
 
             if (result.Active && !m_GizmoBefore.has_value())
             {
@@ -2277,15 +2306,20 @@ export namespace kairo::editor
             if (result.Changed)
             {
                 const auto target = m_GizmoEntity.value_or(*selected);
-                if (m_Project.Scene().Contains(target)) m_Project.EditScene().Transform(target).Local = result.Transform;
+                if (m_Project.Scene().Contains(target))
+                {
+                    auto local=scene.Transform(target).Local;
+                    if(operation==TransformGizmoOperation::Translate)
+                        local.Translation=WorldToLocal(parent,result.Transform.Translation);
+                    else if(operation==TransformGizmoOperation::Rotate)
+                        local.Rotation=(Inverse(parent.Rotation)*result.Transform.Rotation).Normalized();
+                    else
+                        local.Scale={result.Transform.Scale.x/parent.Scale.x,
+                            result.Transform.Scale.y/parent.Scale.y,result.Transform.Scale.z/parent.Scale.z};
+                    m_Project.EditScene().Transform(target).Local=local;
+                }
             }
-            if (m_GizmoBefore.has_value() && ImGui::IsKeyPressed(ImGuiKey_Escape, false))
-            {
-                m_Project.EditScene().Transform(*m_GizmoEntity).Local = *m_GizmoBefore;
-                m_GizmoBefore.reset();
-                m_GizmoEntity.reset();
-            }
-            else if (!result.Active && m_GizmoBefore.has_value())
+            if (!result.Active && m_GizmoBefore.has_value())
             {
                 const auto entity = *m_GizmoEntity;
                 const auto before = *m_GizmoBefore;
