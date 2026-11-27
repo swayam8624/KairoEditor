@@ -39,6 +39,7 @@ module;
 #include <unordered_map>
 #include "detail/AssetPreviewPixels.hpp"
 #include "detail/ViewportInteraction.hpp"
+#include "detail/ViewportClick.hpp"
 #include <variant>
 #include <vector>
 
@@ -420,6 +421,9 @@ export namespace kairo::editor
         bool m_DocumentPanelFocused = false;
         std::array<char, 256> m_AssetFilter{};
         std::array<char, 256> m_HierarchyFilter{};
+        std::optional<kairo::engine::Entity> m_LastHierarchySelection;
+        std::optional<kairo::engine::Entity> m_RevealHierarchy;
+        std::unordered_set<std::uint32_t> m_RevealAncestors;
         std::optional<kairo::assets::AssetID> m_SelectedBrowserAsset;
         bool m_AssetGrid = true;
         const kairo::assets::ImportDatabase* m_AssetImports = nullptr;
@@ -464,6 +468,7 @@ export namespace kairo::editor
         std::uint32_t m_RequestedViewportHeight = 0u;
         detail::Extent m_DisplayedExtent{};
         detail::GestureCapture m_Gesture;
+        detail::ViewportClick m_ViewportClick;
         ImGuiMouseButton m_GestureButton=ImGuiMouseButton_Left;
         std::optional<std::pair<std::uint32_t, std::uint32_t>> m_ViewportPickRequest;
         static constexpr std::chrono::seconds AutosaveInterval{ 30 };
@@ -925,6 +930,7 @@ export namespace kairo::editor
                 m_ViewportKeyboardActive = false;
                 m_ViewportPointerNavigationActive = false;
                 m_Gesture.Cancel();
+                m_ViewportClick.Cancel();
                 if(m_GizmoBefore)CancelGizmoDrag();
             }
             for (std::uint8_t value = static_cast<std::uint8_t>(Panel::ContentBrowser); value < static_cast<std::uint8_t>(Panel::Count); ++value)
@@ -970,7 +976,19 @@ export namespace kairo::editor
             ImGui::Separator();
             const auto& scene = m_Project.Scene();
             (void)SearchField("##HierarchyFilter", "Search entities", m_HierarchyFilter.data(), m_HierarchyFilter.size());
+            // Reveal is explicit when a search is active; do not silently erase
+            // the user's filter when selecting another object in the viewport.
+            const bool reveal=ActionButton("Reveal selection",UIButtonTone::Neutral,selectedEntity.has_value());
+            if(reveal)m_HierarchyFilter.fill(0);
             const auto filter = Lower(m_HierarchyFilter.data());
+            m_RevealHierarchy.reset();m_RevealAncestors.clear();
+            if(selectedEntity&&filter.empty()&&(reveal||selectedEntity!=m_LastHierarchySelection)&&scene.Contains(*selectedEntity))
+            {
+                m_RevealHierarchy=selectedEntity;
+                auto parent=scene.Parent(*selectedEntity);
+                while(parent&&scene.Contains(*parent)&&m_RevealAncestors.insert(parent->Value).second)
+                    parent=scene.Parent(*parent);
+            }
             std::unordered_set<std::uint32_t> matches;
             if (!filter.empty())
                 for (const auto entity : scene.RootEntities())
@@ -984,6 +1002,10 @@ export namespace kairo::editor
             for (const auto entity : scene.RootEntities())
                 DrawHierarchyEntity(scene, entity, filter.empty() ? nullptr : &matches);
             if (!filter.empty() && matches.empty()) MutedText("No matching entities.");
+            if(!filter.empty()&&selectedEntity&&!matches.contains(selectedEntity->Value))
+                MutedText("Selection is outside the filter. Reveal selection to locate it.");
+            m_LastHierarchySelection=m_State.SelectedEntity();
+            m_RevealHierarchy.reset();m_RevealAncestors.clear();
             ImGui::End();
         }
 
@@ -1013,9 +1035,10 @@ export namespace kairo::editor
             const char* kind = scene.HasCamera(entity) ? "Camera" : scene.HasLight(entity) ? "Light" :
                 scene.HasEnvironment(entity) ? "Environment" : scene.HasSceneInstance(entity) ? "Scene instance" :
                 scene.HasMeshRenderer(entity) ? "Mesh" : "Entity";
-            if (matches && !leaf) ImGui::SetNextItemOpen(true, ImGuiCond_Always);
+            if (!leaf&&(matches||m_RevealAncestors.contains(entity.Value))) ImGui::SetNextItemOpen(true, ImGuiCond_Always);
             ImGui::PushID(static_cast<int>(entity.Value));
             const bool open = ImGui::TreeNodeEx("##Entity", flags, "%s", scene.Name(entity).Value.c_str());
+            if(m_RevealHierarchy&&*m_RevealHierarchy==entity)ImGui::SetScrollHereY(0.5f);
             if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort)) ImGui::SetTooltip("%s | #%u", kind, entity.Value);
             if (ImGui::IsItemClicked() && !ImGui::IsItemToggledOpen()) m_State.Select(entity);
             if (ImGui::BeginDragDropSource())
@@ -1647,6 +1670,7 @@ export namespace kairo::editor
                             m_ViewportDragTool = static_cast<ViewportDragTool>(index);
                             m_ViewportPointerNavigationActive = false;
                             m_Gesture.Cancel();
+                            m_ViewportClick.Cancel();
                             if(m_GizmoBefore)CancelGizmoDrag();
                         }
                         if (selected) ImGui::SetItemDefaultFocus();
@@ -1710,17 +1734,21 @@ export namespace kairo::editor
                 const bool navigationClick = ImGui::GetIO().KeyAlt ||
                     m_ViewportPointerNavigationActive || ImGui::IsMouseDown(ImGuiMouseButton_Right) ||
                     ImGui::IsMouseDown(ImGuiMouseButton_Middle);
-                if (hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left) &&
-                    !navigationClick && m_ViewportDragTool == ViewportDragTool::Pick &&
-                    !gizmoOwnsPointer &&
-                    m_ViewportTexture != ImTextureID_Invalid)
-                {
-                    ImGui::SetWindowFocus();
-                    const ImVec2 mouse = ImGui::GetMousePos();
-                    if(const auto pixel=detail::PickPixel(mouse.x-viewportMin.x,mouse.y-viewportMin.y,
-                        viewportSize.x,viewportSize.y,m_DisplayedExtent))
-                        m_ViewportPickRequest=std::pair{pixel->W,pixel->H};
-                }
+                const auto& io=ImGui::GetIO();
+                const bool pickEligible=hovered&&m_ViewportDragTool==ViewportDragTool::Pick&&
+                    !navigationClick&&!gizmoOwnsPointer&&!m_GizmoBefore&&!io.AppFocusLost&&
+                    m_ViewportTexture!=ImTextureID_Invalid&&!ImGui::GetDragDropPayload()&&
+                    !ImGui::IsKeyPressed(ImGuiKey_Escape,false)&&
+                    !ImGui::IsPopupOpen(nullptr,ImGuiPopupFlags_AnyPopupId)&&
+                    io.MouseWheel==0&&io.MouseWheelH==0&&
+                    (m_ViewportFocused||ImGui::IsMouseClicked(ImGuiMouseButton_Left));
+                const auto mouse=ImGui::GetMousePos();
+                if(const auto pixel=m_ViewportClick.Observe(
+                    ImGui::IsMouseClicked(ImGuiMouseButton_Left),
+                    ImGui::IsMouseDown(ImGuiMouseButton_Left),
+                    ImGui::IsMouseReleased(ImGuiMouseButton_Left),pickEligible,mouse.x,mouse.y,
+                    {viewportMin.x,viewportMin.y,viewportSize.x,viewportSize.y,m_DisplayedExtent}))
+                    m_ViewportPickRequest=std::pair{pixel->W,pixel->H};
                 // The transform gizmo must not monopolize MMB/RMB camera motion
                 // merely because the cursor overlaps a rotation/scale handle.
                 // LMB manipulation still belongs to the gizmo unless Alt is held.
@@ -1749,7 +1777,7 @@ export namespace kairo::editor
                 }
                 (void)camera;
             }
-            else {m_Gesture.Cancel();m_ViewportPointerNavigationActive=false;m_ViewportKeyboardActive=false;
+            else {m_Gesture.Cancel();m_ViewportClick.Cancel();m_ViewportPointerNavigationActive=false;m_ViewportKeyboardActive=false;
                 if(m_GizmoBefore)CancelGizmoDrag();}
             ImGui::End();
         }
