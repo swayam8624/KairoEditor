@@ -713,6 +713,10 @@ int main(int argc, char** argv)
                 std::cerr << "KairoEditor recent-projects warning: " << error.what() << '\n';
             }
         }
+        std::optional<std::filesystem::path> projectTransition;
+        // All project-bound objects, including ImGui descriptors and native
+        // GPU resources, must destruct before exec replaces the process.
+        {
         kairo::editor::ProjectSession project;
         project.OpenProject(options.Project);
         std::optional<kairo::editor::RecoverySnapshot> recovered;
@@ -1080,7 +1084,6 @@ int main(int argc, char** argv)
 
         std::uint64_t renderedFrames = 0u;
         std::optional<kairo::renderer::ViewportCapture> screenshot;
-        std::optional<std::filesystem::path> projectTransition;
 #if !defined(_WIN32)
         std::optional<pid_t> launchedRuntime;
         std::chrono::steady_clock::time_point runtimeLaunchedAt{};
@@ -1286,6 +1289,8 @@ int main(int argc, char** argv)
                 throw std::runtime_error("Viewport screenshot requires at least three rendered frames.");
             WriteCapture(*options.Screenshot, *screenshot);
         }
+        if(viewportCursorCaptured)renderer.NativeWindow().SetCursorCaptured(false);
+        } // project-bound resources released before restart
         if (projectTransition.has_value())
         {
             const std::string executable = std::filesystem::absolute(argv[0]).string();
