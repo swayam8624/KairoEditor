@@ -28,6 +28,7 @@ export namespace kairo::editor
         float Snap = 0.0f;
         TransformGizmoOperation Operation = TransformGizmoOperation::Translate;
         TransformGizmoSpace Space = TransformGizmoSpace::World;
+        bool Orthographic = false;
     };
 
     struct TransformGizmoResult final
@@ -50,7 +51,7 @@ export namespace kairo::editor
             auto view = ToColumnMajor(frame.View);
             auto projection = ToColumnMajor(frame.Projection);
             auto model = ToColumnMajor(ToMatrix4(frame.Transform));
-            ImGuizmo::SetOrthographic(false);
+            ImGuizmo::SetOrthographic(frame.Orthographic);
             ImGuizmo::SetDrawlist(ImGui::GetWindowDrawList());
             ImGuizmo::SetRect(frame.X, frame.Y, frame.Width, frame.Height);
 
