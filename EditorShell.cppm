@@ -1989,7 +1989,7 @@ export namespace kairo::editor
             using detail::Gesture;
             const bool pointerHeld=leftDown||rightDown||middleDown;
             Gesture start=Gesture::None;
-            if(hovered&&!m_GizmoBefore.has_value())
+            if(hovered&&!m_GizmoBefore.has_value()&&m_Gesture.Mode()==Gesture::None)
             {
                 if(ImGui::IsMouseClicked(ImGuiMouseButton_Right)){start=Gesture::Fly;m_GestureButton=ImGuiMouseButton_Right;}
                 else if(ImGui::IsMouseClicked(ImGuiMouseButton_Middle))
@@ -2005,7 +2005,7 @@ export namespace kairo::editor
             }
             const auto gesture=m_Gesture.Update(start,ImGui::IsMouseDown(m_GestureButton),pointerHeld,
                 ImGui::IsKeyPressed(ImGuiKey_Escape,false)||ImGui::IsPopupOpen(nullptr,ImGuiPopupFlags_AnyPopupId),
-                m_ViewportFocused&&!io.AppFocusLost);
+                (m_ViewportFocused||start!=Gesture::None)&&!io.AppFocusLost);
             const bool pointerStarts=start!=Gesture::None&&gesture!=Gesture::None;
             const bool pointerNavigation=gesture!=Gesture::None;
             const bool pointerFly=gesture==Gesture::Fly;
@@ -2026,7 +2026,7 @@ export namespace kairo::editor
                  ImGui::IsKeyDown(ImGuiKey_DownArrow) ||
                  ImGui::IsKeyDown(ImGuiKey_LeftArrow) ||
                  ImGui::IsKeyDown(ImGuiKey_RightArrow));
-            const bool wheel = hovered &&
+            const bool wheel = hovered && !m_GizmoBefore.has_value() && !pointerNavigation &&
                 (io.MouseWheel != 0.0f || io.MouseWheelH != 0.0f);
             if (pointerNavigation || keyboardMove || wheel)
             {
