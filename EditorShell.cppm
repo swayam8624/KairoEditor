@@ -2308,14 +2308,7 @@ export namespace kairo::editor
                 const auto target = m_GizmoEntity.value_or(*selected);
                 if (m_Project.Scene().Contains(target))
                 {
-                    auto local=scene.Transform(target).Local;
-                    if(operation==TransformGizmoOperation::Translate)
-                        local.Translation=WorldToLocal(parent,result.Transform.Translation);
-                    else if(operation==TransformGizmoOperation::Rotate)
-                        local.Rotation=(Inverse(parent.Rotation)*result.Transform.Rotation).Normalized();
-                    else
-                        local.Scale={result.Transform.Scale.x/parent.Scale.x,
-                            result.Transform.Scale.y/parent.Scale.y,result.Transform.Scale.z/parent.Scale.z};
+                    const auto local=LocalGizmoChannel(parent,scene.Transform(target).Local,result.Transform,operation);
                     m_Project.EditScene().Transform(target).Local=local;
                 }
             }
