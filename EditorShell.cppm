@@ -38,6 +38,7 @@ module;
 #include <unordered_set>
 #include <unordered_map>
 #include "detail/AssetPreviewPixels.hpp"
+#include "detail/ViewportInteraction.hpp"
 #include <variant>
 #include <vector>
 
@@ -129,6 +130,7 @@ export namespace kairo::editor
         void Draw()
         {
             m_ViewportFlyCursorCaptured = false;
+            m_RequestedViewportWidth=m_RequestedViewportHeight=0;
             m_State.ValidateSelection();
             m_GraphCanvas.BeginFrame();
             if (ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId))
@@ -265,7 +267,8 @@ export namespace kairo::editor
             return debug;
         }
 
-        void SetViewportTexture(ImTextureID texture) noexcept { m_ViewportTexture = texture; }
+        void SetViewportTexture(ImTextureID texture,std::uint32_t width=1,std::uint32_t height=1) noexcept
+        {m_ViewportTexture=texture;m_DisplayedExtent={width,height};}
 
         /// Input: completed backend-neutral render-graph timings from the host.
         /// Task: keep the Profiling workspace tied to real renderer execution
@@ -385,6 +388,7 @@ export namespace kairo::editor
         TransformGizmoSpace m_GizmoSpace = TransformGizmoSpace::World;
         std::optional<kairo::foundation::math::Transformf> m_GizmoBefore;
         std::optional<kairo::engine::Entity> m_GizmoEntity;
+        bool m_GizmoCancelled=false;
         ViewportController m_ViewportController;
         std::optional<kairo::engine::Entity> m_ViewportSceneCamera;
         // Keep authored FOV and clipping when first orbiting a scene camera.
@@ -456,8 +460,11 @@ export namespace kairo::editor
         std::string m_LastError;
         bool m_RequestErrorPopup = false;
         ImTextureID m_ViewportTexture = ImTextureID_Invalid;
-        std::uint32_t m_RequestedViewportWidth = 1u;
-        std::uint32_t m_RequestedViewportHeight = 1u;
+        std::uint32_t m_RequestedViewportWidth = 0u;
+        std::uint32_t m_RequestedViewportHeight = 0u;
+        detail::Extent m_DisplayedExtent{};
+        detail::GestureCapture m_Gesture;
+        ImGuiMouseButton m_GestureButton=ImGuiMouseButton_Left;
         std::optional<std::pair<std::uint32_t, std::uint32_t>> m_ViewportPickRequest;
         static constexpr std::chrono::seconds AutosaveInterval{ 30 };
         std::chrono::steady_clock::time_point m_NextAutosave{};
@@ -467,7 +474,6 @@ export namespace kairo::editor
         NavigationSettings m_NavigationSettings;
         std::filesystem::path m_NavigationSettingsPath;
         bool m_ViewportPointerNavigationActive = false;
-        bool m_ViewportNavigationCancelled = false;
         bool m_ViewportFlyCursorCaptured = false;
         std::uint64_t m_ViewportRenderLayers = kairo::engine::AllRenderLayers;
         bool m_RequestNavigationPreferences = false;
@@ -918,6 +924,8 @@ export namespace kairo::editor
             {
                 m_ViewportKeyboardActive = false;
                 m_ViewportPointerNavigationActive = false;
+                m_Gesture.Cancel();
+                if(m_GizmoBefore)CancelGizmoDrag();
             }
             for (std::uint8_t value = static_cast<std::uint8_t>(Panel::ContentBrowser); value < static_cast<std::uint8_t>(Panel::Count); ++value)
             {
@@ -1591,7 +1599,7 @@ export namespace kairo::editor
                 if (!m_ViewportFocused && !m_ViewportPointerNavigationActive)
                     m_ViewportKeyboardActive = false;
                 const auto camera = m_ViewportController.Pose();
-                ImGui::TextDisabled("Perspective");
+                ImGui::TextDisabled("%s",ViewportCamera().Projection==kairo::renderer::CameraProjectionMode::Orthographic?"Orthographic":"Perspective");
                 ImGui::SameLine();
                 if (ImGui::BeginCombo("##ViewportShading", kairo::renderer::Name(m_ViewportShading).data(),
                     ImGuiComboFlags_WidthFitPreview))
@@ -1638,7 +1646,8 @@ export namespace kairo::editor
                         {
                             m_ViewportDragTool = static_cast<ViewportDragTool>(index);
                             m_ViewportPointerNavigationActive = false;
-                            m_ViewportNavigationCancelled = false;
+                            m_Gesture.Cancel();
+                            if(m_GizmoBefore)CancelGizmoDrag();
                         }
                         if (selected) ImGui::SetItemDefaultFocus();
                     }
@@ -1652,10 +1661,9 @@ export namespace kairo::editor
                 const ImVec2 viewportMin = ImGui::GetCursorScreenPos();
                 const ImVec2 viewportSize = ImGui::GetContentRegionAvail();
                 const ImVec2 framebufferScale = ImGui::GetIO().DisplayFramebufferScale;
-                m_RequestedViewportWidth = static_cast<std::uint32_t>(std::clamp(
-                    std::lround(std::max(viewportSize.x, 1.0f) * framebufferScale.x), 1l, 16384l));
-                m_RequestedViewportHeight = static_cast<std::uint32_t>(std::clamp(
-                    std::lround(std::max(viewportSize.y, 1.0f) * framebufferScale.y), 1l, 16384l));
+                const auto requested=detail::DesiredExtent(viewportSize.x,viewportSize.y,framebufferScale.x,framebufferScale.y);
+                m_RequestedViewportWidth=requested.W;
+                m_RequestedViewportHeight=requested.H;
                 if (m_ViewportTexture != ImTextureID_Invalid)
                     ImGui::Image(ImTextureRef(m_ViewportTexture), viewportSize);
                 else
@@ -1695,8 +1703,10 @@ export namespace kairo::editor
                     }
                     ImGui::EndDragDropTarget();
                 }
+                const bool navigationModifier=ImGui::GetIO().KeyAlt||ImGui::IsMouseDown(ImGuiMouseButton_Right)||
+                    ImGui::IsMouseDown(ImGuiMouseButton_Middle)||m_ViewportPointerNavigationActive;
                 const bool gizmoOwnsPointer = m_ViewportDragTool == ViewportDragTool::Pick &&
-                    DrawTransformGizmo(viewportMin, viewportSize);
+                    (!navigationModifier||m_GizmoBefore.has_value()) && DrawTransformGizmo(viewportMin, viewportSize);
                 const bool navigationClick = ImGui::GetIO().KeyAlt ||
                     m_ViewportPointerNavigationActive || ImGui::IsMouseDown(ImGuiMouseButton_Right) ||
                     ImGui::IsMouseDown(ImGuiMouseButton_Middle);
@@ -1707,13 +1717,9 @@ export namespace kairo::editor
                 {
                     ImGui::SetWindowFocus();
                     const ImVec2 mouse = ImGui::GetMousePos();
-                    const auto x = static_cast<std::uint32_t>(std::clamp(
-                        std::floor((mouse.x - viewportMin.x) * framebufferScale.x), 0.0f,
-                        static_cast<float>(m_RequestedViewportWidth - 1u)));
-                    const auto y = static_cast<std::uint32_t>(std::clamp(
-                        std::floor((mouse.y - viewportMin.y) * framebufferScale.y), 0.0f,
-                        static_cast<float>(m_RequestedViewportHeight - 1u)));
-                    m_ViewportPickRequest = std::pair{ x, y };
+                    if(const auto pixel=detail::PickPixel(mouse.x-viewportMin.x,mouse.y-viewportMin.y,
+                        viewportSize.x,viewportSize.y,m_DisplayedExtent))
+                        m_ViewportPickRequest=std::pair{pixel->W,pixel->H};
                 }
                 // The transform gizmo must not monopolize MMB/RMB camera motion
                 // merely because the cursor overlaps a rotation/scale handle.
@@ -1723,7 +1729,7 @@ export namespace kairo::editor
                     ImGui::IsMouseDown(ImGuiMouseButton_Middle) ||
                     ImGui::IsMouseDown(ImGuiMouseButton_Right) ||
                     (ImGui::GetIO().KeyAlt && ImGui::IsMouseDown(ImGuiMouseButton_Left));
-                HandleViewportNavigation(hovered && (!gizmoOwnsPointer || cameraDrag),
+                HandleViewportNavigation(hovered && (!gizmoOwnsPointer || (cameraDrag&&!m_GizmoBefore.has_value())),
                     m_ViewportKeyboardActive);
 
                 const ImVec2 overlay = { viewportMin.x + 12.0f, viewportMin.y + 12.0f };
@@ -1743,6 +1749,8 @@ export namespace kairo::editor
                 }
                 (void)camera;
             }
+            else {m_Gesture.Cancel();m_ViewportPointerNavigationActive=false;m_ViewportKeyboardActive=false;
+                if(m_GizmoBefore)CancelGizmoDrag();}
             ImGui::End();
         }
 
@@ -1982,37 +1990,31 @@ export namespace kairo::editor
             const bool leftDown = ImGui::IsMouseDown(ImGuiMouseButton_Left);
             const bool rightDown = ImGui::IsMouseDown(ImGuiMouseButton_Right);
             const bool middleDown = ImGui::IsMouseDown(ImGuiMouseButton_Middle);
-            const bool optionLeft = io.KeyAlt && leftDown;
-            const bool plainLeftDrag = m_ViewportDragTool != ViewportDragTool::Pick && leftDown;
-            const bool pointerHeld = optionLeft || plainLeftDrag || rightDown || middleDown;
-            if (!pointerHeld)
+            using detail::Gesture;
+            const bool pointerHeld=leftDown||rightDown||middleDown;
+            Gesture start=Gesture::None;
+            if(hovered&&!m_GizmoBefore.has_value()&&m_Gesture.Mode()==Gesture::None)
             {
-                m_ViewportPointerNavigationActive = false;
-                m_ViewportNavigationCancelled = false;
+                if(ImGui::IsMouseClicked(ImGuiMouseButton_Right)){start=Gesture::Fly;m_GestureButton=ImGuiMouseButton_Right;}
+                else if(ImGui::IsMouseClicked(ImGuiMouseButton_Middle))
+                {start=io.KeyShift?Gesture::Pan:Gesture::Orbit;m_GestureButton=ImGuiMouseButton_Middle;}
+                else if(ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+                {
+                    m_GestureButton=ImGuiMouseButton_Left;
+                    if(io.KeyAlt)start=io.KeyShift?Gesture::Pan:io.KeyCtrl?Gesture::Dolly:Gesture::Orbit;
+                    else if(m_ViewportDragTool==ViewportDragTool::Orbit)start=Gesture::Orbit;
+                    else if(m_ViewportDragTool==ViewportDragTool::Pan)start=Gesture::Pan;
+                    else if(m_ViewportDragTool==ViewportDragTool::Zoom)start=Gesture::Dolly;
+                }
             }
-
-            // A camera drag must BEGIN on the scene image, not on a floating
-            // inspector, button, toolbar, or other window. Once owned, it can
-            // continue beyond the image's edge without releasing mid-drag.
-            const bool pointerStarts = hovered &&
-                (((io.KeyAlt || m_ViewportDragTool != ViewportDragTool::Pick) &&
-                  ImGui::IsMouseClicked(ImGuiMouseButton_Left)) ||
-                 ImGui::IsMouseClicked(ImGuiMouseButton_Right) ||
-                 ImGui::IsMouseClicked(ImGuiMouseButton_Middle));
-            if (pointerStarts && !m_ViewportNavigationCancelled)
-                m_ViewportPointerNavigationActive = true;
-
-            if (ImGui::IsKeyPressed(ImGuiKey_Escape, false) &&
-                m_ViewportPointerNavigationActive)
-            {
-                m_ViewportPointerNavigationActive = false;
-                m_ViewportNavigationCancelled = true;
-            }
-
-            const bool pointerNavigation = m_ViewportPointerNavigationActive &&
-                !m_ViewportNavigationCancelled && pointerHeld;
-            const bool pointerFly = pointerNavigation && rightDown;
-            m_ViewportFlyCursorCaptured = pointerFly;
+            const auto gesture=m_Gesture.Update(start,ImGui::IsMouseDown(m_GestureButton),pointerHeld,
+                ImGui::IsKeyPressed(ImGuiKey_Escape,false)||ImGui::IsPopupOpen(nullptr,ImGuiPopupFlags_AnyPopupId),
+                (m_ViewportFocused||start!=Gesture::None)&&!io.AppFocusLost);
+            const bool pointerStarts=start!=Gesture::None&&gesture!=Gesture::None;
+            const bool pointerNavigation=gesture!=Gesture::None;
+            const bool pointerFly=gesture==Gesture::Fly;
+            m_ViewportPointerNavigationActive=pointerNavigation;
+            m_ViewportFlyCursorCaptured=pointerFly;
 
             // Flight owns WASD/QE only while an RMB gesture is captured.
             // Otherwise Q/W/E/R are transform tools; clicking or selecting
@@ -2028,7 +2030,7 @@ export namespace kairo::editor
                  ImGui::IsKeyDown(ImGuiKey_DownArrow) ||
                  ImGui::IsKeyDown(ImGuiKey_LeftArrow) ||
                  ImGui::IsKeyDown(ImGuiKey_RightArrow));
-            const bool wheel = hovered &&
+            const bool wheel = hovered && !m_GizmoBefore.has_value() && !pointerNavigation &&
                 (io.MouseWheel != 0.0f || io.MouseWheelH != 0.0f);
             if (pointerNavigation || keyboardMove || wheel)
             {
@@ -2048,17 +2050,10 @@ export namespace kairo::editor
             input.MouseDeltaX = deltaX;
             input.MouseDeltaY = deltaY;
             input.DeltaSeconds = std::clamp(io.DeltaTime, 0.0f, 0.05f);
-            input.Orbit = pointerNavigation &&
-                ((m_ViewportDragTool == ViewportDragTool::Orbit && leftDown && !io.KeyAlt) ||
-                 (!io.KeyShift && (middleDown || (optionLeft && !io.KeyCtrl))));
-            input.Pan = pointerNavigation &&
-                ((m_ViewportDragTool == ViewportDragTool::Pan && leftDown && !io.KeyAlt) ||
-                 (middleDown && io.KeyShift) || (optionLeft && io.KeyShift));
-            input.Dolly = pointerNavigation &&
-                ((m_ViewportDragTool == ViewportDragTool::Zoom && leftDown && !io.KeyAlt) ||
-                 (optionLeft && io.KeyCtrl && !io.KeyShift));
-            input.Fly = pointerFly;
-            if (pointerFly) input.Orbit = input.Pan = input.Dolly = false;
+            input.Orbit=gesture==Gesture::Orbit;
+            input.Pan=gesture==Gesture::Pan;
+            input.Dolly=gesture==Gesture::Dolly;
+            input.Fly=pointerFly;
             if (wheel && m_NavigationSettings.ScrollBehavior == ViewportScrollBehavior::Dolly)
                 input.WheelDelta = io.MouseWheel;
             if (wheel && !pointerNavigation && m_NavigationSettings.ScrollBehavior == ViewportScrollBehavior::Pan)
@@ -2256,9 +2251,22 @@ export namespace kairo::editor
             ImGui::EndPopup();
         }
 
+        void CancelGizmoDrag()
+        {
+            if(m_GizmoBefore&&m_GizmoEntity&&m_Project.Scene().Contains(*m_GizmoEntity))
+                m_Project.EditScene().Transform(*m_GizmoEntity).Local=*m_GizmoBefore;
+            m_GizmoBefore.reset();m_GizmoEntity.reset();m_GizmoCancelled=true;
+        }
+
         [[nodiscard]] bool DrawTransformGizmo(ImVec2 viewportMin, ImVec2 viewportSize)
         {
             const auto selected = m_State.SelectedEntity();
+            if(!ImGui::IsMouseDown(ImGuiMouseButton_Left))m_GizmoCancelled=false;
+            if(m_GizmoBefore&&(!selected||selected!=m_GizmoEntity||m_ActiveTool==EditorAction::SelectTool||
+                m_State.Mode()!=EditorMode::Edit||ImGui::GetIO().AppFocusLost||
+                ImGui::IsKeyPressed(ImGuiKey_Escape,false)))
+                CancelGizmoDrag();
+            if(m_GizmoCancelled)return false;
             if (!selected.has_value() || m_ActiveTool == EditorAction::SelectTool ||
                 m_State.Mode() != EditorMode::Edit) return false;
             using namespace kairo::foundation::math;
@@ -2267,16 +2275,28 @@ export namespace kairo::editor
             kairo::renderer::ShowcaseCamera projectionCamera;
             projectionCamera.SetPose(camera);
             Mat4f projection = projectionCamera.Projection(
-                static_cast<std::uint32_t>(std::max(viewportSize.x, 1.0f)),
-                static_cast<std::uint32_t>(std::max(viewportSize.y, 1.0f)));
+                std::max(m_DisplayedExtent.W,1u),std::max(m_DisplayedExtent.H,1u));
             const TransformGizmoOperation operation = m_ActiveTool == EditorAction::TranslateTool
                 ? TransformGizmoOperation::Translate : m_ActiveTool == EditorAction::RotateTool
                 ? TransformGizmoOperation::Rotate : TransformGizmoOperation::Scale;
             const float snap = ImGui::GetIO().KeyCtrl || ImGui::GetIO().KeySuper
                 ? (operation == TransformGizmoOperation::Rotate ? 15.0f : 0.5f) : 0.0f;
+            // The gizmo's model is the same composed world TRS used by
+            // scene rendering. Convert just the manipulated channel back
+            // through the parent's TRS to avoid editing unrelated fields.
+            const auto& scene=m_Project.Scene();
+            const auto parentID=scene.Parent(*selected);
+            const auto parent=parentID?scene.WorldTransform(*parentID):Transformf::Identity();
+            if(!std::isfinite(parent.Scale.x)||!std::isfinite(parent.Scale.y)||!std::isfinite(parent.Scale.z)||
+                std::abs(parent.Scale.x)<1.e-6f||std::abs(parent.Scale.y)<1.e-6f||std::abs(parent.Scale.z)<1.e-6f)
+            {
+                if(m_GizmoBefore)CancelGizmoDrag();
+                return false;
+            }
             const auto result = m_TransformGizmo.Draw({ view, projection,
-                m_Project.Scene().Transform(*selected).Local, viewportMin.x, viewportMin.y,
-                viewportSize.x, viewportSize.y, snap, operation, m_GizmoSpace });
+                scene.WorldTransform(*selected), viewportMin.x, viewportMin.y,
+                viewportSize.x, viewportSize.y, snap, operation, m_GizmoSpace,
+                camera.Projection==kairo::renderer::CameraProjectionMode::Orthographic });
 
             if (result.Active && !m_GizmoBefore.has_value())
             {
@@ -2286,15 +2306,13 @@ export namespace kairo::editor
             if (result.Changed)
             {
                 const auto target = m_GizmoEntity.value_or(*selected);
-                if (m_Project.Scene().Contains(target)) m_Project.EditScene().Transform(target).Local = result.Transform;
+                if (m_Project.Scene().Contains(target))
+                {
+                    const auto local=LocalGizmoChannel(parent,scene.Transform(target).Local,result.Transform,operation);
+                    m_Project.EditScene().Transform(target).Local=local;
+                }
             }
-            if (m_GizmoBefore.has_value() && ImGui::IsKeyPressed(ImGuiKey_Escape, false))
-            {
-                m_Project.EditScene().Transform(*m_GizmoEntity).Local = *m_GizmoBefore;
-                m_GizmoBefore.reset();
-                m_GizmoEntity.reset();
-            }
-            else if (!result.Active && m_GizmoBefore.has_value())
+            if (!result.Active && m_GizmoBefore.has_value())
             {
                 const auto entity = *m_GizmoEntity;
                 const auto before = *m_GizmoBefore;

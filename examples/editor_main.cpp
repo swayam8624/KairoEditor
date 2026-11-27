@@ -1,5 +1,6 @@
 #include "../detail/SelectionBounds.hpp"
 #include "../detail/SelectionContour.hpp"
+#include "../detail/ViewportInteraction.hpp"
 #include "../detail/AssetPreviewPixels.hpp"
 #include "../detail/LogicTraceCapture.hpp"
 #include <algorithm>
@@ -712,6 +713,10 @@ int main(int argc, char** argv)
                 std::cerr << "KairoEditor recent-projects warning: " << error.what() << '\n';
             }
         }
+        std::optional<std::filesystem::path> projectTransition;
+        // All project-bound objects, including ImGui descriptors and native
+        // GPU resources, must destruct before exec replaces the process.
+        {
         kairo::editor::ProjectSession project;
         project.OpenProject(options.Project);
         std::optional<kairo::editor::RecoverySnapshot> recovered;
@@ -735,6 +740,9 @@ int main(int argc, char** argv)
                     project.Descriptor().GraphicsBackend));
         kairo::renderer::RendererRuntime renderer({
             project.Descriptor().Name, 1600u, 1000u, true, backend });
+        // Establish the exact initial render extent instead of inferring it from dock geometry.
+        renderer.ResizeViewport(1600u,1000u);
+        kairo::editor::detail::ResizePolicy viewportResize({1600u,1000u});
         kairo::editor::EditorState state(project.Scene());
         if (const auto entities = project.Scene().Entities(); !entities.empty()) state.Select(entities.front());
         kairo::editor::RenderAssetBindings renderAssets(project.Assets());
@@ -1076,7 +1084,6 @@ int main(int argc, char** argv)
 
         std::uint64_t renderedFrames = 0u;
         std::optional<kairo::renderer::ViewportCapture> screenshot;
-        std::optional<std::filesystem::path> projectTransition;
 #if !defined(_WIN32)
         std::optional<pid_t> launchedRuntime;
         std::chrono::steady_clock::time_point runtimeLaunchedAt{};
@@ -1090,7 +1097,8 @@ int main(int argc, char** argv)
             if (const auto picked = renderer.TakeViewportPickResult(); picked.has_value())
                 shell.ApplyViewportPick(*picked);
             imgui.BeginFrame(shell.ViewportKeyboardActive());
-            shell.SetViewportTexture(imgui.ViewportTexture());
+            const auto displayed=viewportResize.Current();
+            shell.SetViewportTexture(imgui.ViewportTexture(),displayed.W,displayed.H);
             shell.SetRendererProfile(renderer.LastFrameProfile());
             shell.Draw();
 #if !defined(_WIN32)
@@ -1271,7 +1279,8 @@ int main(int argc, char** argv)
             if (auto capture = renderer.TakeViewportCapture(); capture.has_value())
                 screenshot = std::move(capture);
             const auto [viewportWidth, viewportHeight] = shell.RequestedViewportExtent();
-            renderer.ResizeViewport(viewportWidth, viewportHeight);
+            if(const auto next=viewportResize.Observe({viewportWidth,viewportHeight}))
+                renderer.ResizeViewport(next->W,next->H);
             ++renderedFrames;
         }
         if (options.Screenshot.has_value())
@@ -1280,6 +1289,8 @@ int main(int argc, char** argv)
                 throw std::runtime_error("Viewport screenshot requires at least three rendered frames.");
             WriteCapture(*options.Screenshot, *screenshot);
         }
+        if(viewportCursorCaptured)renderer.NativeWindow().SetCursorCaptured(false);
+        } // project-bound resources released before restart
         if (projectTransition.has_value())
         {
             const std::string executable = std::filesystem::absolute(argv[0]).string();

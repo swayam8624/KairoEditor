@@ -4,6 +4,8 @@
 
 import Kairo.Editor.UI;
 import Kairo.Editor.Theme;
+import Kairo.Editor.TransformGizmo;
+import Kairo.Foundation.Math;
 
 using namespace kairo::editor;
 
@@ -60,4 +62,29 @@ TEST_CASE("Studio theme preserves readable text and actual native widget states"
     CHECK(style.Colors[ImGuiCol_CheckMark].z>style.Colors[ImGuiCol_CheckMark].x);
     CHECK(style.Colors[ImGuiCol_TabSelected].z>style.Colors[ImGuiCol_TabSelected].x);
     CHECK(style.Colors[ImGuiCol_TableRowBg].x!=style.Colors[ImGuiCol_TableRowBgAlt].x);
+}
+
+TEST_CASE("World gizmo preserves untouched local channels under a rotated scaled parent",
+    "[KairoEditor][Gizmo]")
+{
+    using namespace kairo::foundation::math;
+    Transformf parent;
+    parent.Translation={8,2,-3};
+    parent.Rotation=LookRotation(Vec3f{1,0,0},Vec3f{0,1,0});
+    parent.Scale={2,3,4};
+    Transformf original;
+    original.Translation={1,2,3};original.Scale={1,2,3};
+    auto world=parent*original;
+    world.Translation={4,5,6};
+    const auto moved=LocalGizmoChannel(parent,original,world,TransformGizmoOperation::Translate);
+    CHECK(NearlyEqual((parent*moved).Translation,world.Translation,1e-4f));
+    CHECK(moved.Rotation==original.Rotation);CHECK(moved.Scale==original.Scale);
+    world.Rotation=LookRotation(Vec3f{0,1,1},Vec3f{0,1,0});
+    const auto rotated=LocalGizmoChannel(parent,original,world,TransformGizmoOperation::Rotate);
+    CHECK(NearlyEqual((parent*rotated).Forward(),world.Forward(),1e-4f));
+    CHECK(rotated.Translation==original.Translation);CHECK(rotated.Scale==original.Scale);
+    world.Scale={4,9,16};
+    const auto scaled=LocalGizmoChannel(parent,original,world,TransformGizmoOperation::Scale);
+    CHECK(NearlyEqual((parent*scaled).Scale,world.Scale,1e-4f));
+    CHECK(scaled.Translation==original.Translation);CHECK(scaled.Rotation==original.Rotation);
 }
