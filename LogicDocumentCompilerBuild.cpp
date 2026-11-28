@@ -62,17 +62,11 @@ namespace kairo::editor
     std::vector<DocumentDiagnostic> CheckCoreLogicDocument(const AuthoringDocument& document)
     {
         const auto& services=logic_document_compiler_detail::Services();
-        auto result=CompileDocument(document,services.Schemas,services.Compiler);
-        if (result.Succeeded())
-        {
-            try { kairo::engine::ValidateCompiledLogicPayload(result.Artifact->Payload); }
-            catch (const std::exception& error)
+        return CheckDocumentWithRuntimeValidator(document, services.Schemas, services.Compiler,
+            [](const std::vector<std::byte>& payload)
             {
-                result.Diagnostics.push_back({DiagnosticSeverity::Error,"runtime-payload",
-                    error.what(),std::nullopt,std::nullopt});
-            }
-        }
-        return std::move(result.Diagnostics);
+                kairo::engine::ValidateCompiledLogicPayload(payload);
+            });
     }
 
     void InitializeLogicStarter(AuthoringDocument& document)

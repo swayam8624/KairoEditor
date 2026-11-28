@@ -177,6 +177,28 @@ export namespace kairo::editor
         return result;
     }
 
+    /// Diagnostic-only boundary: own the optional artifact and its teardown
+    /// in the defining module, rather than instantiating it in an importer.
+    /// A runtime validator may add a diagnostic to an otherwise valid result.
+    [[nodiscard]] std::vector<DocumentDiagnostic> CheckDocumentWithRuntimeValidator(
+        const AuthoringDocument& document,
+        const DocumentSchemaRegistry& schemas,
+        const DocumentCompiler& compiler,
+        void (*validate)(const std::vector<std::byte>&))
+    {
+        auto result = CompileDocument(document, schemas, compiler);
+        if (result.Succeeded())
+        {
+            try { validate(result.Artifact->Payload); }
+            catch (const std::exception& error)
+            {
+                result.Diagnostics.push_back({DiagnosticSeverity::Error, "runtime-payload",
+                    error.what(), std::nullopt, std::nullopt});
+            }
+        }
+        return std::move(result.Diagnostics);
+    }
+
     /// Checked payload-only build boundary. This is deliberately out-of-line:
     /// `DocumentCompileResult` is owned and destroyed in this module object so
     /// importers never instantiate its optional artifact/diagnostic teardown.
