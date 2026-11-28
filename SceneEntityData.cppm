@@ -1,5 +1,10 @@
 module;
 
+// MSVC's IFC importer instantiates Entity comparison and optional traits here.
+// Keep the standard declarations visible in this importing translation unit.
+#include <compare>
+#include <optional>
+
 export module Kairo.Editor.SceneEntityData;
 
 import Kairo.EngineCore.Entity;
