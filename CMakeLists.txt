@@ -150,7 +150,7 @@ if(KAIRO_EDITOR_BUILD_APP)
     include(FetchContent)
     FetchContent_Declare(DearImGui
         GIT_REPOSITORY https://github.com/ocornut/imgui.git
-        GIT_TAG 572f249ce1975f98ad9f8aabce512ffa12a52d6c)
+        GIT_TAG b61e56346a92cfcaf1f43a545ca37b0b32239654)
     FetchContent_MakeAvailable(DearImGui)
 
     find_package(glfw3 CONFIG REQUIRED)
@@ -234,6 +234,10 @@ if(KAIRO_EDITOR_BUILD_APP)
     target_link_libraries(KairoEditorImGui PUBLIC
         KairoEditor KairoRenderer KairoRealtimeRenderBridge KairoDearImGui Kairo::ImGuizmo)
     set_property(TARGET KairoEditorImGui PROPERTY COMPILE_WARNING_AS_ERROR ON)
+    if(WIN32)
+        # Windows SDK headers must not replace std::min/std::max tokens.
+        target_compile_definitions(KairoEditorImGui PUBLIC NOMINMAX)
+    endif()
     target_compile_definitions(KairoEditorImGui PRIVATE
         KAIRO_EDITOR_HAS_OPENGL_UI=1)
     if(APPLE)
