@@ -3,6 +3,7 @@
 #include "../detail/ViewportInteraction.hpp"
 #include "../detail/AssetPreviewPixels.hpp"
 #include "../detail/LogicTraceCapture.hpp"
+#include "../detail/WindowsProcessArguments.hpp"
 #include <algorithm>
 #include <imgui.h>
 #include <vector>
@@ -632,9 +633,13 @@ namespace
         std::string traceText=traceSession?traceSession->ToString():std::string{};
 
 #if defined(_WIN32)
-        std::vector<const char*> args{executableText.c_str(),descriptorText.c_str()};
-        if(backendOverride){args.push_back("--renderer");args.push_back(backendText.c_str());}
-        if(traceSession){args.push_back("--logic-trace");args.push_back(traceText.c_str());}
+        std::vector<std::string> arguments{executableText,descriptorText};
+        if(backendOverride){arguments.emplace_back("--renderer");arguments.push_back(backendText);}
+        if(traceSession){arguments.emplace_back("--logic-trace");arguments.push_back(traceText);}
+        const auto encoded=kairo::editor::detail::EncodeWindowsArguments(arguments);
+        std::vector<const char*> args;
+        args.reserve(encoded.size()+1);
+        for(const auto& value:encoded)args.push_back(value.c_str());
         args.push_back(nullptr);
         const intptr_t child=_spawnv(_P_NOWAIT,executableText.c_str(),args.data());
         if (child == -1)
@@ -1296,8 +1301,10 @@ int main(int argc, char** argv)
             const std::string executable = std::filesystem::absolute(argv[0]).string();
             const std::string projectPath = projectTransition->string();
 #if defined(_WIN32)
-            const intptr_t result = _spawnl(_P_OVERLAY, executable.c_str(), executable.c_str(),
-                "--project", projectPath.c_str(), static_cast<char*>(nullptr));
+            const auto encoded = kairo::editor::detail::EncodeWindowsArguments(
+                {executable, "--project", projectPath});
+            const char* args[]{encoded[0].c_str(), encoded[1].c_str(), encoded[2].c_str(), nullptr};
+            const intptr_t result = _spawnv(_P_OVERLAY, executable.c_str(), args);
             if (result == -1)
                 throw std::runtime_error("Cannot restart KairoEditorApp for the selected project.");
 #else
