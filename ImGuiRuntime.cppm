@@ -245,7 +245,7 @@ export namespace kairo::editor
                 init.QueueFamily = context.GraphicsQueueFamily;
                 init.Queue = context.GraphicsQueue;
                 init.DescriptorPoolSize = 64u;
-                init.MinImageCount = std::max(2u, context.SwapchainImageCount);
+                init.MinImageCount = (std::max)(2u, context.SwapchainImageCount);
                 init.ImageCount = context.SwapchainImageCount;
                 init.PipelineInfoMain.RenderPass = context.RenderPass;
                 init.PipelineInfoMain.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
@@ -434,7 +434,7 @@ export namespace kairo::editor
             const auto context = m_Renderer.BackendContext();
             if (context.SwapchainImageCount != m_ImageCount)
             {
-                ImGui_ImplVulkan_SetMinImageCount(std::max(2u, context.SwapchainImageCount));
+                ImGui_ImplVulkan_SetMinImageCount((std::max)(2u, context.SwapchainImageCount));
                 m_ImageCount = context.SwapchainImageCount;
             }
             if (context.RenderPass != m_RenderPass)
